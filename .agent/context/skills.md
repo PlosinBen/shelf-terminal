@@ -48,27 +48,21 @@ related:
 
 **Related**：`skills#1`、`deployment#1`、`agent-providers#1`、`background-tasks#3`、`src/main/agent/app-tool.ts`、`src/main/{skills-sync,skills-store,ipc/skills}.ts`、`agent-server/{app-tool-client,app-tool-tools}.ts`、測試 `app-tool.test.ts` / `skills-store.test.ts`。
 
-## skills#3 — `/mcp` `/skills` provider 內部攔截 → 各自組 md 唯讀卡片（不轉發 SDK）  ·  [Decision]
+## skills#3 — Claude `/mcp` `/skills` provider 內部攔截與唯讀卡片  ·  [Decision]
 
-**Problem**：使用者要直觀看到「這個 session 載入了哪些 MCP server / skill」。但 `/mcp` `/skills` 在兩家 CLI 都是**互動式 TUI-only、SDK/headless 不可派發**（Claude 官方：只有非互動指令可經 SDK 派發；`system/init.slash_commands` 只列 clear/compact/context/usage）。轉發給 SDK 會失敗或被當 prompt 餵模型。
+**Decision**：Claude provider 攔截 `/mcp`、`/skills`，讀取 SDK 結構化資料並組 markdown，以 `reply` 回傳。Copilot 走 ACP 原生派發，不使用這套卡片或 cache（見 `agent-providers#13`）。renderer／wire／main 不處理 provider listing 差異，也不為此建立跨 provider 共通 result type（見 `agent-providers#6`）。
 
-**Decision**：**provider 內部攔截 `/mcp` `/skills`（像 `/model`），讀自家 SDK 結構化資料 → 各自組 markdown → 印 `reply`**。renderer / wire / main **零改**。**不建跨 provider 共通 result type** —— 各 provider 用自己的形狀組卡片（純函式 formatter），只共用無語意排版工具 `md-table.ts`。見 `agent-providers#6`（含為何共通 normalized type 會權責倒置）。
+**Reason**：Claude 的這兩個指令屬互動式 CLI 功能，不能直接當 SDK slash 派發，否則可能失敗或成為模型 prompt。卡片使用 `Query.mcpServerStatus()` 與 `supportedCommands()`；cache 保留 raw 結果，顯示時才 format。
 
-> **適用範圍（cutover 後）**：本條的攔截 + 自組卡片機制**只適用 claude（SDK）**。**copilot 走 ACP 後改原生派發** —— `/mcp` `/skills` 是 CLI 自己的互動指令、Shelf 不攔截也不組卡片（見 `agent-providers#13`(c)）。以下所有 copilot-SDK 細節（`session.skills_loaded`/`mcp_servers_loaded` event、`session.rpc.mcp.list()`、把 shelf bridge 當 `config.tools` 補進 `/mcp`、冷窗 pull 等）屬**已刪 native backend**，僅存為 claude 對照史。
-- **資料來源（init 抓一次、cache raw、reconnect 刷新）**：Claude `Query.mcpServerStatus()` + `supportedCommands()`，**必須在 REAL persistent session 的 `system/init` 抓**（`refreshLoadedContext()`，full options），不是 cwd-only warmup probe（會漏 app skills + in-process bridge）；Copilot 從 `session.skills_loaded` / `session.mcp_servers_loaded` event 抓。cache 存 **raw SDK 結果**，讀時才 format。
-- **`/mcp` 卡 = 兩張表**：servers 表（Server · Status [· Source]）+ 扁平 tools 表（Tool · Server · Description,跨 server 聚合;無任何 tool 時省略）。兩家同形（各自用 `mdTable` 組,不共用語意型別）。Claude `mcpServerStatus()` 每 server 直接帶 `tools[]`（+`readOnly`/`destructive` annotations,以 `_(…)_` 後綴呈現在 Tool 格）。Copilot 的 `mcp.list()`/event/`mcp.discover()` **都不帶 per-server tools** → 真實外部 server 只進 servers 表;**要補其 tools 得走 client `tools.list()` + `namespacedName`（`server/tool`）前綴 group,未驗證、deferred（等 `app-level-mcps` 有東西可測）**。
-- **in-process `shelf` bridge 兩家都要顯示（可用性）**：bridge（`list_app_skills`/.../`web.fetch`）是 in-process 工具,**Claude SDK 把它包成 MCP server `shelf`**（`mcpServerStatus()` 直接含,帶 tools）；**Copilot 把它註冊成 `config.tools`、不是 MCP server**（`mcp.list()` 不含）。為了兩家一致都看得到,Copilot `/mcp` **主動補一個 `shelf` 條目**,其 tools 取自單一來源 `app-tool-tools.ts` 的 `SHELF_BRIDGE_TOOLS`（與註冊同源、不漂移）。bridge 永遠顯示;真實 server pull 失敗只加 fail-loud 註記、不藏 bridge。
-- **不對稱（SDK 限制）**：`source`/`enabled` 只有 Copilot 給得出；Claude `/skills` = `supportedCommands()` 去掉已知 built-ins。各 provider 卡片本就不同 —— 在 `agent-providers#6` 下合法。
-- **list ↔ dispatch 必須成對**：加進 command list **且**實作攔截 —— 只列不攔會被當 prompt 餵模型。
-- **cold-start read-through warm（`ensureLoadedContext`）**：cache 是 read-through —— slash handler 先 `await ensureLoadedContext()` 再讀。**冷窗（開 tab、未送訊息、就打 `/mcp`）**就地暖一次。**兩家機制不同,都源於「載入訊號要等第一個 turn」**：
-  - **Claude**:常駐 session 是 streaming-input，**未 push 訊息前不發 `system/init`**（實測:streaming 流不送訊息 15s 無 init;字串 prompt `' '` 會 init）→ 另開**字串 prompt 拋棄式 probe**（full options:plugins + in-process `shelf` MCP,少一樣就漏報）,init 即讀 `mcpServerStatus()`/`supportedCommands()` 即 abort。real session 出現後由 `refreshLoadedContext()` 持續刷新。
-  - **Copilot**:`skills_loaded`/`mcp_servers_loaded` event **在第一個 turn 才發、不是 bare `createSession()`**（症狀:冷窗按 `/mcp` 回 "failed to initialize"）→ 不等事件,改**直接 pull** `session.rpc.mcp.list()` / `session.rpc.skills.list()`（deterministic）。event 仍負責後續 turn/reconnect 的刷新。
-  - 暖機**刻意與 auth probe 分離**（載 MCP/skills 不與登入判斷 fate-share,慢/壞的 MCP 不擋開 pane）;idempotent、per-listing（部分 event 已填則只補缺的）。
-- **fail-loud**：載入真的失敗 → 印「Could not load …」，**不謊報「none」**。`/skills` 整張 fail-loud；`/mcp` 因為 `shelf` bridge 永遠在,失敗時仍顯示 bridge + 加一行「無法載入已設定的 MCP server」註記。
+- **資料來源**：真正持久 session 的 `system/init` 觸發 `refreshLoadedContext()`，使用包含 app skills、使用者 MCP 與 SDK in-process `shelf` bridge 的完整 options。
+- **卡片**：`/mcp` 顯示 servers 表與跨 server 的 tools 表，包含 SDK 回報的工具 annotations；`/skills` 從 `supportedCommands()` 排除已知 built-ins。
+- **cold-start read-through warm**：slash handler 先等待 `ensureLoadedContext()`。尚未送出訊息的 streaming session 不會發 `system/init`，因此另開字串 prompt `' '` 的拋棄式 probe，帶入完整 plugins／MCP／cwd options，init 後讀清單並 abort。暖機 idempotent 並合併並行請求，真實 session init 後再刷新。
+- **錯誤邊界**：probe 未能填入 cache 時，卡片顯示「Could not load …」，不把未初始化當成空清單。SDK listing RPC 的個別錯誤目前會轉為空陣列；這不代表已確認沒有 server／skill，也不保證失敗時仍顯示 `shelf`。
+- **list ↔ dispatch 成對**：列出自訂攔截指令時，必須同時實作 dispatch，避免把指令當 prompt 餵給模型。
 
-**Do not change casually because**：① 在 warmup probe（cwd-only）抓會漏掉 app skills + in-process `shelf` bridge —— 一定要在 full-options 的 session 抓（含 `ensureLoadedContext` 的拋棄式 probe，真機 `/mcp` 確認 `shelf` 有列出）。② Claude 冷窗不能改用「`ensureSession()` 不送訊息」暖機 —— streaming session 不會 init。③ 別把暖機折進 auth warmup 省一個行程 —— 會讓登入判斷被 MCP 啟動健康度綁架（`app-level-mcps` 上線後尤甚）。
+**Do not change casually because**：只帶 cwd 的 auth probe 會漏掉 app skills 與 `shelf` bridge；冷窗不能只呼叫 `ensureSession()` 而不送訊息來暖機。listing probe 刻意與 auth probe 分離，避免 MCP／skill 載入健康度影響登入判斷。
 
-**Related**：`agent-providers#1`、`agent-providers#6`、`skills#2`、PRODUCT #5（原生的歸原生）、`agent-server/{app-tool-tools,providers/md-table,providers/claude/index,providers/claude/helpers,providers/copilot/index,providers/copilot/helpers,providers/fake/index}.ts`、測試 `agent-server/providers/{claude,copilot}/{loaded-context-warm,mcp-skills-cards}.test.ts`。
+**Related**：`agent-providers#1`、`agent-providers#6`、`skills#2`、`agent-server/providers/claude/{index,helpers}.ts`、測試 `agent-server/providers/claude/{loaded-context-warm,mcp-skills-cards}.test.ts`。
 
 ## skills#4 — App-skill live hot-reload：skill 改完免重連即生效  ·  [Decision]
 

@@ -159,6 +159,7 @@ title: shelf-terminal — Intent → File Index
 | Shelf MCP degradation tests | `shelf-mcp-lifecycle.test.ts` + `shelf-mcp-lifecycle.integration.test.ts` + `shelf-mcp-startup.test.ts` | 單次啟動、授權／listener 失敗、新 lifecycle 恢復與非法請求隔離驗證 |
 | Shelf MCP bootstrap tests | `shelf-mcp-auth.test.ts` + `shelf-mcp-bootstrap.test.ts` + `app-tool-client.test.ts` | key／token scope、真實 RPC／HTTP 串接、shutdown 與 request correlation 驗證 |
 | Shelf 工具契約測試 | `shelf-tool-contract.test.ts` + `shelf-mcp.test.ts` | Claude／HTTP 的 surface snapshots、操作映射、回傳格式與 HTTP limits |
+| Shelf 真實 Claude SDK smoke | `shelf-tool-sdk-smoke.test.ts` | 全部共用工具的 SDK 建構與 in-memory tools/list schema 相容性 |
 | Log proxy → main | `server-logger.ts` | `serverLog(level,tag,msg,...args)`：args 源頭 flatten 後走 wire `log` 訊息回 main（agent-server 無獨立 observability，見 `contracts/agent-wire-protocol`） |
 | ~/.shelf 清理（heartbeat-lease） | `cleanup.ts` | `runCleanupSweep()` 啟動時按 `.heartbeat` lease 回收 version/appId 殘留 |
 | 正常關閉單一路徑（reap→dispose→exit） | `shutdown.ts` | `performShutdown()`：由 `rl.on('close')` 與 idle watchdog 共用，先收屍再 dispose 再 exit（見 `context/connection-health` #5） |
