@@ -1,4 +1,6 @@
 import React from 'react';
+import { CONFIG_CONTROL as CC } from '@shared/agent-config-control';
+import { createAgentInputMessage, AGENT_INPUT_SOURCE } from '@shared/agent-input';
 import { SelectionPanel } from '../SelectionPanel';
 import { PickerPanel } from '../PickerPanel';
 import {
@@ -6,6 +8,7 @@ import {
   setPendingPermission as setPendingPermissionStore,
   setPendingPicker as setPendingPickerStore,
   useAgentTab,
+  enqueuePendingSend,
 } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { permissionControlViews } from './permission-control-view';
@@ -22,8 +25,8 @@ interface Props {
  * 2. **pendingPicker** (provider-driven via picker_request, e.g.
  *    Claude AskUserQuestion). Resolves through IPC.
  * 3. **localPicker** (renderer-only, triggered by /model and friends).
- *    On select, emits a structured config-edit turn (agent:send +
- *    configEdit) — same path as a typed /model X (agent-config-flow#5).
+ *    Selection preserves its origin: direct session control for status-bar
+ *    edits, ordinary queued slash input for slash-origin selections.
  *
  * Realistically permission + picker can't both be active (both gated
  * by canUseTool which SDK serializes), so the priority gate is a
@@ -122,11 +125,16 @@ export function DecisionPanel({ tabId }: Props) {
         initialSelected={Math.max(0, options.findIndex((o) => o.value === current))}
         cancellable
         onSelect={(value) => {
-          // Route as a structured config-edit turn — same path a typed
-          // `/model X` takes, so divider + capabilities come back identically
-          // (agent-config-flow#5). No optimistic update; display follows the
-          // provider's capabilities event.
-          emitAgent('agent:send', { tabId, configEdit: { key, value } });
+          // Provider confirmation, never selection intent, changes displayed prefs.
+          if (localPicker.origin === CC.ORIGIN.STATUS_BAR) {
+            emitAgent(CC.EVENT, { tabId, key, value });
+          } else {
+            const content = `/${localPicker.command} ${value}`;
+            const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content });
+            if (!built.ok) { console.error('Cannot create config slash message', { tabId, error: built.error }); return; }
+            enqueuePendingSend(tabId, built.message.msgId, content, undefined, undefined, built.message);
+            emitAgent('agent:send', { tabId, inputMessage: built.message });
+          }
           setLocalPickerStore(tabId, null);
         }}
         onCancel={() => setLocalPickerStore(tabId, null)}

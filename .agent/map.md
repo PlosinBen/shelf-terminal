@@ -133,6 +133,7 @@ title: shelf-terminal — Intent → File Index
 |--------|------|------|
 | Role-split entry point | `index.ts` | 薄 entrypoint：讀 `--role`，dynamic-import `./exec`（預設）或 `./dispatcher`。lazy import → dispatcher role 永不載入 provider/SDK（保持 thin） |
 | Execution proc（per session） | `exec.ts` | 原 agent-server 主體：stdin/stdout JSON line protocol + dispatch to Claude/Copilot + context persistence。在 dispatcher 下以 `--sid` spawn，outbound 全蓋自己的 `sid`；含 model-cache client（cache_get/put 側通道） |
+| Independent session config control | `session-config-control.ts` + `../src/shared/agent-config-control.ts` | 控制請求／結果契約、確認 timeout 與不確定結果的安全屏障 |
 | 共通輸入 prompt 準備 | `input-prompt.ts` | 指令判讀正規化與每訊息回覆指示轉換，保留原始 Message |
 | 主機 dispatcher（per host broker） | `dispatcher.ts` | 薄 per-host broker：`sid` 路由/relay（串流 opaque pass-through，只 peek pong/cache_）、open/close_session、兩層 health 的 inner-ping、supervisor（exec 死→reconnect + backoff）、per-host model cache 側通道。**不 import provider/SDK** |
 | Dispatcher/exec memory reporting | `memory-report.ts` | source-owned process snapshot、role attribution、success/error report 與 10 秒初始排程 |

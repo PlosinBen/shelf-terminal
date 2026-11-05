@@ -6,7 +6,7 @@ import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '../../shared/shel
 import { beginPendingCancel, finishPendingCancel, cancelPendingSend } from '../agentTabStore';
 import { QUEUE_CANCEL as C } from '../../shared/agent-queue-cancel';
 import { SUBMISSION_ERROR as E, submissionFailed } from '../../shared/agent-submission';
-vi.mock('../agentTabStore', () => ({ cancelPendingSend: vi.fn(), beginPendingCancel: vi.fn(() => true), finishPendingCancel: vi.fn() }));
+vi.mock('../agentTabStore', () => ({ cancelPendingSend: vi.fn(), beginPendingCancel: vi.fn(() => true), finishPendingCancel: vi.fn(), beginConfigControl: vi.fn(), updateConfigControl: vi.fn() }));
 
 // Mock the agent IPC surface. Each on* method stores its callback so
 // tests can fire it synchronously; each outbound method records calls
@@ -28,6 +28,8 @@ function makeMockAgentApi() {
       send: record('send'),
       stop: record('stop'),
       cancelQueued: record('cancelQueued'),
+      configure: record('configure'),
+      onConfigControl: listener('onConfigControl'),
       destroy: record('destroy'),
       resolvePermission: record('resolvePermission'),
       resolvePicker: record('resolvePicker'),

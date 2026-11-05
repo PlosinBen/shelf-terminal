@@ -14,6 +14,7 @@ import { emitAgent } from '../../events';
 import { useAttachmentPaste } from '../../hooks/useAttachmentPaste';
 import { backendAttachments, historyImagePreviews, type PendingImageAttachment } from '../../utils/agent-send-attachments';
 import { OPTIONED_SLASHES, useSlashCommands, type SlashCommand } from './slash-commands';
+import { CONFIG_CONTROL as CC } from '@shared/agent-config-control';
 import { SlashMenu } from './SlashMenu';
 import { AttachmentChips } from './AttachmentChips';
 import { useDelegations } from '../../delegationStore';
@@ -266,7 +267,9 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     if (slash && pickerKey && !slash.args) {
       setInput('');
       setShowSlashMenu(false);
-      setLocalPickerStore(tabId, { key: pickerKey });
+      const key = pickerKey === 'permissionMode' && capabilities?.permissionControl?.strategy === 'native'
+        ? 'nativePermission' : pickerKey;
+      setLocalPickerStore(tabId, { key, origin: CC.ORIGIN.SLASH, command: slash.cmd });
       return;
     }
 
@@ -299,7 +302,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
       tabId,
       inputMessage: message,
     });
-  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady, delegationLocked]);
+  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady, delegationLocked, capabilities]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this execution AND drop everything I queued up

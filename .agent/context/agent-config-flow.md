@@ -37,7 +37,7 @@ related:
 
 **Decision**：Slash 是 provider 想特別解釋的字串，**不是獨立 channel**：
 
-- Renderer 不替 provider 派發 slash — `agent.send(tabId, {inputMessage})` 一條路徑通吃普通 text 跟 `/cmd`（config picker 走 `agent-config-flow#3` / `agent-config-flow#5` 的結構化 config-edit turn，是「按鍵級 config edit」不是 agent command）
+- Renderer 不替 provider 派發 slash — `agent.send(tabId, {inputMessage})` 一條路徑通吃普通 text 跟 `/cmd`；slash-origin picker 只補齊原命令的參數，status-bar control 獨立走 `agent-config-flow#16`。
 - Provider 自己決定如何解釋 slash：Claude 在 `query()` 內 parse/dispatch；Copilot 交給 ACP CLI；Codex 在 app-server backend 將 Shelf-supported slash 映到對應 JSON-RPC route，unsupported route 明確回錯。
 - Slash 輸出走 `fold_markdown` 渲染原語（label 是 `/cmd` 名、失敗用 `errorMessage`；見 `agent-ui#5`）
 - Backend interface 只剩 `query(input, send)`，沒有 `handleSlashCommand`
@@ -65,7 +65,7 @@ InputZone parseSlashPrefix
     │
     ├─ cmd ∈ OPTIONED_SLASHES && !args
     │     → 開 inline <SelectionPanel>（從 capabilities 取選項）
-    │       picker 選定 → handleConfigEdit → 結構化 config-edit turn（agent-config-flow#5）
+    │       picker 選定 → factory 建立原 slash＋所選參數的正常訊息 → FIFO
     │       → provider applyConfigEdit（divider + capabilities，非 renderer-local）
     │
     └─ 其他狀況（含 OPTIONED_SLASHES with args、/help、/clear、未知 slash）
@@ -90,7 +90,7 @@ InputZone parseSlashPrefix
 
 走「**renderer 發起 → provider 執行 → 廣播 capabilities → renderer 落地**」：
 
-- 打字 slash with args 走 provider slash（如上圖）；picker / status-bar 走結構化 config-edit turn（`agent-config-flow#5`）。兩者最終都到 provider `applyConfigEdit` → re-broadcast capabilities，**無 renderer 樂觀更新**
+- 打字 slash 與 slash-origin picker 走正常訊息；status-bar picker 走獨立 session control（`agent-config-flow#16`）。Provider 套用並確認後發布 capabilities，**無 renderer 樂觀更新**。
 - Renderer `AgentView` 觀察 capabilities，跟 savedPrefs 比較後保存。若有 `confirmedPrefs`，只保存該 explicit patch；其他 provider 沿用 snapshot 同步（`agent-config-flow#13`）。
 - Backend 拒絕的 edit 不發布成功 capabilities，也不保存該 edit。Claude 尚無 live session 時，保存的是下一個 session 的 options；不是宣稱 SDK 已預先驗證該值。
 
@@ -137,17 +137,9 @@ InputZone parseSlashPrefix
 
 **Related**：`agent-server/providers/claude.ts:shouldAdoptResolvedModel` + query loop promotion；SDK `init.model` 是解析後具體 id（帶 `[1m]`）不是 alias。
 
-## agent-config-flow#5 — Config 變更統一走 provider applyConfigEdit（職責歸位）  ·  [Decision]
+## agent-config-flow#5 — Config 套用入口  ·  [Decision]
 
-model/effort/permission 三個入口（打字 `/model X`、picker、status-bar 點擊）都收斂到 provider 的 `applyConfigEdit`（set value + emit capabilities + emit `system` divider，文案 `src/shared/config-ack.ts`）。打字走 `query()` parseSlash；picker/status-bar 走 `handleConfigEdit` emit 結構化 config-edit turn（`agent:send` 帶 `configEdit:{key,value}`、無 echo）→ `QueryInput.configEdit`。
-
-本質是把 config 變更的語意還給 provider，renderer 不再 renderer-local 樂觀模擬（取代 `agent-config-flow#3` picker 那條 renderer-local 路）。
-
-**Do not change casually because**：
-- 不要在 `handleConfigEdit` 加回樂觀 `setActual*`/`persistPref` — 會跟打字的 round-trip 行為分歧。顯示/持久化一律由回傳的 capabilities 驅動
-- renderer 送結構化 `{key,value}`，不要組 `/model X` 字串（slash 語法留在 provider）；也不要為 config-edit 開新 IPC（它是 turn，重用 send/turn 路由）
-- 明確 edit 成功有 divider；初始化套用沒有 divider。兩者由 provider 共用真正的套用邏輯，不另設每訊息 silent setter。
-- **值沒變＝完全 no-op**：送出的值 === 現行 closure 時 provider直接 return，不 emit divider、capabilities、status streaming/idle；各 backend在自己的 apply入口維持此 guard。
+**Superseded by agent-config-flow#16.**
 
 ## agent-config-flow#6 — Config 套用職責邊界：能塞給 SDK 就塞，不擴張權責（model / effort / permission 同一套）  ·  [Decision]
 
@@ -174,9 +166,9 @@ model/effort/permission 三個入口（打字 `/model X`、picker、status-bar �
 - SDK 拒絕或 advertised state 不合法就照實 emit error；不可跳過 SDK action 卻回報成功。
 
 **Renderer / Backend 分層（回應「picker 兩邊行為是否不同」— 不同只在 backend）**：
-- **Renderer 對 provider 無感、單一路徑**：picker/status-bar/無參數 `/model` → `handleConfigEdit` → `agent:send{configEdit}`；手打 `/model X` → 普通 prompt。
-- **差異只在 backend apply 收斂點**：各 provider在 `query()` 見到 `QueryInput.configEdit` 時走自己的 `applyConfigEdit`，依 transport套用或記住下一回合設定。
-- config-edit成功都 emit `system` divider（共用 `formatConfigAck`）；失敗 emit `error`。
+- **Renderer 對 provider 無感，依入口來源路由**：status-bar 送直接 control；slash-origin picker 補齊原 slash 後走普通訊息。
+- **差異在 backend apply 收斂點**：provider 依 transport 套用或準備下一個 session 的 options；直接控制的 application policy 與錯誤見 `agent-config-flow#16`。
+- 只有 slash／相容 configEdit execution 使用 `formatConfigAck` divider；直接 control 的確認與錯誤只顯示在控制區。
 
 **Do not change casually because**：
 - 不要在 `gatherCapabilities`/`setModel`/`dispatchSlash` 加「model 是否在 `listModels` 清單內」的前置拒絕 — 交給 SDK，錯誤照實回。
@@ -229,7 +221,7 @@ Provider 以 capability strategy 選一條路：
 - `shelf`：沿用 `permissionModes` / `currentPermissionMode`、`permissionMode` config edit、per-message pref diff 與 confirmed-capability persistence。
 - `native`：capability 帶專用 mode/permission descriptors；renderer 送 `nativeMode` / `nativePermission` config edit。confirmed descriptor current values 分別寫入 `AgentPrefs.nativeMode` / `AgentPrefs.nativePermission`，warm-up 也只從這兩個欄位重套；舊 `permissionMode` 不參與 native flow。
 
-持久化的是 project-level confirmed selection，不是 backend truth cache。Runtime 仍以 native descriptor 的 provider snapshot 為權威：ACP notification 可在沒有 active execution 時到達，因此 execution-less `capabilities` 必須走 session sink；收到 provider update 或完整 set-config response就用完整 snapshot 取代舊 state，不自行 merge 猜測。UI 顯示 provider option label/current value，只有 edit request 走既有 structured config-edit turn。只有 present、非空的 confirmed value 更新 preference；provider 未 advertise control 不代表刪除已存值。
+持久化的是 project-level confirmed selection，不是 backend truth cache。Runtime 仍以 native descriptor 的 provider snapshot 為權威：ACP notification 可在沒有 active execution 時到達，因此 execution-less `capabilities` 必須走 session sink；收到 provider update 或完整 set-config response就用完整 snapshot 取代舊 state，不自行 merge 猜測。UI 顯示 provider option label/current value；status-bar 使用直接控制，slash-origin selection 使用普通訊息（`agent-config-flow#16`）。只有 present、非空的 confirmed value 更新 preference；provider 未 advertise control 不代表刪除已存值。
 
 **Do not change casually because：** 不要同時 expose canonical 與 native permission controls；不要把缺少的 native control補成 Shelf default；不要讓 `permissionMode` 與 native 欄位互相 migration 或覆寫。Renderer 只判 strategy/descriptor，provider identity 與 ACP vocabulary 留在 backend。
 
@@ -285,8 +277,8 @@ Provider 以 capability strategy 選一條路：
 
 ## agent-config-flow#14 — 初始化屬於 exec incarnation，一般輸入不重送設定  ·  [Decision]
 
-**Decision：** 一般 send 僅帶內容、附件及 queue correlation；明確設定修改仍以既有
-FIFO 的 configEdit／provider-native slash 執行。main 提供按需讀取 canonical Project
+**Decision：** 一般 send 僅帶內容、附件及 queue correlation；slash 與相容 configEdit
+仍以 FIFO 執行，status-bar 設定走獨立 control（agent-config-flow#16）。main 提供按需讀取 canonical Project
 explicit prefs 與 custom models 的入口；remote 只持有初始化 promise／proc identity／
 epoch，不 cache prefs。並行 capabilities probe 與輸入等待同一屏障；初始化成功才送
 prompt，失敗呈現 init failed 與 recovery metadata，不把失敗當成可送訊息的狀態。
@@ -322,3 +314,37 @@ Sender 只協調檢查、目標查找與執行服務，不依來源拼 prompt、
 metadata 不要求舊資料遷移。訊息本身不承擔執行／交付狀態；共通 Sender 的 queue
 確認、具型別錯誤與晚到對帳見 `agent-core#13`。不因此加入重送或 queue／UI 重構。
 具體型別見 `contracts/agent-routing`。
+
+## agent-config-flow#16 — Session control 與訊息生命週期分離  ·  [Decision]
+
+**Decision：** Status-bar picker 以獨立 requestId 提交 session control，不建立訊息／execution
+ID、queue chip、timeline 或 idle。Slash-origin picker 保留命令名稱，factory 組成正常 slash
+訊息並入 FIFO；共同 UI 不抹除來源。Provider 共用真正的 setter，但直接控制不重用有
+divider／idle side effect 的 query wrapper。同值仍回 confirmed，避免 pending 永不結束。
+
+**Reason：** 設定變更不是推論工作，不能只為了抵達 setter 就等完所有 queued messages。
+共用層負責一個 View 一筆 pending、correlation、timeout 與 start barrier，provider 封裝
+實際套用及確認。完全分散的 provider lifecycle 會重複清理並產生不同排序；coalescing 與
+多筆控制 queue 並非 MVP 必要，model／effort 也不能只按同 key 防競態。
+
+**Application boundary：** Claude model／permission 使用 streaming setters；critical execution
+期間延後。Effort 在前景 execution 結束後排空並重建 session；若仍有 active cycles 或
+background tasks，在 mutation 前明確拒絕，不中斷背景工作。Copilot model／effort／allow_all
+以 ACP response configOptions 確認，native mode 保留 notification gate 並延後。Codex
+所有直接 controls 保守等 idle，保留原生 RPC／notification 確認與 uncertain gate。確認是
+session 設定，不承諾目前 inference 已改用新值；尚無 Claude live session 時仍只是設定
+下個 session 的 options，不宣稱 SDK 已預驗。協定／mock 證據不等於 live inference 保證。
+
+**Failure boundary：** Deferred 不算套用時間；30 秒 apply timeout 從真正開始套用才起算。
+明確 pre-mutation rejection 可繼續使用；setter／transport 結果不確定不宣稱回滾，不重送，
+保留 queued input 並阻擋新 execution，要求 reconnect。UI recovery 必須先結束／停止工作並
+明確取消 queued input，避免 restart 靜默丟資料。能力狀態仍只由 authoritative reports
+更新，持久化沿用 per-View prefs 的 serialized mutation 與 confirmedPrefs explicit patch。
+
+**Do not change casually because：** 新 execution 必須等 accepted control 完成；不能將
+control 加入 message snapshot 或用控制結果結束 execution。Request 綁定 initialized
+incarnation，reconnect／close 結束 pending，舊 ID 不得污染新 session。IPC progress 與
+invoke 結果的送達順序不可作為保證，terminal 結果之後的 progress 必須忽略並記錄。
+建立 wire 結果時只挑契約欄位，不可 spread inbound envelope 蓋掉 response type。
+Claude 前景工作記錄提交時的 model revision；收到該工作回報的 resolved model 時，只有
+revision 仍符合目前設定才允許 promotion，避免舊回覆覆寫執行中已確認的新 model 選擇。

@@ -237,6 +237,8 @@ interface ShelfApi {
     };
     stop: (tabId: string) => Promise<boolean>;
     cancelQueued: (tabId: string, clientMsgId: string) => Promise<import('../shared/agent-queue-cancel').QueueCancelResult>;
+    configure: (tabId: string, request: import('../shared/agent-config-control').ConfigControlRequest) => Promise<import('../shared/agent-config-control').ConfigControlUpdate>;
+    onConfigControl: (cb: (tabId: string, update: import('../shared/agent-config-control').ConfigControlUpdate) => void) => () => void;
     destroy: (tabId: string) => Promise<void>;
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') => Promise<boolean>;
     resolvePicker: (

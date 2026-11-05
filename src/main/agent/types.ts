@@ -196,6 +196,7 @@ export interface AgentBackend {
   stopTask?(taskId: string): Promise<void>;
   /** Queue authority confirms removal or reports already-running / missing. */
   cancelQueued?(clientMsgId: string): Promise<import('@shared/agent-queue-cancel').QueueCancelResult>;
+  configure?(request: import('@shared/agent-config-control').ConfigControlRequest, progress: (update: import('@shared/agent-config-control').ConfigControlUpdate) => void): Promise<import('@shared/agent-config-control').ConfigControlUpdate>;
   /**
    * Resolve a pending picker_request by forwarding the user's answers (or
    * cancellation) to the remote agent-server. Provider tracks the pending

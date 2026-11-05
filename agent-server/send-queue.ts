@@ -51,12 +51,18 @@ export interface SendQueue<T extends QueuedSend> {
   clear(): void;
   /** Test/diagnostic introspection. */
   snapshot(): AgentQueueItem[];
+  /** Reserve one independent control slot; never projected as a message. */
+  runControl(run: () => Promise<void>, defer: boolean): Promise<void>;
+  /** An unconfirmed mutation must not allow queued work to run with unknown settings. */
+  block(): void;
 }
 
 export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): SendQueue<T> {
   const queue: T[] = [];
   let processing = false;
   let runningClientMsgId: string | undefined;
+  let control: { run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void; started: boolean; defer: boolean } | undefined;
+  let blocked = false;
 
   function snapshot(): AgentQueueItem[] {
     const items: AgentQueueItem[] = [];
@@ -70,6 +76,18 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
   const terminate = (msg: T) => { if (msg.executionId) deps.terminateExecution(msg.executionId); };
 
   function pump(): void {
+    if (blocked) return;
+    if (control) {
+      if (!control.started && (!processing || !control.defer)) {
+        const current = control;
+        current.started = true;
+        Promise.resolve().then(current.run).then(current.resolve, current.reject).finally(() => {
+          if (control === current) control = undefined;
+          pump();
+        });
+      }
+      return;
+    }
     if (processing) return;
     const next = queue.shift();
     if (!next) {
@@ -84,15 +102,22 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
       .then(() => deps.handle(next))
       .catch((err) => deps.onHandleError(next, err))
       .finally(() => {
-        // Don't reset runningClientMsgId here — pump's drain branch needs to see
-        // the still-set value to know it must emit the final empty snapshot
-        // (it compares `runningClientMsgId !== undefined`). pump clears it.
+        // A control may now own the boundary. Clear the completed message's
+        // running marker before waiting, without projecting the control itself.
         processing = false;
+        runningClientMsgId = undefined;
+        emit();
         pump();
       });
   }
 
   return {
+    runControl(run, defer) {
+      if (blocked) return Promise.reject(new Error('Session configuration is uncertain; reconnect before continuing'));
+      if (control) return Promise.reject(new Error('A session configuration request is already pending'));
+      return new Promise<void>((resolve, reject) => { control = { run, resolve, reject, started: false, defer }; pump(); });
+    },
+    block() { blocked = true; },
     enqueue(msg: T): void {
       queue.push(msg);
       // Show the new chip immediately when busy (pump won't emit until the

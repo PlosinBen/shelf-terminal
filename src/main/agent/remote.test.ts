@@ -335,6 +335,42 @@ describe('remote backend', () => {
     backend.dispose();
   });
 
+  it('routes deferred/applying config responses outside executions and invalidates on close', async () => {
+    const { child, writes } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => { setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0); return child; });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    await backend.getCapabilities!('/tmp');
+    const progress = vi.fn();
+    const request = { requestId: 'config-a', key: 'model' as const, value: 'new' };
+    const pending = backend.configure!(request, progress);
+    expect(writes.at(-1)).toEqual({ type: 'configure_session', ...request });
+    const reply = (state: string) => child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'configure_session_result', ...request, state }) + '\n'));
+    reply('deferred'); reply('applying'); reply('confirmed');
+    await expect(pending).resolves.toMatchObject({ state: 'confirmed' });
+    expect(progress.mock.calls.map(c => c[0].state)).toEqual(['deferred', 'applying']);
+    const closed = backend.configure!({ ...request, requestId: 'config-b' }, progress);
+    backend.dispose();
+    await expect(closed).resolves.toMatchObject({ state: 'uncertain' });
+  });
+
+  it('settles deferred configuration when its direct transport exits', async () => {
+    const { child } = capabilitiesChild({});
+    vi.mocked(spawn).mockImplementationOnce(() => { setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0); return child; });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' } as any);
+    try {
+      await backend.getCapabilities!('/tmp');
+      let state: string | undefined;
+      const request = { requestId: 'config-exit', key: 'effort' as const, value: 'high' };
+      const pending = backend.configure!(request, () => {}).then(result => { state = result.state; });
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'configure_session_result', ...request, state: 'deferred' }) + '\n'));
+      child.emit('exit', 1, null);
+      await vi.waitFor(() => expect(state).toBe('uncertain'), { timeout: 200 });
+      await pending;
+    } finally { backend.dispose(); }
+  });
+
   it.each(['cancelled', 'running', 'not_found'])('waits for a correlated remote queue cancellation: %s', async status => {
     const { child, writes } = capabilitiesChild({});
     vi.mocked(spawn).mockImplementationOnce(() => {

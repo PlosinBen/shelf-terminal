@@ -46,6 +46,15 @@ provider execution                                              │
 
 Session readiness also carries a confirmed-configuration loop:
 
+Explicit status-bar changes use an independent session-control lane rather than conversational input.
+The control coordinator reserves one pending request per View; the provider owns validation,
+application and confirmation. Live controls may apply while work continues; deferred controls wait
+for the active execution and apply before the next queued input starts. Neither creates conversation
+content or settles execution. A mutation with an unknown outcome holds the execution-start barrier
+until session recovery. Pending intent stays separate from confirmed runtime values and durable
+selections; restarting a session does not replay an uncertain request. Slash-origin selections remain
+ordinary queued messages, even when they share picker presentation with direct controls.
+
 ```text
 durable selections for the View's stable session
     │ desired initialization intent (empty for a new View)

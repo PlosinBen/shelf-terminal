@@ -357,6 +357,13 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.AGENT_STOP, { tabId }),
     cancelQueued: (tabId: string, clientMsgId: string) =>
       ipcRenderer.invoke(IPC.AGENT_CANCEL_QUEUED, { tabId, clientMsgId }),
+    configure: (tabId: string, request: import('../shared/agent-config-control').ConfigControlRequest) =>
+      ipcRenderer.invoke(IPC.AGENT_CONFIGURE, { tabId, request }),
+    onConfigControl: (cb: (tabId: string, update: import('../shared/agent-config-control').ConfigControlUpdate) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, tabId: string, update: import('../shared/agent-config-control').ConfigControlUpdate) => cb(tabId, update);
+      ipcRenderer.on(IPC.AGENT_CONFIG_CONTROL, listener);
+      return () => ipcRenderer.removeListener(IPC.AGENT_CONFIG_CONTROL, listener);
+    },
     destroy: (tabId: string) =>
       ipcRenderer.invoke(IPC.AGENT_DESTROY, { tabId }),
     resolvePermission: (tabId: string, toolUseId: string, allow: boolean, scope?: 'once' | 'session') =>

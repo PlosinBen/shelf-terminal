@@ -2,6 +2,7 @@ import { AgentInitializationError, AgentInitRecoveryKind, savedPrefRecovery } fr
 import { randomUUID } from 'node:crypto';
 import { inputPromptForDispatch } from '../../input-prompt';
 import { CONFIG_EDIT_KEYS, formatConfigAck } from '@shared/config-ack';
+import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
@@ -222,6 +223,8 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       models: [
         { value: 'fake-model', displayName: 'fake-model' },
         { value: 'fake-model-pro', displayName: 'fake-model-pro' },
+        { value: 'fake-config-error', displayName: 'Unconfirmed model (test)' },
+        { value: 'fake-config-rejected', displayName: 'Rejected model (test)' },
       ],
       permissionModes: [],
       permissionControl: {
@@ -704,6 +707,17 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   }
 
   return {
+    configRequiresIdle(key) { return key === CONFIG_EDIT_KEYS.EFFORT; },
+    async configure({ key, value }, send) {
+      if (value === 'fake-config-rejected') throw new ConfigControlRejectedError('Fake configuration rejected before submission');
+      if (value === 'fake-config-error') throw new Error('Fake configuration was not confirmed');
+      if (key === CONFIG_EDIT_KEYS.MODEL) currentModel = value;
+      else if (key === CONFIG_EDIT_KEYS.EFFORT) currentEffort = value;
+      else if (key === CONFIG_EDIT_KEYS.NATIVE_MODE) nativeMode = value;
+      else if (key === CONFIG_EDIT_KEYS.NATIVE_PERMISSION) nativePermission = value;
+      else if (key === CONFIG_EDIT_KEYS.NATIVE_APPROVAL) nativeApproval = value;
+      send({ type: 'capabilities', ...nativePermissionCapabilities({ [key]: value }) });
+    },
     async query(input: QueryInput, send: SendFn): Promise<void> {
       abortController = new AbortController();
       const signal = abortController.signal;
@@ -731,6 +745,16 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       // listing composed as canned markdown (each provider owns its own card;
       // no cross-provider result type). Emitted as a plain `reply`.
       const slash = parseSlashPrefix(inputPromptForDispatch(input));
+      if (slash?.args && ['model', 'effort', 'permission'].includes(slash.cmd)) {
+        const key = slash.cmd === 'permission' ? CONFIG_EDIT_KEYS.NATIVE_PERMISSION : slash.cmd as 'model' | 'effort';
+        if (key === CONFIG_EDIT_KEYS.MODEL) currentModel = slash.args;
+        else if (key === CONFIG_EDIT_KEYS.EFFORT) currentEffort = slash.args;
+        else nativePermission = slash.args;
+        send({ type: 'capabilities', ...nativePermissionCapabilities({ [key]: slash.args }) });
+        send({ type: 'message', msgId: mintId('m'), msgType: 'system', content: formatConfigAck(key, slash.args) });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
       // Wire-level clear fixture: the real Copilot provider emits the same
       // contextUsage null sentinel after replacing its ACP session. Keep quota
       // untouched so E2E covers the session-vs-account status boundary.

@@ -1,4 +1,5 @@
 import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
+import { CONFIG_CONTROL as CC, validConfigControl, isConfigControlPending, type ConfigControlUpdate } from '@shared/agent-config-control';
 import { QUEUE_CANCEL as C, type QueueCancelResult } from '@shared/agent-queue-cancel';
 import { log } from '@shared/logger';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
@@ -158,8 +159,11 @@ export function createRemoteBackend(
   let remoteProc: RemoteProcess | null = null;
   let initializedProc: RemoteProcess | null = null;
   let initializationEpoch = 0;
+  let cancelControl: (() => void) | undefined;
+  let controlUncertain = false;
   let initializing: { proc: RemoteProcess; epoch: number; promise: Promise<ProviderCapabilities> } | null = null;
   function invalidateInitialization(): void {
+    cancelControl?.();
     initializationEpoch++;
     initializedProc = null;
     initializing = null;
@@ -202,7 +206,7 @@ export function createRemoteBackend(
             ? dc.openSession(sid, cwd, { onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, onExecDown: invalidateInitialization, onMemoryUsage: memorySinks?.session, projectId, ...viewContext }, projectEnv)
             : null;
         } else {
-          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session, viewContext);
+          proc = await spawnAgentServer(connection, cwd, deployResult!, initScript, projectEnv, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, memorySinks?.session, viewContext, invalidateInitialization);
         }
         if (!proc) return null;
         const ready = await proc.awaitReady();
@@ -304,6 +308,7 @@ export function createRemoteBackend(
     },
 
     async *query(input: import('@shared/agent-input').AgentInputRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
+      if (controlUncertain) { yield { type: 'error', error: 'Session configuration is uncertain; reconnect before sending more messages' }; return; }
       const epoch = initializationEpoch;
       const proc = await ensureProcReady(cwd);
       if (initializationEpoch !== epoch) {
@@ -420,6 +425,45 @@ export function createRemoteBackend(
       }
     },
 
+    async configure(request, progress) {
+      const proc = remoteProc;
+      if (!validConfigControl(request) || !proc || initializedProc !== proc || initializing) throw new Error('Session configuration requires an initialized session');
+      request = { requestId: request.requestId, key: request.key, value: request.value };
+      if (cancelControl || controlUncertain) throw new Error('Session configuration is pending or uncertain; reconnect if needed');
+      const epoch = initializationEpoch;
+      return new Promise<ConfigControlUpdate>(resolve => {
+        let off = () => {};
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let settled = false;
+        const finish = (update: ConfigControlUpdate) => {
+          if (settled) return;
+          settled = true; off(); clearTimeout(timer); cancelControl = undefined;
+          if (update.state === CC.STATE.UNCERTAIN) controlUncertain = true;
+          resolve(update);
+        };
+        const uncertain = (error: string) => {
+          log.warn('agent-remote', `${error} requestId=${request.requestId}`);
+          finish({ ...request, state: CC.STATE.UNCERTAIN, error });
+        };
+        const arm = () => { clearTimeout(timer); timer = setTimeout(() => uncertain('Configuration response was not confirmed; reconnect before continuing. Do not automatically resend.'), CC.APPLY_TIMEOUT_MS + 5000); };
+        const listen = () => { off = proc.onResponse(request.requestId, CC.RESPONSE, payload => {
+          log.debug('config-control', `response requestId=${request.requestId} state=${payload.state}`);
+          if (remoteProc !== proc || initializationEpoch !== epoch) { uncertain('Configuration session was replaced'); return; }
+          if (payload.key !== request.key || payload.value !== request.value || !Object.values(CC.STATE).includes(payload.state)) { uncertain('Invalid configuration response'); return; }
+          const update: ConfigControlUpdate = { ...request, state: payload.state, ...(typeof payload.error === 'string' ? { error: payload.error } : {}) };
+          if (isConfigControlPending(update.state)) {
+            clearTimeout(timer);
+            if (update.state === CC.STATE.APPLYING) arm();
+            listen(); progress(update);
+          } else finish(update);
+        }); };
+        cancelControl = () => uncertain('Configuration session closed or replaced; application outcome is unknown');
+        listen(); arm();
+        try { proc.sendLine({ type: CC.REQUEST, ...request }); }
+        catch (error) { uncertain(String(error)); }
+      });
+    },
+
     async cancelQueued(clientMsgId: string): Promise<QueueCancelResult> {
       const proc = remoteProc;
       if (!proc) throw new Error('Queue cancellation failed: agent-server is not running');
@@ -454,6 +498,9 @@ export function createRemoteBackend(
 
     reconnect() {
       invalidateInitialization();
+      if (controlUncertain) {
+        remoteProc?.kill(); remoteProc = null; initInFlight = null; controlUncertain = false;
+      }
       // Fire-and-forget: tell the agent-server to drop this provider's live ACP
       // connection so the next caps probe / execution respawns and re-reads config-home
       // credentials (post-login re-init, Gap C). No-op if the process isn't up (the
@@ -846,9 +893,10 @@ async function spawnAgentServer(
   projectId?: string,
   onMemoryUsage?: (report: MemoryUsageReport) => void,
   viewContext?: { agentViewId: string; agentTabId: string },
+  onDown?: () => void,
 ): Promise<RemoteProcess | null> {
   const proc = spawnDeployedProcess(connection, cwd, deploy, false, initScript, projectEnv);
-  return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage, viewContext);
+  return wrapProcess(proc, onTaskEvent, onServerExecution, onHealth, onQueue, onSkillsReloaded, onSessionEvent, projectId, onMemoryUsage, viewContext, onDown);
 }
 
 /** Test mode and Electron runtime selection are agent startup semantics. */
@@ -1011,6 +1059,7 @@ export function wrapProcess(
   projectId?: string,
   onMemoryUsage?: (report: MemoryUsageReport) => void,
   viewContext?: { agentViewId: string; agentTabId: string },
+  onDown?: () => void,
 ): RemoteProcess {
   const dispatcher = createExecutionDispatcher(parseRemoteMessage, onTaskEvent, onServerExecution, onQueue, onSkillsReloaded, onSessionEvent);
   let buffer = '';
@@ -1202,6 +1251,7 @@ export function wrapProcess(
   let wrapped: RemoteProcess;
 
   proc.on('exit', (code, signal) => {
+    if (active) onDown?.();
     active = false;
     directProcesses.delete(wrapped);
     // Transport is gone. Nothing auto-recovers this — the session stays wedged

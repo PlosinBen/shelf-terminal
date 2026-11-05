@@ -192,6 +192,80 @@ test.describe('agent flows via fake provider', () => {
 
   test.describe('provider-native permission controls', () => {
     test.use({ nativePermissions: true });
+    test.afterEach(async ({ shelfApp: { userDataDir } }, info) => {
+      const root = path.join(userDataDir, 'logs');
+      if (info.status !== info.expectedStatus && fs.existsSync(root)) {
+        const logs = fs.readdirSync(root, { recursive: true }).filter(name => String(name).endsWith('.log'));
+        for (const name of logs) await info.attach('main-log', { body: fs.readFileSync(path.join(root, String(name))), contentType: 'text/plain' });
+      }
+    });
+
+    test('changes a live session setting without waiting for work or adding history', async ({ shelfApp: { page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await page.evaluate(async () => { const settings = await window.shelfApi.settings.load(); await window.shelfApi.settings.save({ ...settings, logLevel: 'debug' }); });
+      await sendAgentPrompt(page, 'delay:4000|text:original work completed');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
+      const users = page.locator('.agent-messages:visible .agent-msg-user');
+      await expect(users).toHaveCount(1);
+      await page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' }).click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'fake-model-pro' }).click();
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'confirmed', { timeout: 2000 });
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
+      await expect(users).toHaveCount(1);
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('Model set to');
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+      await expect.poll(async () => {
+        const project = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
+        return Object.values(project.agentViews).some(view => view.prefs.model === 'fake-model-pro');
+      }).toBe(true);
+      await expect(page.locator('.agent-messages:visible')).toContainText('original work completed');
+    });
+
+    test('defers effort ahead of queued messages while slash picker remains ordinary input', async ({ shelfApp: { page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await sendAgentPrompt(page, 'delay:3500|text:first work completed');
+      await page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'effort:' }).click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'high' }).click();
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'deferred');
+      await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' })).toHaveAttribute('aria-disabled', 'true');
+      await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'effort:' })).toHaveText('effort: medium');
+      await sendAgentPrompt(page, '/model');
+      await page.locator('.agent-perm-option:visible', { hasText: 'fake-model-pro' }).click();
+      await expect(page.locator('.agent-msg-queued')).toContainText('/model fake-model-pro');
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'confirmed');
+      await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'effort:' })).toHaveText('effort: high');
+      await expect(page.locator('.agent-messages:visible .agent-msg-user').filter({ hasText: '/model fake-model-pro' })).toHaveCount(1);
+      await expect(page.locator('.agent-messages:visible')).toContainText('Model set to fake-model-pro');
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+    });
+
+    test('shows uncertain config outside the timeline and reconnects without resending it', async ({ shelfApp: { page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' }).click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'Unconfirmed model (test)' }).click();
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'uncertain');
+      await expect(page.locator('.agent-config-feedback')).toContainText('Fake configuration was not confirmed');
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('Fake configuration was not confirmed');
+      // Session restart is the existing user-owned recovery surface. A new View
+      // must read confirmed prefs, never the failed requested value.
+      await page.locator('.agent-config-feedback button', { hasText: 'Reconnect' }).click();
+      await expect(page.locator('.agent-config-feedback')).toHaveCount(0);
+      await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' })).toBeVisible();
+      await sendAgentPrompt(page, 'text:usable after reconnect');
+      await expect(page.locator('.agent-messages:visible')).toContainText('usable after reconnect');
+    });
+
+    test('rejects a config control without changing confirmed settings or blocking messages', async ({ shelfApp: { page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      const model = page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' });
+      await model.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'Rejected model (test)' }).click();
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'rejected');
+      await expect(model).toHaveText('fake-model');
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('Fake configuration rejected');
+      await sendAgentPrompt(page, 'text:usable after rejection');
+      await expect(page.locator('.agent-messages:visible')).toContainText('usable after rejection');
+    });
 
     test('shows and mutates mode and permission independently', async ({ shelfApp: { page } }) => {
       await setupProject(page);

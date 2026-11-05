@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { OutgoingMessage } from '../types';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 const modelInputs: any[] = [];
+const sdkMessages: any[] = [];
+let sdkModels: Array<{ value: string; displayName: string }> = [];
 
 const sdk = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -17,6 +19,8 @@ let backend: ReturnType<typeof createClaudeBackend>;
 const sessions: Array<{ options: any; setModel: ReturnType<typeof vi.fn>; setPermissionMode: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }> = [];
 beforeEach(() => {
   modelInputs.length = 0;
+  sdkMessages.length = 0;
+  sdkModels = [];
   sessions.length = 0;
   sdk.query.mockImplementation(({ prompt, options }) => {
     async function* messages() {
@@ -24,11 +28,12 @@ beforeEach(() => {
       for await (const _user of prompt) {
         modelInputs.push(_user);
         yield { type: 'system', subtype: 'init', session_id: 'live-session' };
+        yield* sdkMessages.splice(0);
         yield { type: 'result', subtype: 'success', session_id: 'live-session' };
       }
     }
     const query = Object.assign(messages(), {
-      supportedModels: async () => [], supportedCommands: async () => [], mcpServerStatus: async () => [],
+      supportedModels: async () => sdkModels, supportedCommands: async () => [], mcpServerStatus: async () => [],
       setModel: vi.fn(async () => {}), setPermissionMode: vi.fn(async () => {}), close: vi.fn(),
     });
     if (typeof prompt !== 'string') sessions.push({ options, ...query });
@@ -42,6 +47,41 @@ async function warm() {
   await backend.gatherCapabilities!('/tmp', undefined, undefined, { model: 'old', effort: 'low', permissionMode: 'default' });
   await backend.query({ prompt: 'first', cwd: '/tmp' }, () => {});
 }
+
+it('confirms direct controls without timeline or execution side effects, including same-value no-op', async () => {
+  await warm();
+  const out: OutgoingMessage[] = [];
+  expect(backend.configRequiresIdle!('model')).toBe(false);
+  expect(backend.configRequiresIdle!('effort')).toBe(true);
+  for (const value of ['new', 'new']) await backend.configure!({ key: 'model', value }, m => out.push(m));
+  expect(out).toHaveLength(2);
+  expect(out.every(m => m.type === 'capabilities')).toBe(true);
+  expect(sessions[0].setModel).toHaveBeenCalledTimes(1);
+});
+
+it('does not interrupt running background tasks for effort, but permits it after task completion', async () => {
+  sdkMessages.push({ type: 'system', subtype: 'task_started', task_id: 'config-task', description: 'Background work', task_type: 'local_bash', tool_use_id: 'config-tool' });
+  await warm();
+  await expect(backend.configure!({ key: 'effort', value: 'high' }, () => {})).rejects.toThrow('background work');
+  expect(sessions[0].close).not.toHaveBeenCalled();
+  sdkMessages.push({ type: 'system', subtype: 'task_notification', task_id: 'config-task', status: 'completed', summary: 'Done' });
+  await backend.query({ prompt: 'observe completed task', cwd: '/tmp' }, () => {});
+  await expect(backend.configure!({ key: 'effort', value: 'high' }, () => {})).resolves.toBeUndefined();
+});
+
+it('does not let a running response model overwrite a newer direct selection', async () => {
+  sdkModels = [{ value: 'recommended', displayName: 'Recommended' }];
+  await backend.gatherCapabilities!('/tmp', undefined, undefined, { model: 'old-custom' });
+  let release!: (message: any) => void;
+  sdkMessages.push(new Promise(resolve => { release = resolve; }));
+  const out: OutgoingMessage[] = [];
+  const run = backend.query({ prompt: 'running work', cwd: '/tmp' }, m => out.push(m));
+  await vi.waitFor(() => expect(sessions).toHaveLength(1));
+  await backend.configure!({ key: 'model', value: 'new-custom' }, m => out.push(m));
+  release({ type: 'assistant', message: { model: 'old-resolved', content: [] } });
+  await run;
+  expect(out.filter(m => m.type === 'capabilities').at(-1)).toMatchObject({ currentModel: 'new-custom' });
+});
 
 it('applies common reply guidance only to the model input, not config slashes', async () => {
   const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: 'original', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });

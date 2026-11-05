@@ -1,4 +1,5 @@
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { runBridgeTool, SHELF_BRIDGE_TOOLS, bridgeToolArgs } from '../../app-tool-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
@@ -279,6 +280,7 @@ export function createClaudeBackend(): ServerBackend {
   // Provider-owned preferences. Initialization and explicit edits share
   // applyPreference; live control confirmation precedes state publication.
   let currentModel: string | undefined;
+  let modelRevision = 0;
   let currentEffort: string | undefined;
   let currentPermissionMode: string | undefined;
 
@@ -304,6 +306,7 @@ export function createClaudeBackend(): ServerBackend {
   // A user prompt waiting in the queue for its `system/init` to arrive. On init
   // it is turned into an active foreground TurnFrame (openForegroundFrame).
   interface ForegroundTurn {
+    modelRevision: number;
     /** Turn-bound send (orchestrator already wrapped it with executionId+context). */
     send: SendFn;
     /** Idle-deduped wrapper over `send` (multiple idle emit sites per turn). */
@@ -321,6 +324,7 @@ export function createClaudeBackend(): ServerBackend {
   // drifted (server forgot `user` tool_results → the "整排 tool 卡沒 result" bug).
   // See features/claude-content-turn-unify.
   interface TurnFrame {
+    modelRevision?: number;
     kind: 'foreground' | 'server';
     /** Content + status sink. FG: idle-deduped `executionSend`. Server: base send
      *  pre-stamped with its lifecycle-routing `executionId`. */
@@ -660,6 +664,7 @@ export function createClaudeBackend(): ServerBackend {
   async function applyPreference(key: ConfigEditKey, value: string): Promise<boolean> {
     if (key === CONFIG_EDIT_KEYS.MODEL) {
       if (currentModel === value) return false;
+      modelRevision++;
       if (session) await session.query.setModel(value);
       currentModel = value;
     } else if (key === CONFIG_EDIT_KEYS.EFFORT) {
@@ -974,6 +979,7 @@ export function createClaudeBackend(): ServerBackend {
         kind: 'foreground', send: turn.executionSend, blockMsgIds: turn.blockMsgIds,
         forwardAll: true, rawSend: turn.send, cwd: turn.cwd,
         pendingCompactMsgId: turn.pendingCompactMsgId, resolve: turn.resolve,
+        modelRevision: turn.modelRevision,
       };
     } else {
       // Stray init with no pending push — synthesize so content isn't dropped.
@@ -1057,7 +1063,8 @@ export function createClaudeBackend(): ServerBackend {
     // Alias resolution → pin concrete model (see agent-config-flow#4).
     if (frame.kind === 'foreground' && msg.type === 'assistant' && any.parent_tool_use_id == null) {
       const resolved = any.message?.model;
-      if (shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
+      // agent-config-flow#16: an older response cannot overwrite a newer control.
+      if (frame.modelRevision === modelRevision && shouldAdoptResolvedModel(resolved, currentModel, cache.models ?? [])) {
         currentModel = resolved;
         frame.rawSend!({ type: 'capabilities', ...buildCapabilities() });
       }
@@ -1185,6 +1192,17 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   return {
+    configRequiresIdle(key) {
+      if (![CONFIG_EDIT_KEYS.MODEL, CONFIG_EDIT_KEYS.EFFORT, CONFIG_EDIT_KEYS.PERMISSION_MODE].some(supported => supported === key)) throw new Error(`Claude does not accept config key "${key}"`);
+      return key === CONFIG_EDIT_KEYS.EFFORT || !stoppable;
+    },
+    async configure(edit, send) {
+      if (edit.key === CONFIG_EDIT_KEYS.EFFORT && edit.value !== currentEffort && (activeCycles > 0 || [...backgroundTasks.values()].some(task => !task.done))) {
+        throw new ConfigControlRejectedError('Claude effort cannot change while provider background work remains active; retry after it finishes');
+      }
+      await applyPreference(edit.key, edit.value);
+      send({ type: 'capabilities', ...buildCapabilities() });
+    },
     async gatherCapabilities(
       cwd: string,
       _sessionId?: string,
@@ -1311,7 +1329,7 @@ export function createClaudeBackend(): ServerBackend {
       // Register the foreground turn, then push its prompt into the live
       // session. The consumer loop attributes the SDK's reply back to this
       // entry (FIFO) and resolves `done` at the foreground result.
-      const turn: ForegroundTurn = { send, executionSend, blockMsgIds, cwd: input.cwd, pendingCompactMsgId, resolve: () => {} };
+      const turn: ForegroundTurn = { send, executionSend, blockMsgIds, cwd: input.cwd, pendingCompactMsgId, modelRevision, resolve: () => {} };
       const done = new Promise<void>((r) => { turn.resolve = r; });
       pendingPush.push(turn);
       notePush(router);

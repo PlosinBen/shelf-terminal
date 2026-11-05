@@ -1,5 +1,6 @@
 import type { AgentInitStatus, AgentLoginPrompt, AgentLoginResult, AgentQueueItem, Connection, TaskEvent } from '../../shared/types';
 import { on, emit } from './bus';
+import { CONFIG_CONTROL as CC } from '../../shared/agent-config-control';
 import { SHELF_MCP, type ShelfMcpStatus } from '../../shared/shelf-mcp';
 import { DELEGATION, type DelegationUiAction, type AgentViewRef } from '../../shared/agent-delegation';
 
@@ -17,6 +18,7 @@ import { DELEGATION, type DelegationUiAction, type AgentViewRef } from '../../sh
 // Payloads carry tabId so a single global listener can route to the
 // right tab slice without per-component (tabId === id) filtering.
 export interface AgentEventMap {
+  [CC.EVENT]: { tabId: string; key: import('../../shared/config-ack').ConfigEditKey; value: string };
   [DELEGATION.EVENT.ACTION]: DelegationUiAction;
   [DELEGATION.EVENT.SELECT]: { requestId: string; target: AgentViewRef | null };
   [DELEGATION.EVENT.RENAME]: { tabId: string; displayName: string };

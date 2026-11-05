@@ -157,6 +157,23 @@ function withConfigSelection(
 }
 
 describe('acp-copilot backend (via mock ACP agent)', () => {
+  it('confirms direct ACP settings from response snapshots without timeline or idle events', async () => {
+    let liveConfig = COPILOT_CONFIG;
+    const mock = createMockAcpAgent({ modes: COPILOT_MODES, configOptions: COPILOT_CONFIG,
+      get configOptionsOnSetConfigOption() { return liveConfig; },
+      onSetConfigOption(params) { const p = params as { configId: string; value: string }; liveConfig = withConfigSelection(liveConfig, p.configId, p.value); },
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    try {
+      await backend.gatherCapabilities!('/repo');
+      const out: OutgoingMessage[] = [];
+      expect(backend.configRequiresIdle!('effort')).toBe(false);
+      expect(backend.configRequiresIdle!('nativeMode')).toBe(true);
+      await backend.configure!({ key: 'effort', value: 'high' }, m => out.push(m));
+      expect(out).toContainEqual(expect.objectContaining({ type: 'capabilities', currentEffort: 'high' }));
+      expect(out.every(m => m.type === 'capabilities')).toBe(true);
+    } finally { backend.dispose(); }
+  });
   it('observes usage without publishing context or credit, while forwarding reply text', async () => {
     const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
     const mock = createMockAcpAgent({ updatesOnPrompt: [

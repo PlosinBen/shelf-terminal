@@ -1,4 +1,5 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
+import { CONFIG_CONTROL as CC, isConfigControlPending, type ConfigControlUpdate, type ConfigControlRequest } from '@shared/agent-config-control';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { QUEUE_CANCEL as C, type QueueCancelResult } from '@shared/agent-queue-cancel';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
@@ -68,11 +69,13 @@ export interface PendingPicker {
   }>;
 }
 
-export interface LocalPicker {
-  key: ConfigEditKey;
-}
+export type LocalPicker = { key: ConfigEditKey } & (
+  | { origin: typeof CC.ORIGIN.STATUS_BAR }
+  | { origin: typeof CC.ORIGIN.SLASH; command: string }
+);
 
 export interface AgentTabState {
+  configControl?: ConfigControlUpdate;
   shelfMcpStatus?: ShelfMcpStatus;
   // identity
   sessionId: string;
@@ -1034,6 +1037,30 @@ export function setLocalPicker(tabId: string, lp: LocalPicker | null) {
   update(tabId, (prev) => ({ ...prev, localPicker: lp }));
 }
 
+export function beginConfigControl(tabId: string, edit: { key: ConfigEditKey; value: string }): ConfigControlRequest | undefined {
+  const tab = tabs.get(tabId);
+  if (!tab || tab.initStatus !== 'ready' || (tab.configControl && (isConfigControlPending(tab.configControl.state) || tab.configControl.state === CC.STATE.UNCERTAIN))) return;
+  const request = { ...edit, requestId: crypto.randomUUID() };
+  update(tabId, prev => ({ ...prev, configControl: { ...request, state: CC.STATE.DEFERRED } }));
+  return request;
+}
+
+export function updateConfigControl(tabId: string, result: ConfigControlUpdate): void {
+  debugLog('config-control', `result tab=${formatTabLogId(tabId)} requestId=${result.requestId} state=${result.state}`);
+  update(tabId, prev => {
+    if (prev.configControl?.requestId !== result.requestId) {
+      debugLog('config-control', `ignored stale result tab=${formatTabLogId(tabId)} requestId=${result.requestId}`);
+      return prev;
+    }
+    if (!isConfigControlPending(prev.configControl.state)) {
+      debugLog('config-control', `ignored late update after terminal state requestId=${result.requestId}`);
+      return prev;
+    }
+    if (prev.configControl.state === CC.STATE.APPLYING && result.state === CC.STATE.DEFERRED) return prev;
+    return { ...prev, configControl: result };
+  });
+}
+
 // ── Auth / Init actions ──
 
 export function setAuthRequired(tabId: string, auth: { provider: string } | null) {
@@ -1082,7 +1109,9 @@ export function setInitStatus(
   phase: AgentInitPhase | null = null,
   recovery?: AgentInitRecovery,
 ) {
-  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error, initPhase: phase, initRecovery: status === 'failed' ? recovery : undefined }));
+  update(tabId, (prev) => ({ ...prev, initStatus: status, initError: error, initPhase: phase, initRecovery: status === 'failed' ? recovery : undefined,
+    ...(status !== 'ready' ? { configControl: undefined, localPicker: null } : {}),
+  }));
 }
 
 // ── Selectors ──

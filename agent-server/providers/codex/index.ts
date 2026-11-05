@@ -1,4 +1,5 @@
 import { CodexNativeControls, CODEX_NATIVE_RPC } from './native-controls';
+import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
 import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import * as path from 'node:path';
@@ -486,19 +487,30 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       ...nativeControls.capabilities(), confirmedPrefs };
   }
 
-  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn, acknowledge = true): Promise<void> {
     if (!appServer || !nativeReady) throw new Error('Codex settings are not initialized');
     const changed = await nativeControls.apply(appServer, key, value);
-    if (!changed) return;
+    if (!changed) { if (!acknowledge) send({ type: 'capabilities', ...buildCapabilities() }); return; }
     explicitPrefs = { ...explicitPrefs, [key]: value };
     currentModel = nativeControls.value(CONFIG_EDIT_KEYS.MODEL);
     currentEffort = nativeControls.value(CONFIG_EDIT_KEYS.EFFORT);
     send({ type: 'capabilities', ...buildCapabilities({ [key]: value }) });
-    send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
+    if (acknowledge) send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
   }
 
   return {
     bindSessionSend(send): void { sessionSend = send; },
+    configRequiresIdle(key) {
+      if (key === CONFIG_EDIT_KEYS.PERMISSION_MODE) throw new Error('Codex requires native configuration keys');
+      return true;
+    },
+    async configure(edit, send) {
+      nativeControls.assertUsable();
+      // Direct-control rejection must not replace initialization recovery metadata.
+      try { nativeControls.validate(edit.key, edit.value); }
+      catch (error) { throw new ConfigControlRejectedError(error instanceof Error ? error.message : String(error)); }
+      await applyConfigEdit(edit.key, edit.value, send, false);
+    },
     async query(input, send): Promise<void> {
       if (activeRun) {
         send({ type: 'error', error: 'codex: a turn is already running' });

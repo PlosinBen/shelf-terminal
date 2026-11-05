@@ -1,4 +1,5 @@
 import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-recovery';
+import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { CONFIG_EDIT_KEYS, type ConfigEditKey } from '@shared/config-ack';
 import { PERMISSION_CONTROL_STRATEGIES, type NativePermissionControlDescriptor } from '@shared/permission-controls';
 import type { ProviderCapabilities } from '../types';
@@ -119,7 +120,7 @@ export class CodexNativeControls {
     if (key === CONFIG_EDIT_KEYS.MODEL && this.settings.effort != null) {
       const supported = this.models.find(model => model.value === value)?.effortLevels;
       if (supported && !supported.some(option => option.value === this.settings.effort)) {
-        throw new Error(`Model ${value} does not support current effort ${this.settings.effort}; change effort before switching model`);
+        throw new ConfigControlRejectedError(`Model ${value} does not support current effort ${this.settings.effort}; change effort before switching model`);
       }
     }
     if (this.pending) throw new Error('Codex settings update already pending');

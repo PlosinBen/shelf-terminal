@@ -37,6 +37,8 @@ import {
   setPendingPermission,
   setPendingPicker,
   setLocalPicker,
+  beginConfigControl,
+  updateConfigControl,
   setAuthRequired,
   beginLogin,
   setLoginPrompt,
@@ -56,6 +58,28 @@ import {
 
 const TAB = 'tab-1';
 const SESSION = 'sess-1';
+
+it('keeps direct config requests out of history and ignores results after incarnation replacement', () => {
+  initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+  setInitStatus(TAB, 'ready');
+  const request = beginConfigControl(TAB, { key: 'model', value: 'new' })!;
+  expect(request.requestId).toBeTruthy();
+  expect(beginConfigControl(TAB, { key: 'effort', value: 'high' })).toBeUndefined();
+  updateConfigControl(TAB, { ...request, state: 'confirmed' });
+  expect(__getTabForTests(TAB)?.messages).toEqual([]);
+  const next = beginConfigControl(TAB, { key: 'effort', value: 'high' })!;
+  setInitStatus(TAB, 'starting'); setInitStatus(TAB, 'ready');
+  updateConfigControl(TAB, { ...next, state: 'confirmed' });
+  expect(__getTabForTests(TAB)?.configControl).toBeUndefined();
+});
+
+it('does not let delayed progress overwrite a terminal control result', () => {
+  initTab(TAB, { sessionId: SESSION, provider: 'claude' }); setInitStatus(TAB, 'ready');
+  const request = beginConfigControl(TAB, { key: 'model', value: 'new' })!;
+  updateConfigControl(TAB, { ...request, state: 'confirmed' });
+  updateConfigControl(TAB, { ...request, state: 'applying' });
+  expect(__getTabForTests(TAB)?.configControl?.state).toBe('confirmed');
+});
 
 it('retains canonical input metadata through existing queue promotion and history save', async () => {
   initTab(TAB, { sessionId: SESSION, provider: 'claude' });
@@ -839,7 +863,7 @@ describe('agentTabStore — decisions / auth / init', () => {
     expect(__getTabForTests(TAB)!.pendingPermission?.toolUseId).toBe('tu1');
     setPendingPicker(TAB, { id: 'p1', prompts: [] });
     expect(__getTabForTests(TAB)!.pendingPicker?.id).toBe('p1');
-    setLocalPicker(TAB, { key: 'model' });
+    setLocalPicker(TAB, { key: 'model', origin: 'status-bar' });
     expect(__getTabForTests(TAB)!.localPicker?.key).toBe('model');
   });
 

@@ -3003,6 +3003,21 @@ button {
   flex-shrink: 0;
 }
 
+.agent-config-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  flex-shrink: 0;
+}
+.agent-status-interactive[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+.agent-config-feedback[data-state="uncertain"],
+.agent-config-feedback[data-state="rejected"] { color: var(--agent-warning, #e5c07b); }
+
 .agent-status-dot {
   flex-shrink: 0;
 }

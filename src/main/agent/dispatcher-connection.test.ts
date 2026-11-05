@@ -335,10 +335,12 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     // → caps init failed ("Failed to start agent-server") instead of spawning fresh.
     const onDown = vi.fn();
     const onHealth = vi.fn();
+    const onExecDown = vi.fn();
     const { f, conn } = make({ onDown });
-    conn.openSession('s1', undefined, { onHealth });
+    conn.openSession('s1', undefined, { onHealth, onExecDown });
     f.exit(null); // dispatcher proc killed
     expect(onDown).toHaveBeenCalledTimes(1);
+    expect(onExecDown).toHaveBeenCalledTimes(1);
     expect(onHealth).toHaveBeenCalledWith({ state: 'dead' }); // the tab also goes dead
     expect(conn.size()).toBe(0);
   });

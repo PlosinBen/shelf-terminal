@@ -536,7 +536,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
   /** Apply a config-edit turn (picker / status-bar): imperative apply + updated
    *  capabilities + an ack divider. No-op guard skips a re-pick of the live value. */
-  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn): Promise<void> {
+  async function applyConfigEdit(key: ConfigEditKey, value: string, send: SendFn, acknowledge = true): Promise<void> {
     const controls = nativePermissionControl();
     const cur = key === CONFIG_EDIT_KEYS.MODEL
       ? currentModel
@@ -547,15 +547,24 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           : key === CONFIG_EDIT_KEYS.NATIVE_PERMISSION
             ? controls.strategy === 'native' ? controls.permission?.currentValue : undefined
             : undefined;
-    if (cur === value) return;
+    if (cur === value) { if (!acknowledge) send({ type: 'capabilities', ...buildCapabilities() }); return; }
     try {
       if (key === CONFIG_EDIT_KEYS.MODEL) await applyModel(value);
       else if (key === CONFIG_EDIT_KEYS.EFFORT) await applyEffort(value);
       else if (key === CONFIG_EDIT_KEYS.NATIVE_MODE) await applyNativeMode(value);
       else if (key === CONFIG_EDIT_KEYS.NATIVE_PERMISSION) await applyNativePermission(value);
       else throw new Error(`Copilot native strategy does not accept config key "${key}"`);
-      send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
+      if (acknowledge) send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'system', content: formatConfigAck(key, value) });
+      else {
+        const confirmed = key === CONFIG_EDIT_KEYS.MODEL ? currentModel
+          : key === CONFIG_EDIT_KEYS.EFFORT ? currentEffort
+          : key === CONFIG_EDIT_KEYS.NATIVE_MODE ? sessionModes?.currentModeId
+          : sessionConfigOptions?.find(option => option.id === COPILOT_PERMISSION_OPTION_ID)?.currentValue;
+        if (confirmed !== value) throw new Error(`Copilot did not confirm ${key}=${value}`);
+        send({ type: 'capabilities', ...buildCapabilities() });
+      }
     } catch (err) {
+      if (!acknowledge) throw err;
       send({ type: 'message', msgId: `m-${randomUUID().slice(0, 8)}`, msgType: 'error', content: `Failed to set ${key}: ${(err as Error)?.message ?? String(err)}` });
     }
   }
@@ -926,6 +935,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     bindSessionSend(send: SendFn): void { sessionSend = send; },
+    configRequiresIdle(key) {
+      if (key === CONFIG_EDIT_KEYS.PERMISSION_MODE || key === CONFIG_EDIT_KEYS.NATIVE_APPROVAL) throw new Error(`Copilot does not accept config key "${key}"`);
+      return key === CONFIG_EDIT_KEYS.NATIVE_MODE;
+    },
+    async configure(edit, send) { await applyConfigEdit(edit.key, edit.value, send, false); },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
       permissions.resolvePermission(toolUseId, allow, message, scope);

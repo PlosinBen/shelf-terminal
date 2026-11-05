@@ -292,6 +292,8 @@ Renderer → main (invoke / send):
 |--------|-------|
 | `init(tabId, cwd, connection, provider, sessionId?, opts?)` | invoke `agent:init` |
 | `send(tabId, input)` | invoke `agent:send` with `{tabId, ...input}`. `AgentInputRequest` in `src/shared/agent-input.ts`: `{inputMessage}` or `{configEdit:{key,value}}`, never both. Message returns `SubmissionResult` (`src/shared/agent-submission.ts`) on exec queue receipt, not execution completion. Config edit retains its completion boolean. See `contracts/agent-routing`. |
+| `configure(tabId, request)` | invoke `agent:configure-session` with `{tabId,request}`. `ConfigControlRequest` / terminal `ConfigControlUpdate` in `src/shared/agent-config-control.ts`; independent of message execution. |
+| `onConfigControl(callback)` | listen `agent:config-control`, callback `(tabId, ConfigControlUpdate)` for deferred/applying progress. Terminal result comes from `configure`; late progress cannot overwrite it. |
 | `stop(tabId)` | invoke `agent:stop` |
 | `cancelQueued(tabId, clientMsgId)` | invoke `agent:cancel-queued` → `QueueCancelResult` (`src/shared/agent-queue-cancel.ts`), status `cancelled` / `running` / `not_found`; RPC failure rejects. Renderer retains cancelling content until authority confirms removal. |
 | `destroy(tabId)` | invoke `agent:destroy` |

@@ -1,4 +1,5 @@
 import { recoveryFromError } from '@shared/agent-init-recovery';
+import { validConfigControl, CONFIG_CONTROL as CC } from '@shared/agent-config-control';
 import { BrowserWindow, ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
 import { SHELF_MCP } from '@shared/shelf-mcp';
@@ -403,6 +404,19 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     const session = sessions.get(payload.tabId);
     if (!session?.backend.cancelQueued || typeof payload.clientMsgId !== 'string') throw new Error('Queue cancellation target is unavailable or invalid');
     return session.backend.cancelQueued(payload.clientMsgId);
+  });
+
+  ipcMain.handle(IPC.AGENT_CONFIGURE, async (_e, payload) => {
+    const session = sessions.get(payload.tabId);
+    if (!validConfigControl(payload.request)) throw new Error('Invalid session configuration request');
+    const request = { requestId: payload.request.requestId, key: payload.request.key, value: payload.request.value };
+    if (!session?.ready || !session.backend.configure) return { ...request, state: CC.STATE.REJECTED, error: 'Session configuration is unavailable' };
+    const result = await session.backend.configure(request, update => {
+      if (sessions.get(payload.tabId) === session) send(IPC.AGENT_CONFIG_CONTROL, payload.tabId, update);
+      else log.debug('agent', `ignored stale config progress requestId=${update.requestId}`);
+    }).catch(error => ({ ...request, state: CC.STATE.REJECTED, error: String(error) }));
+    if (sessions.get(payload.tabId) !== session) return { ...request, state: CC.STATE.UNCERTAIN, error: 'Session was replaced' };
+    return result;
   });
 
 }

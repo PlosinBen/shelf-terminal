@@ -1,4 +1,6 @@
 import React, { useCallback } from 'react';
+import { CONFIG_CONTROL as CC, isConfigControlPending } from '@shared/agent-config-control';
+import { emitAgent } from '../../events';
 import type { AgentProvider } from '@shared/types';
 import { providerLabel } from '@shared/agent-providers';
 import { clearMessages as clearMessagesStore, setLocalPicker, useAgentTab } from '../../agentTabStore';
@@ -21,11 +23,12 @@ interface Props {
  * Cycle-on-click was easy to misfire — a stray click would silently switch
  * the model with no confirmation. Opening a dismissable picker makes a
  * misclick harmless (Esc closes it) and the selection explicit. Options come
- * from `capabilities`; the picker's onSelect emits a config-edit execution
- * (DecisionPanel → agent:send + configEdit).
+ * from `capabilities`; status-bar selections use independent session control.
  */
 export function StatusBar({ tabId, provider }: Props) {
   const tab = useAgentTab(tabId);
+  const control = tab?.configControl;
+  const controlsDisabled = tab?.initStatus !== 'ready' || !!(control && (isConfigControlPending(control.state) || control.state === CC.STATE.UNCERTAIN));
   const { processMemorySummary } = useStore();
   const isExecutionActive = tab?.isExecutionActive ?? false;
   const statusModel = tab?.actualModel ?? null;
@@ -40,18 +43,18 @@ export function StatusBar({ tabId, provider }: Props) {
   const credits = tab?.credits ?? null;
 
   const handleOpenModelPicker = useCallback(() => {
-    if (!capabilities || capabilities.models.length === 0) return;
-    setLocalPicker(tabId, { key: 'model' });
-  }, [tabId, capabilities]);
+    if (controlsDisabled || !capabilities || capabilities.models.length === 0) return;
+    setLocalPicker(tabId, { key: 'model', origin: CC.ORIGIN.STATUS_BAR });
+  }, [tabId, capabilities, controlsDisabled]);
 
   const handleOpenPermissionPicker = useCallback((key: PermissionControlView['key']) => {
-    setLocalPicker(tabId, { key });
-  }, [tabId]);
+    if (!controlsDisabled) setLocalPicker(tabId, { key, origin: CC.ORIGIN.STATUS_BAR });
+  }, [tabId, controlsDisabled]);
 
   const handleOpenEffortPicker = useCallback(() => {
-    if (!capabilities || capabilities.effortLevels.length === 0) return;
-    setLocalPicker(tabId, { key: 'effort' });
-  }, [tabId, capabilities]);
+    if (controlsDisabled || !capabilities || capabilities.effortLevels.length === 0) return;
+    setLocalPicker(tabId, { key: 'effort', origin: CC.ORIGIN.STATUS_BAR });
+  }, [tabId, capabilities, controlsDisabled]);
 
   const handleClearHistory = useCallback(async () => {
     // Wipes what the user sees (in-memory + IDB). Does NOT touch agent
@@ -68,6 +71,7 @@ export function StatusBar({ tabId, provider }: Props) {
   const currentEffortOption = capabilities?.effortLevels.find((e) => e.value === currentEffort);
 
   return (
+    <>
     <div className="agent-status-bar">
       <span className="agent-status-dot" style={{ color: isExecutionActive ? 'var(--agent-warning, #e5c07b)' : 'var(--agent-success, #98c379)' }}>{'●'}</span>
       <span className="agent-status-label">{isExecutionActive ? 'running' : 'idle'}</span>
@@ -79,6 +83,7 @@ export function StatusBar({ tabId, provider }: Props) {
           <span
             className={`agent-status-seg${capabilities ? ' agent-status-interactive' : ''}`}
             onClick={handleOpenModelPicker}
+            aria-disabled={controlsDisabled}
           >{statusModel}</span>
         </>
       )}
@@ -94,6 +99,7 @@ export function StatusBar({ tabId, provider }: Props) {
             data-severity={current?.severity ?? 'normal'}
             data-config-key={control.key}
             onClick={() => handleOpenPermissionPicker(control.key)}
+            aria-disabled={controlsDisabled}
           >
             {control.key === 'permissionMode'
               ? displayName
@@ -109,6 +115,7 @@ export function StatusBar({ tabId, provider }: Props) {
             className="agent-status-seg agent-status-interactive"
             data-severity={currentEffortOption?.severity ?? 'normal'}
             onClick={handleOpenEffortPicker}
+            aria-disabled={controlsDisabled}
           >
             <span className="agent-status-seg-label">effort: </span>{currentEffortOption?.displayName ?? currentEffort ?? 'Default'}
           </span>
@@ -148,5 +155,16 @@ export function StatusBar({ tabId, provider }: Props) {
         title="Clear visible messages (agent keeps its memory; use /clear to reset agent context)"
       >Clear History</button>
     </div>
+    {control && <div className="agent-config-feedback" role="status" data-state={control.state}>
+      {control.state === CC.STATE.DEFERRED ? `Waiting for a safe boundary: ${control.key} → ${control.value}`
+        : control.state === CC.STATE.APPLYING ? `Applying session setting: ${control.key} → ${control.value}`
+        : control.state === CC.STATE.CONFIRMED ? `Session setting confirmed: ${control.key} = ${control.value}`
+        : control.error ?? 'Session configuration was rejected'}
+      {control.state === CC.STATE.UNCERTAIN && <>
+        {(isExecutionActive || !!tab?.pendingSends.length) && <span>Finish or stop work and cancel queued messages before reconnecting.</span>}
+        <button className="agent-reset-btn" disabled={isExecutionActive || !!tab?.pendingSends.length} onClick={() => emitAgent('agent:retryInit', { tabId })}>Reconnect</button>
+      </>}
+    </div>}
+    </>
   );
 }

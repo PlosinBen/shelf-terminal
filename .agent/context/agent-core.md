@@ -245,7 +245,8 @@ delivery／結果槽契約。Runner 持續管理事件、權限、busy 計數與
 不改寫已回傳的錯誤。追蹤直到 execution 結束或 View 關閉；queued 取消仍需結束
 其 reader。一般輸入保留 optimistic projection，內部 mirror 必須從 renderer
 projection 分流，不能把所有被 receipt 追蹤的 id 都濾除。回覆內容屬 session lane，
-idle 不代表完整回覆。configEdit 暫保留自己的 completion 路徑，不偽裝為訊息 receipt。
+idle 不代表完整回覆。相容 configEdit 保留自己的 completion 路徑，不偽裝為訊息 receipt；
+status-bar 直接控制使用獨立 session control（agent-config-flow#16）。
 
 ## agent-core#14 — 取消排隊訊息以遠端結果為準，意圖不能丟掉內容  ·  [Decision]
 

@@ -1,5 +1,7 @@
 import type { AgentInitStatus } from '../../shared/types';
 import { onAgent, emitAgent } from './types';
+import { CONFIG_CONTROL as CC } from '../../shared/agent-config-control';
+import { beginConfigControl, updateConfigControl } from '../agentTabStore';
 import { SHELF_MCP } from '../../shared/shelf-mcp';
 import { beginPendingCancel, finishPendingCancel, cancelPendingSend } from '../agentTabStore';
 import { QUEUE_CANCEL as C } from '../../shared/agent-queue-cancel';
@@ -22,6 +24,15 @@ import { isSubmissionUncertain, SUBMISSION_ERROR as E, type SubmissionError } fr
 // stub window.shelfApi before calling bindAgentIPCGroup().
 export function bindAgentIPCGroup(): () => void {
   const api = window.shelfApi.agent;
+  const offConfigProgress = api.onConfigControl((tabId, update) => updateConfigControl(tabId, update));
+  const offConfigure = onAgent(CC.EVENT, ({ tabId, key, value }) => {
+    const request = beginConfigControl(tabId, { key, value });
+    if (!request) return;
+    void api.configure(tabId, request).then(result => updateConfigControl(tabId, result)).catch(error => {
+      console.error('Session configuration failed', { tabId, requestId: request.requestId, error });
+      updateConfigControl(tabId, { ...request, state: CC.STATE.UNCERTAIN, error: `${String(error)}. Reconnect before continuing; do not automatically resend.` });
+    });
+  });
   const offShelfMcp = api.onShelfMcpStatus((tabId, status) => {
     emitAgent(SHELF_MCP.STATUS_EVENT, { tabId, status });
   });
@@ -112,6 +123,8 @@ export function bindAgentIPCGroup(): () => void {
   });
 
   return () => {
+    offConfigProgress();
+    offConfigure();
     offShelfMcp();
     offMessage();
     offStream();

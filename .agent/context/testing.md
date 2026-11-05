@@ -8,6 +8,21 @@ related:
 
 # Testing Practices
 
+## Session configuration control verification
+
+`agent-server/session-config-control.test.ts` 與 `send-queue.test.ts` 驗 live／deferred control、
+FIFO start barrier、跨 key 排他、同值 settlement、等待安全邊界不算 apply timeout、
+uncertain 保留 queued input，以及 wire envelope 不得洩漏至結果。各 provider 的 config
+測試走 mock SDK／ACP／app-server，驗確認與無 timeline／idle side effect，不呼叫 live 模型。
+`src/main/agent/remote.test.ts` 驗 request correlation／close invalidation；renderer store
+測試驗 incarnation 與 terminal monotonicity。
+
+`npm run test:e2e -- e2e/agent-flows.spec.ts` 的 session setting／deferred effort／uncertain
+config／rejected config 案例走實際 IPC、exec queue 與 fake provider，驗 busy 時 direct
+control、slash picker 的訊息路徑、確認後保存、獨立錯誤與使用者 reconnect。失敗時保存
+main log 至 Playwright attachments，fixture 清理不抹掉證據。這不是 live provider 或
+SSH／Docker／WSL 的執行中 setter 支援證明。
+
 ## Worktree scan verification
 
 `e2e/worktree-reconciliation.spec.ts` 的首次 target probe 失敗案例，在 Connect

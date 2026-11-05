@@ -267,7 +267,10 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     active = false;
     log.warn('dispatcher-conn', `dispatcher process exited code=${code} — host down until reconnect`);
     clearInterval(timer);
-    for (const ch of channels.values()) ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
+    for (const ch of channels.values()) {
+      ch.sinks.onExecDown?.();
+      ch.sinks.onHealth?.({ state: 'dead' } as ConnectionHealth);
+    }
     channels.clear();
     deps.onDown?.(); // owner evicts this dead conn → next connect spawns fresh
   });

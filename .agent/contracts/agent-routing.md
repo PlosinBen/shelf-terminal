@@ -98,8 +98,8 @@ or logical View closure; timers are cleared. Internal projections remain filtere
 lifetime. Renderer callers use existing snapshots to reconcile optimistic chips; error notices
 are historical submission errors, not a new persistent delivery-state UI.
 
-`configEdit` is not a message: it retains the existing queued execution-completion boolean,
-without a message id or receipt wait. Its separate session-control redesign is not implied here.
+The compatibility `configEdit` input retains its queued execution-completion boolean, without a
+message id or receipt wait. Status-bar selections use independent session control instead.
 
 ## Slash command dispatch
 
@@ -165,19 +165,47 @@ attachment's `mimeType`, or defaults to `image/png` when that hint is empty or a
 not decode, transcode, validate, or reject other image formats. Codex continues to use the uploaded
 path. Clipboard/file classification and renderer previews still follow their existing metadata.
 
-## Config edit (model / effort / canonical or native permission)
+## Session configuration control
 
-**Direction**: renderer → main → agent-server, as a structured no-prompt execution.
+Types/constants: `src/shared/agent-config-control.ts`; keys: `src/shared/config-ack.ts`.
+Status-bar picker selections invoke `agent.configure(tabId, request)` through `IPC.AGENT_CONFIGURE`:
 
-Picker / status-bar config changes do NOT build a slash string — they send a structured `configEdit` that converges on the provider's `applyConfigEdit` (`agent-config-flow#5`). Canonical Shelf permission uses `permissionMode`; a native strategy uses the dedicated `nativeMode` / `nativePermission` / `nativeApproval` keys advertised by capabilities.
+```ts
+{ requestId: '<control UUID>', key: 'effort', value: 'high' }
+// stdin
+{ type: 'configure_session', requestId: '<control UUID>', key: 'effort', value: 'high' }
+// stdout (progress, then one terminal result)
+{ type: 'configure_session_result', requestId: '<control UUID>', key: 'effort', value: 'high', state: 'deferred' }
+```
 
-- renderer → main: `IPC.AGENT_SEND` with `{ tabId, prompt: '', configEdit: { key: 'model' | 'effort' | 'permissionMode' | 'nativeMode' | 'nativePermission' | 'nativeApproval', value: string }, clientMsgId? }`.
-- main → agent-server: `sendLine({ type: 'send', executionId, provider, prompt: '', cwd, sessionId, configEdit: { key, value }, ... })` — `prompt` is empty; the provider applies the explicit edit through the existing FIFO. There is no per-message preference replay.
-- The provider applies it and emits a `system` divider; confirmed capabilities update the renderer, never optimistically. Model/effort persist from `currentModel` / `currentEffort`; Shelf-strategy permission persists from `currentPermissionMode`; native-strategy mode/permission persist from their descriptor `currentValue`. When `confirmedPrefs` is present, only that explicit patch persists; `{}` means display-only defaults. Providers without the field retain the existing snapshot-driven persistence. A failed edit emits no confirming capabilities and therefore writes no preference.
+Progress is `deferred` or `applying`, forwarded over `IPC.AGENT_CONFIG_CONTROL`. The invoke resolves
+with `ConfigControlUpdate`: terminal `confirmed`, `rejected`, or `uncertain`, with optional `error`.
+Deferred means accepted, not applied. The server's 30-second confirmation timeout starts at applying,
+not while waiting for current work. Main times out a missing initial/applying response after 35 seconds;
+deferred waiting has no execution-duration timeout. Neither layer automatically resends.
 
-Field type: `configEdit?: { key: ConfigEditKey; value: string }`, where `ConfigEditKey` is defined once in `src/shared/permission-controls.ts` and shared by `AgentQueryOptions`, `IncomingMessage`, and `QueryInput`.
+One unresolved direct control is allowed per View, across all keys. A provider chooses live application
+or an idle boundary. Both reserve a control slot outside message snapshots and prevent the next queued
+execution from starting until settled; message FIFO is unchanged. Direct controls create no message or
+execution IDs, pending chips, timeline entries, or execution status. Same-value no-ops still settle.
+Only confirmed capabilities update display and `Project.agentViews[sessionId].prefs` through the normal
+serialized mutation path. `confirmedPrefs` retains its provider-specific explicit-patch semantics.
+Confirmation does not promise that currently running inference adopted the setting.
 
-Configuration enters through initialization intent or an explicit edit. `ServerBackend` has no silent per-message preference setters. Ordinary input cannot overwrite live settings; provider-specific application stays inside its adapter (`agent-config-flow#14`).
+Definite pre-mutation rejection leaves the session usable. Unknown mutation outcome retains queued
+inputs and blocks subsequent execution starts until reconnect; it does not imply rollback. The UI
+requires active work to finish/stop and queued inputs to be cancelled before its Reconnect action,
+avoiding silent discard. Reconnect never resends the failed control. Main binds pending calls to the
+initialized process/epoch; renderer ignores stale IDs and progress after terminal results.
+
+Picker origin is explicit: status-bar selections use this control contract; no-argument `/model`,
+`/effort`, or `/permission` pickers retain their command name and submit `/<command> <value>` as a
+factory-created ordinary message, including queue projection/history. Native permission capability
+descriptors choose the picker options without exposing provider types to renderer.
+
+The supported compatibility input `{configEdit:{key,value}}` still uses `send` / `QueryInput.configEdit`
+as a no-prompt FIFO execution with provider acknowledgement. It is not the status-bar route.
+Ordinary input never carries settings overrides (`agent-config-flow#14`, `agent-config-flow#16`).
 
 ## picker_request (agent-server → renderer)
 

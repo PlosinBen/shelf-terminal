@@ -540,6 +540,21 @@ describe('Codex official app-server backend lifecycle', () => {
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
   });
 
+  it('confirms direct settings without execution or timeline events', async () => {
+    const app = new FakeAppServer();
+    const backend = createCodexBackend({ createAppServer: () => app });
+    try {
+      await backend.gatherCapabilities!('/repo', undefined, [{ id: 'gpt-5-codex' }]);
+      app.calls = [];
+      const out: OutgoingMessage[] = [];
+      expect(backend.configRequiresIdle!('model')).toBe(true);
+      await backend.configure!({ key: 'model', value: 'gpt-5-codex' }, m => out.push(m));
+      await backend.configure!({ key: 'model', value: 'gpt-5-codex' }, m => out.push(m));
+      expect(out.every(m => m.type === 'capabilities')).toBe(true);
+      expect(app.calls.map(c => c.method)).toEqual(['thread/settings/update']);
+    } finally { backend.dispose(); }
+  });
+
   it('rejects concurrent turns defensively and idles the rejected turn once', async () => {
     let release!: () => void;
     const app = new FakeAppServer({

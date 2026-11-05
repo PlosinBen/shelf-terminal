@@ -1,4 +1,5 @@
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
+import { CONFIG_CONTROL, type ConfigControlUpdate } from '@shared/agent-config-control';
 import { QUEUE_CANCEL, type QueueCancelResult } from '@shared/agent-queue-cancel';
 import { SHELF_MCP, type ShelfMcpStatus } from '@shared/shelf-mcp';
 export type StatusSegmentSeverity = 'normal' | 'info' | 'warning' | 'critical';
@@ -78,6 +79,7 @@ export type CanonicalMsgType =
  * parse case in `src/main/agent/remote.ts`.
  */
 export type OutgoingMessage = WireEnvelope & (
+  | ({ type: typeof CONFIG_CONTROL.RESPONSE } & ConfigControlUpdate)
   // ── Lifecycle (no executionId) ────────────────────────────────────────────────
   | { type: 'ready' }
   // pong echoes the heartbeat's `seq` so the client can correlate the ack to its
@@ -289,7 +291,7 @@ export interface QueryInput {
   attachments?: AgentAttachment[];
   sessionId?: string;
   /**
-   * Structured config edit (from a picker / status-bar click). When set, the
+   * Compatibility structured config execution. Status-bar changes use configure(). When set, the
    * provider applies it (set current value + emit capabilities + emit a
    * `system` divider) and returns WITHOUT running an SDK query — `prompt` is
    * empty for these executions. Converges UI config edits onto the same provider
@@ -423,6 +425,8 @@ export interface ReapableTask {
 }
 
 export interface ServerBackend {
+  configRequiresIdle?(key: ConfigEditKey): boolean;
+  configure?(edit: { key: ConfigEditKey; value: string }, send: SendFn): Promise<void>;
   query(input: QueryInput, send: SendFn): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;

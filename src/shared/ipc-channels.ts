@@ -189,6 +189,8 @@ export const IPC = {
    *  (fire-and-forget). Server drops it from its queue + re-emits AGENT_QUEUE.
    *  No-op once the message is running. See message-queue-ownership design. */
   AGENT_CANCEL_QUEUED: 'agent:cancel-queued',
+  AGENT_CONFIGURE: 'agent:configure-session',
+  AGENT_CONFIG_CONTROL: 'agent:config-control',
   /** Renderer hydration getter for the latest cached process-memory summary. */
   AGENT_MEMORY_USAGE_CURRENT: 'agent:memory-usage-current',
 
