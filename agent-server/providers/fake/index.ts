@@ -9,7 +9,8 @@ import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
-import { FAKE_TEST_ENV, FAKE_RETIRED_MODEL } from './test-env';
+import { FAKE_TEST_ENV, FAKE_RETIRED_MODEL, FAKE_FILE_CHANGES } from './test-env';
+import { translateCodexAppServerNotification } from '../codex/app-server-translate';
 import { SHELF_MCP, SHELF_MCP_STATE, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import type { AgentPrefs } from '@shared/types';
 import { DELEGATION as D, type AgentViewRef } from '@shared/agent-delegation';
@@ -45,6 +46,7 @@ const FAKE_AUTH_DISPLAY_NAME = 'Fake Harness';
  *                              msgId after query/idle (history-upsert fixture)
  *   thinking:<msg>      thinking message
  *   websearch:<query>   bodyless Web search markdown card
+ *   file_changes:<scenario>   Codex translator fixtures (see FAKE_FILE_CHANGES)
  *   tool:<name>         tool_use + tool_result success
  *   tool_err:<name>     tool_use + tool_result error
  *   subagent:<label>    outer Agent/Task tool_use card + inner steps tagged with
@@ -398,6 +400,36 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         label: 'Thinking',
         body: { content, tone: 'muted' },
       });
+      return;
+    }
+
+    if (Object.values(FAKE_FILE_CHANGES).some(scenario => scenario === step)) {
+      if (step === FAKE_FILE_CHANGES.LEGACY) {
+        send({ type: 'message', msgId: mintId('legacy-diff'), msgType: 'fold_diff', label: 'Legacy edit',
+          subtitle: 'legacy.ts', body: { diff: { oldString: 'legacy before', newString: 'legacy after' } } });
+        return;
+      }
+      const changes: Array<{ path: string; kind: { type: string; move_path?: string }; diff: string }> = [
+        { path: 'a.ts', kind: { type: 'update' }, diff: '@@ -2,3 +2,3 @@\n context\n-before\n+after\n end\n@@ -16,2 +16,3 @@\n-old\n+new\n+inserted\n tail\n' },
+        { path: 'b.ts', kind: { type: 'update' }, diff: '@@ -20 +20 @@\n-old-b\n+new-b\n' },
+      ];
+      if (step === FAKE_FILE_CHANGES.MIXED) changes.push(
+        { path: 'added.md', kind: { type: 'add' }, diff: '```\noriginal added content\n```\n' },
+        { path: 'deleted.ts', kind: { type: 'delete' }, diff: 'deleted content\n' },
+        { path: 'moved.ts', kind: { type: 'update', move_path: 'destination.ts' }, diff: 'move content' },
+        { path: 'invalid.ts', kind: { type: 'update' }, diff: '@@ -1,2 +1 @@\n-malformed\n+preserved\n' },
+      );
+      const item = { id: mintId('file-item'), type: 'fileChange', changes };
+      const status = step === FAKE_FILE_CHANGES.FAILED ? 'failed' : step === FAKE_FILE_CHANGES.DECLINED ? 'declined' : 'completed';
+      // Exercise actual translation, then normal wire/main/renderer upserts.
+      for (const [method, currentStatus] of [
+        ['item/started', 'inProgress'], ['item/updated', 'inProgress'],
+        ['item/completed', status], ['item/completed', status],
+      ]) {
+        for (const message of translateCodexAppServerNotification(method, { item: { ...item, status: currentStatus } })) send(message);
+      }
+      send({ type: 'message', msgId: mintId('markdown'), msgType: 'fold_markdown', label: 'Details',
+        body: { content: '**Ordinary Markdown stays expanded**' } });
       return;
     }
 

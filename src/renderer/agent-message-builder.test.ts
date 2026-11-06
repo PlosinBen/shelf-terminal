@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { CLAUDE_PROVIDER } from '@shared/agent-providers';
 import { buildAgentMsg } from './agent-message-builder';
 import type { AgentMsg } from './components/AgentMessage';
@@ -83,5 +83,29 @@ describe('buildAgentMsg', () => {
       const out = buildAgentMsg({ type: 'user', msgId: 'u3' }, CLAUDE_PROVIDER) as any;
       expect(out.content).toBe('');
     });
+  });
+});
+
+describe('File Diff renderer projection', () => {
+  it('retains all hunks and legacy string bodies', () => {
+    for (const diff of [
+      { hunks: [
+        { oldStart: 2, newStart: 2, oldLines: ['a'], newLines: ['b', 'c'] },
+        { oldStart: 10, newStart: 11, oldLines: ['x'], newLines: ['y'] },
+      ] },
+      { oldString: 'old\n', newString: 'new\n' },
+    ]) {
+      expect(buildAgentMsg({ type: 'fold_diff', msgId: 'edit', label: 'Edit', body: { diff } }, CLAUDE_PROVIDER))
+        .toMatchObject({ type: 'fold_diff', body: { diff } });
+    }
+  });
+  it('fails visibly on malformed data without losing the upstream error', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const out = buildAgentMsg({ type: 'fold_diff', msgId: 'bad', label: 'Edit', errorMessage: 'File change failed', body: { diff: { hunks: [] } } }, CLAUDE_PROVIDER);
+      expect(out).toMatchObject({ errorMessage: 'File change failed; Invalid file diff data' });
+      expect(out).not.toHaveProperty('body');
+      expect(warn).toHaveBeenCalledWith('Invalid diff body', expect.objectContaining({ msgId: 'bad' }));
+    } finally { warn.mockRestore(); }
   });
 });

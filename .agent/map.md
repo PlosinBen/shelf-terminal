@@ -146,6 +146,7 @@ title: shelf-terminal — Intent → File Index
 | Copilot usage E2E transport fixture | `providers/copilot/test-agent.ts` | 僅於測試替換模式提供實際 Copilot provider + mock ACP transport |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
 | Codex native controls | `providers/codex/native-controls.ts` | 原生選項、有效設定、managed 限制與 settings confirmation；不保存 project Prefs |
+| Codex File Changes | `providers/codex/file-changes.ts` | 完整 unified patch 解析、逐檔穩定 ID、多 hunk File Diff 與保留原文的逐檔 Markdown fallback |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：connection/initialize、new/resume/load（load replay suppression）、update translation、permission、capabilities、MCP 與測試 mock |
 | Provider session replacement transaction | `providers/acp/session-replacement.ts` | 以 opaque callbacks 編排 capture、invalidate、reset、establish 與 initialize 的 fail-closed helper |
 | Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |
@@ -280,6 +281,7 @@ title: shelf-terminal — Intent → File Index
 | Intent | File | Role |
 |--------|------|------|
 | 通用型別 | `types.ts` | Connection / AppSettings / PM types 與非 project-domain shared payloads |
+| File Diff body | `agent-diff.ts` | Legacy 字串／多 hunk 契約與跨 main、renderer 共用的完整 body 驗證 |
 | 共通 Agent 輸入 | `agent-input.ts` | Message／source／replyRequirement、factory 與跨 process 純驗證 |
 | Agent 提交結果契約 | `agent-submission.ts` | 可序列化 success／typed error 與 queue projection 常數 |
 | Agent queue 取消契約 | `agent-queue-cancel.ts` | 取消 RPC 的 wire 常數、timeout 與權威結果型別 |

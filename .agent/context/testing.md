@@ -98,3 +98,18 @@ factory，讓 `.mjs` probe 不需另一套 TypeScript runtime 或重複 Message 
 driver 的 send frames 經此 Caller adapter 轉成 inputMessage，控制 frames 原樣傳遞；
 image-only smoke 先建立暫存圖片附件，退出時清理。這些 live Claude／Copilot probe
 仍需要各自登入與執行環境，不能以 unit／fake-provider E2E 通過推定 live 模型通過。
+
+## File Diff verification
+
+`src/shared/agent-diff.test.ts` 驗 legacy／hunks body 及完整範圍驗證；Codex 的
+`file-changes.test.ts` 與 `app-server-translate.test.ts` 驗 unified parser、逐檔 ID、
+混合 fallback、原文完整性、遮罩與診斷。`codex/index.test.ts` 以 FakeAppServer 驗
+正式 started／completed 經真正 forwarding loop 發出每張卡片。Remote、renderer
+message-builder 與 agent-history unit 覆蓋跨層投影、非法 body fail-visible、同 ID
+upsert 與舊資料相容。
+
+`npm run test:e2e -- e2e/codex-provider-flow.spec.ts` 以 fake provider 將受控
+fileChange fixture 送進正式 translator，再走 wire／renderer／IndexedDB。案例涵蓋
+Markdown Expanded 與 File Diff Collapsed 的獨立設定、每檔收合、多 hunk 行號、
+重複通知、混合 fallback、failed／declined、重連歷史還原與 legacy body。
+這些測試不呼叫 live Codex，不證明真實模型或 app-server transport 的操作結果。

@@ -4400,6 +4400,20 @@ button {
 
 /* ── Agent Edit side-by-side diff ─────────────────────── */
 
+.agent-diff-hunk + .agent-diff-hunk {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.agent-diff-hunk-range {
+  color: var(--text-muted);
+  font-family: var(--font-mono, Menlo, monospace);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+
 .agent-diff-sbs {
   display: grid;
   grid-template-columns: 1fr 1fr;

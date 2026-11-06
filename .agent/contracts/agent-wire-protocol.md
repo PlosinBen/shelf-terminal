@@ -90,13 +90,35 @@ Body shape per variant:
 | `fold_text` | `{ content: string; tone?: 'muted' }?` | wrapped plain text (reasoning/prose); streams; `tone:'muted'` renders dim |
 | `fold_code` | `{ content: string }?` | monospace `<pre>`, markdown intentionally NOT parsed (shell stdout, file contents) |
 | `fold_markdown` | `{ content: string }?` | rendered markdown (slash output, MCP rich text, fenced code) |
-| `fold_diff` | `{ diff: { oldString: string; newString: string } }?` | side-by-side diff |
+| `fold_diff` | `{ diff: AgentDiff }?` | side-by-side diff; legacy strings or independently aligned hunks |
 
 ```jsonc
 { "type": "message", "msgId": "tool_abc",
   "msgType": "fold_diff", "label": "Edit src/app.ts", "subtitle": "src/app.ts",
   "body": { "diff": { "oldString": "const a = 1", "newString": "const a = 2" } } }
 ```
+
+`AgentDiff` in `src/shared/agent-diff.ts` also accepts `{ hunks: Array<{ oldStart,
+newStart, oldLines: string[], newLines: string[] }> }`. Each hunk renders separately
+with its original line numbers and a range heading; the entire file shares one
+card and the existing File Diff display setting. Omitted lines between hunks are
+never joined into synthetic contiguous text. `[]` means zero lines; `[""]` means
+one blank line. Legacy `{ oldString, newString }` bodies retain their existing
+rendering, including persisted history.
+
+Hunks must be nonempty, ordered, nonoverlapping, with equal omitted gaps on both
+sides. Starts and computed bounds are safe integers; nonempty sides start at 1
+or later, while zero-line sides use unified-diff insertion positions (0 allowed).
+Lines contain no CR/LF, and both sides cannot be empty. The two body formats cannot
+be mixed. Main and renderer validate the complete body with `readAgentDiff`;
+invalid data logs the message id/reason and displays `Invalid file diff data`,
+without silently dropping individual hunks or leaving a pending card. An absent
+body remains a valid pending card. A failed File Diff retains the existing error
+banner and hides its diff body.
+
+History saves either body shape unchanged; no database migration is needed.
+New clients read legacy bodies; old clients are not promised compatibility with
+hunks. Deployment uses the existing app-version-matched agent-server bundle.
 
 ```jsonc
 { "type": "message", "msgId": "tool_def",

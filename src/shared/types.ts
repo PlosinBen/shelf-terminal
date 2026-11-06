@@ -1,3 +1,4 @@
+import type { AgentDiff } from '@shared/agent-diff';
 import type { AgentInitRecovery } from './agent-init-recovery';
 import type { AgentInputAttachmentKind, AgentInputMessage } from './agent-input';
 
@@ -135,7 +136,7 @@ export type AgentMessage = WithMsgId & (
   | (FoldBase & { type: 'fold_text';     body?: { content: string; tone?: 'muted' } })
   | (FoldBase & { type: 'fold_code';     body?: { content: string } })
   | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
-  | (FoldBase & { type: 'fold_diff';     body?: { diff: { oldString: string; newString: string } } })
+  | (FoldBase & { type: 'fold_diff';     body?: { diff: AgentDiff } })
   | { type: 'user';    content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }
 );
 

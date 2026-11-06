@@ -152,6 +152,7 @@ closure. No collaboration history or restart recovery is maintained.
 - **Arrival order is presentation order.** New message ids append when received. Existing message ids are upserted in place so streaming deltas and final forms remain one timeline entry.
 - **The renderer timeline has no execution boundary.** Message visibility, DOM grouping, spacing, and insertion never depend on execution id or a derived start marker.
 - **The wire carries render primitives, not provider vocabulary.** Provider-specific update shapes are translated before crossing into renderer-facing state.
+- **File diffs preserve hunk boundaries.** Providers translate complete patches into one render card per file, retaining disjoint ranges and original line numbers. Unsupported patches retain their source in per-file Markdown cards. Main and renderer validate the generic diff body; rendering and history preserve each hunk, while collapse state belongs to the whole card.
 - **Every accepted send terminates its control reader.** Success, failure, cancellation, or queue removal must produce terminal control settlement so busy state and queued work cannot remain locked.
 - **Permission correlation is execution-local.** Tool permission requests use the active execution's response channel and tool-use id; this permission pointer is not a general content sink.
 - **The backend owns ordering.** The renderer submits eagerly and mirrors authoritative queue snapshots instead of guessing execution seams.

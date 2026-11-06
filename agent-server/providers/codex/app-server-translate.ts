@@ -1,4 +1,6 @@
 import type { OutgoingMessage, StatusSegment } from '../types';
+import { serverLog } from '../../server-logger';
+import { fileChangesToMessages } from './file-changes';
 
 export interface CodexAppServerTranslateOptions {
   redactValues?: string[];
@@ -139,7 +141,7 @@ function translateCompletedItem(params: unknown, opts: CodexAppServerTranslateOp
     return [commandExecutionToMessage(id, item, opts)];
   }
   if (itemType === 'fileChange' || itemType === 'file_change') {
-    return [fileChangeToMessage(id, item, opts)];
+    return fileChangeToMessages(id, item, opts);
   }
   if (itemType === 'mcpToolCall' || itemType === 'mcp_tool_call') {
     return [mcpToolCallToMessage(id, item, opts)];
@@ -180,82 +182,34 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
   };
 }
 
-function fileChangeToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {
-  const status = stringValue(item.status);
-  const diff = singleFileDiff(item.changes);
-  if (diff) {
-    return {
-      type: 'message',
-      msgId: id,
-      msgType: 'fold_diff',
-      label: 'File changes',
-      subtitle: redactText(diff.path, opts.redactValues),
-      ...(status === 'failed' ? { errorMessage: 'File change failed' } : {}),
-      ...(status === 'declined' ? { errorMessage: 'File change declined' } : {}),
-      body: { diff: { oldString: redactText(diff.oldString, opts.redactValues), newString: redactText(diff.newString, opts.redactValues) } },
-    };
+function fileChangeToMessages(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage[] {
+  const result = fileChangesToMessages(id, item);
+  for (const diagnostic of result.diagnostics) {
+    serverLog(diagnostic.level, 'codex-file-change', redactText(JSON.stringify(diagnostic), opts.redactValues));
   }
-  return {
-    type: 'message',
-    msgId: id,
-    msgType: 'fold_markdown',
-    label: 'File changes',
-    ...(status === 'failed' ? { errorMessage: 'File change failed' } : {}),
-    ...(status === 'declined' ? { errorMessage: 'File change declined' } : {}),
-    body: { content: redactText(renderFileChanges(item.changes), opts.redactValues) },
+  // Preserve hunk row counts even when an explicitly redacted value spans lines.
+  const redactLines = (lines: string[]) => {
+    if (!lines.length) return [];
+    let content = lines.join('\n');
+    for (const value of opts.redactValues ?? []) {
+      if (value) content = content.split(value).join(value.split('\n').map(() => '[REDACTED]').join('\n'));
+    }
+    return content.split('\n');
   };
-}
-
-function singleFileDiff(raw: unknown): { path: string; oldString: string; newString: string } | null {
-  const changes = asArray(raw).map(asRecord).filter((value): value is Record<string, unknown> => !!value);
-  if (changes.length !== 1) return null;
-  const change = changes[0];
-  const path = stringValue(change.path) ?? 'unknown';
-  const parsed = parseUnifiedDiff(stringValue(change.diff) ?? '');
-  return parsed ? { path, ...parsed } : null;
-}
-
-function parseUnifiedDiff(diff: string): { oldString: string; newString: string } | null {
-  if (!diff.trim() || !/^@@\s/m.test(diff)) return null;
-  const oldLines: string[] = [];
-  const newLines: string[] = [];
-  const lines = diff.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (line === '' && i === lines.length - 1) continue;
-    if (line.startsWith('@@') || line.startsWith('diff --git ') || line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) continue;
-    if (line.startsWith('-')) {
-      oldLines.push(line.slice(1));
-      continue;
+  return result.messages.map(message => {
+    if (message.type !== 'message') return message;
+    if (message.msgType === 'fold_diff' && message.body && 'hunks' in message.body.diff) {
+      return { ...message, subtitle: redactText(message.subtitle ?? '', opts.redactValues), body: { diff: {
+        hunks: message.body.diff.hunks.map(hunk => ({ ...hunk, oldLines: redactLines(hunk.oldLines), newLines: redactLines(hunk.newLines) })),
+      } } };
     }
-    if (line.startsWith('+')) {
-      newLines.push(line.slice(1));
-      continue;
+    if (message.msgType === 'fold_markdown') {
+      return { ...message, ...(message.subtitle ? { subtitle: redactText(message.subtitle, opts.redactValues) } : {}),
+        ...(message.body ? { body: { content: redactText(message.body.content, opts.redactValues) } } : {}),
+      };
     }
-    if (line.startsWith(' ')) {
-      const text = line.slice(1);
-      oldLines.push(text);
-      newLines.push(text);
-      continue;
-    }
-    if (line === '\\ No newline at end of file') continue;
-    // Some app-server snapshots contain raw file content instead of unified diff.
-    return null;
-  }
-  return { oldString: oldLines.join('\n'), newString: newLines.join('\n') };
-}
-
-function renderFileChanges(raw: unknown): string {
-  const lines: string[] = [];
-  for (const entry of asArray(raw)) {
-    const change = asRecord(entry);
-    const path = stringValue(change?.path) ?? 'unknown';
-    const kind = stringValue(change?.kind) ?? 'change';
-    const diff = stringValue(change?.diff);
-    lines.push(`- ${kind} \`${path}\``);
-    if (diff?.trim()) lines.push(`\`\`\`diff\n${diff}\n\`\`\``);
-  }
-  return lines.join('\n');
+    return message;
+  });
 }
 
 function mcpToolCallToMessage(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage {

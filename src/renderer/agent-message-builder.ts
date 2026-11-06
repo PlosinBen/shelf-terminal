@@ -1,3 +1,4 @@
+import { AGENT_DIFF_ERROR, readAgentDiff } from '@shared/agent-diff';
 import type { AgentMsg } from './components/AgentMessage';
 import { validateAgentInputMessage } from '@shared/agent-input';
 
@@ -85,16 +86,16 @@ function buildAgentMsgInner(msg: any, provider: string): AgentMsg | null {
           : {}),
         provider, timestamp: ts,
       };
-    case 'fold_diff':
+    case 'fold_diff': {
+      const checked = msg.body === undefined ? undefined : readAgentDiff(msg.body?.diff);
+      if (checked && !checked.ok) console.warn('Invalid diff body', { msgId: id, reason: checked.reason });
       return {
         id, type: 'fold_diff', ...foldBase(msg),
-        ...(msg.body && msg.body.diff
-          && typeof msg.body.diff.oldString === 'string'
-          && typeof msg.body.diff.newString === 'string'
-          ? { body: { diff: { oldString: msg.body.diff.oldString, newString: msg.body.diff.newString } } }
-          : {}),
+        ...(checked?.ok ? { body: { diff: checked.diff } } : {}),
+        ...(checked && !checked.ok ? { errorMessage: [msg.errorMessage, AGENT_DIFF_ERROR].filter(Boolean).join('; ') } : {}),
         provider, timestamp: ts,
       };
+    }
     default:
       return null;
   }

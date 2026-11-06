@@ -1,3 +1,4 @@
+import { AGENT_DIFF_ERROR, readAgentDiff } from '@shared/agent-diff';
 import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_CONTROL as CC, validConfigControl, isConfigControlPending, type ConfigControlUpdate } from '@shared/agent-config-control';
 import { QUEUE_CANCEL as C, type QueueCancelResult } from '@shared/agent-queue-cancel';
@@ -1502,6 +1503,8 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
     }
     case 'fold_diff': {
       if (typeof msg.label !== 'string') return null;
+      const checked = msg.body === undefined ? undefined : readAgentDiff(msg.body?.diff);
+      if (checked && !checked.ok) log.warn('agent-diff', 'Invalid diff body', { msgId, reason: checked.reason });
       return {
         msgId,
         type: 'fold_diff',
@@ -1509,11 +1512,8 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
         ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
         ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),
         ...parent,
-        ...(msg.body && msg.body.diff
-          && typeof msg.body.diff.oldString === 'string'
-          && typeof msg.body.diff.newString === 'string'
-          ? { body: { diff: { oldString: msg.body.diff.oldString, newString: msg.body.diff.newString } } }
-          : {}),
+        ...(checked?.ok ? { body: { diff: checked.diff } } : {}),
+        ...(checked && !checked.ok ? { errorMessage: [msg.errorMessage, AGENT_DIFF_ERROR].filter(Boolean).join('; ') } : {}),
       };
     }
     default:

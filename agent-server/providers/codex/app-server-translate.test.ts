@@ -2,6 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { summarizeTokenUsageForLog, tokenUsageToContextSegment, translateCodexAppServerNotification } from './app-server-translate';
 
 describe('translateCodexAppServerNotification', () => {
+  // File Diff settings must govern the whole file, including separated edits.
+  // Keep this representative case across provider, wire and UI coverage.
+  it('splits multiple files into file diff cards without joining separated hunks', () => {
+    const messages = translateCodexAppServerNotification('item/completed', {
+      item: { id: 'multi-file', type: 'fileChange', status: 'completed', changes: [
+        { path: 'a.ts', kind: { type: 'update' }, diff: '@@ -2,3 +2,3 @@\n context\n-before\n+after\n end\n@@ -16,2 +16,3 @@\n-old\n+new\n+inserted\n tail\n' },
+        { path: 'b.ts', kind: { type: 'update' }, diff: '@@ -20 +20 @@\n-old-b\n+new-b\n' },
+      ] },
+    });
+    expect(messages).toMatchObject([
+      { msgType: 'fold_diff', subtitle: 'a.ts', body: { diff: { hunks: [
+        { oldStart: 2, newStart: 2, oldLines: ['context', 'before', 'end'], newLines: ['context', 'after', 'end'] },
+        { oldStart: 16, newStart: 16, oldLines: ['old', 'tail'], newLines: ['new', 'inserted', 'tail'] },
+      ] } } },
+      { msgType: 'fold_diff', subtitle: 'b.ts', body: { diff: { hunks: [
+        { oldStart: 20, newStart: 20, oldLines: ['old-b'], newLines: ['new-b'] },
+      ] } } },
+    ]);
+  });
   it('maps agent message deltas to text stream chunks', () => {
     expect(translateCodexAppServerNotification('item/agentMessage/delta', {
       itemId: 'item-1',
@@ -131,48 +150,26 @@ describe('translateCodexAppServerNotification', () => {
     ]);
   });
 
-  it('maps a single unified file change to a fold_diff card', () => {
-    expect(translateCodexAppServerNotification('item/completed', {
-      item: {
-        id: 'file-1',
-        type: 'fileChange',
-        status: 'completed',
-        changes: [
-          { path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new\n' },
-        ],
-      },
-    })).toEqual([
-      {
-        type: 'message',
-        msgId: 'file-1',
-        msgType: 'fold_diff',
-        label: 'File changes',
-        subtitle: 'a.ts',
-        body: { diff: { oldString: 'old', newString: 'new' } },
-      },
-    ]);
+  it('maps a single object-kind update to a hunk diff', () => {
+    expect(translateCodexAppServerNotification('item/completed', { item: {
+      id: 'file-1', type: 'fileChange', status: 'completed', changes: [
+        { path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-old\n+new\n' },
+      ],
+    } })).toMatchObject([{ msgType: 'fold_diff', subtitle: 'a.ts', body: { diff: { hunks: [
+      { oldStart: 1, newStart: 1, oldLines: ['old'], newLines: ['new'] },
+    ] } } }]);
   });
 
-  it('falls back to markdown for multi-file or non-unified file changes', () => {
-    expect(translateCodexAppServerNotification('item/completed', {
-      item: {
-        id: 'file-1',
-        type: 'fileChange',
-        status: 'completed',
-        changes: [
-          { path: 'a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' },
-          { path: 'b.ts', kind: 'add', diff: '' },
-        ],
-      },
-    })).toEqual([
-      {
-        type: 'message',
-        msgId: 'file-1',
-        msgType: 'fold_markdown',
-        label: 'File changes',
-        body: { content: '- update `a.ts`\n```diff\n@@ -1 +1 @@\n-old\n+new\n```\n- add `b.ts`' },
-      },
-    ]);
+  it('redacts file paths and multiline content without losing hunk row counts', () => {
+    const out = translateCodexAppServerNotification('item/completed', { item: {
+      id: 'redact', type: 'fileChange', changes: [
+        { path: '/secret/a.ts', kind: { type: 'update' }, diff: '@@ -1,2 +1,2 @@\n-one\n-two\n+three\n+four\n' },
+      ],
+    } }, { redactValues: ['/secret', 'one\ntwo'] });
+    expect(out).toMatchObject([{ subtitle: '[REDACTED]/a.ts', body: { diff: { hunks: [
+      { oldLines: ['[REDACTED]', '[REDACTED]'], newLines: ['three', 'four'] },
+    ] } } }]);
+    expect(JSON.stringify(out)).not.toContain('/secret');
   });
 
   it('maps MCP and dynamic tool calls to markdown cards', () => {

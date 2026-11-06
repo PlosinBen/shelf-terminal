@@ -9,3 +9,11 @@ export const FAKE_TEST_ENV = {
 } as const;
 
 export const FAKE_RETIRED_MODEL = 'fake-retired-model';
+
+export const FAKE_FILE_CHANGES = {
+  SUCCESS: 'file_changes:success',
+  MIXED: 'file_changes:mixed',
+  FAILED: 'file_changes:failed',
+  DECLINED: 'file_changes:declined',
+  LEGACY: 'file_changes:legacy',
+} as const;

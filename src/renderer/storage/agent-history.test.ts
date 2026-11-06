@@ -106,6 +106,22 @@ describe('agent history persistence', () => {
     expect(db.createObjectStore).toHaveBeenCalledExactlyOnceWith('pending-cleanup', { keyPath: 'sessionId' });
   });
 
+  it('saves every hunk on same-id replacement and preserves legacy diff rows', async () => {
+    const pending: AgentMsg = { id: 'hunks', type: 'fold_diff', label: 'Edit', timestamp: 10 };
+    const completed: AgentMsg = { ...pending, body: { diff: { hunks: [
+      { oldStart: 2, newStart: 2, oldLines: ['a'], newLines: ['b', 'c'] },
+      { oldStart: 10, newStart: 11, oldLines: ['x'], newLines: ['y'] },
+    ] } } };
+    const legacy: AgentMsg = { id: 'legacy', type: 'fold_diff', label: 'Edit', timestamp: 9,
+      body: { diff: { oldString: 'old', newString: 'new' } } };
+    await saveAgentMessagesDelta('diff-session', [legacy, pending]);
+    await saveAgentMessagesDelta('diff-session', [completed]);
+    expect(fakeIdb.rows).toHaveLength(2);
+    expect(fakeIdb.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining(completed), expect.objectContaining(legacy),
+    ]));
+  });
+
   it('updates an existing session/message row instead of appending another snapshot', async () => {
     await saveAgentMessagesDelta('session-1', [reply('first')]);
     await saveAgentMessagesDelta('session-1', [reply('first plus late content')]);

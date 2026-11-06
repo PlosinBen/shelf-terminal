@@ -1,3 +1,4 @@
+import type { AgentDiff } from '@shared/agent-diff';
 import React, { useState, useMemo, useContext } from 'react';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
@@ -41,7 +42,7 @@ export type AgentMsg = {
   | (FoldBase & { type: 'fold_text';     body?: { content: string; tone?: 'muted' }; streaming?: boolean })
   | (FoldBase & { type: 'fold_code';     body?: { content: string } })
   | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
-  | (FoldBase & { type: 'fold_diff';     body?: { diff: { oldString: string; newString: string } } })
+  | (FoldBase & { type: 'fold_diff';     body?: { diff: AgentDiff } })
   | { type: 'user'; content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }
 );
 
@@ -51,10 +52,10 @@ function truncateLines(text: string, max: number): { lines: string[]; remaining:
   return { lines: all.slice(0, max), remaining: all.length - max };
 }
 
-function SideBySideDiff({ rows }: { rows: DiffRow[] }) {
-  // Walk rows once to compute snippet-relative line numbers per side.
-  let oldLine = 0;
-  let newLine = 0;
+function SideBySideDiff({ rows, oldStart = 1, newStart = 1 }: { rows: DiffRow[]; oldStart?: number; newStart?: number }) {
+  // Legacy snippets start at 1; hunks supply their original file positions.
+  let oldLine = oldStart - 1;
+  let newLine = newStart - 1;
   const annotated = rows.map((row) => {
     const showOld = row.old !== null;
     const showNew = row.new !== null;
@@ -291,13 +292,17 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
               are transient intermediate states the agent itself retries; the
               red banner + header are enough to signal "this attempt failed". */}
           {isExpanded && !hasError && message.body?.diff && (() => {
-            const rows = alignLineDiff(
-              message.body.diff.oldString.split('\n'),
-              message.body.diff.newString.split('\n'),
-            );
+            const diff = message.body.diff;
             return (
               <div className="fold-body fold-body-diff">
-                <SideBySideDiff rows={rows} />
+                {'hunks' in diff ? diff.hunks.map((hunk, index) => (
+                  <div className="agent-diff-hunk" key={index}>
+                    <div className="agent-diff-hunk-range">
+                      {`@@ -${hunk.oldStart},${hunk.oldLines.length} +${hunk.newStart},${hunk.newLines.length} @@`}
+                    </div>
+                    <SideBySideDiff rows={alignLineDiff(hunk.oldLines, hunk.newLines)} oldStart={hunk.oldStart} newStart={hunk.newStart} />
+                  </div>
+                )) : <SideBySideDiff rows={alignLineDiff(diff.oldString.split('\n'), diff.newString.split('\n'))} />}
               </div>
             );
           })()}

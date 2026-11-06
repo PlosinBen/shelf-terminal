@@ -1,3 +1,4 @@
+import type { AgentDiff } from '@shared/agent-diff';
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_CONTROL, type ConfigControlUpdate } from '@shared/agent-config-control';
 import { QUEUE_CANCEL, type QueueCancelResult } from '@shared/agent-queue-cancel';
@@ -274,7 +275,7 @@ export type OutgoingMessage = WireEnvelope & (
   | {
       type: 'message'; msgId: string; msgType: 'fold_diff';
       label: string; subtitle?: string; errorMessage?: string;
-      body?: { diff: { oldString: string; newString: string } }; parentToolUseId?: string;
+      body?: { diff: AgentDiff }; parentToolUseId?: string;
     }
 );
 

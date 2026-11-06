@@ -677,6 +677,24 @@ describe('Codex official app-server backend lifecycle', () => {
     await running;
   });
 
+  it('forwards all file cards with stable IDs from started through declined', async () => {
+    const changes = ['a.ts', 'b.ts'].map(path => ({ path, kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-old\n+new\n' }));
+    const app = new FakeAppServer({ 'turn/start': async () => {
+      app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+      app.fire('item/started', { item: { id: 'files', type: 'fileChange', status: 'inProgress', changes } });
+      app.fire('item/completed', { item: { id: 'files', type: 'fileChange', status: 'declined', changes } });
+      app.fire('turn/completed', turnCompleted('turn-1'));
+      return { turn: { id: 'turn-1' } };
+    } });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'edit files', cwd: '/repo' }, m => out.push(m));
+    const cards = out.filter((m): m is Extract<OutgoingMessage, { msgType: 'fold_diff' }> => m.type === 'message' && m.msgType === 'fold_diff');
+    expect(cards).toHaveLength(4);
+    expect(cards.slice(0, 2).map(m => m.msgId)).toEqual(cards.slice(2).map(m => m.msgId));
+    expect(cards.slice(2).map(m => m.errorMessage)).toEqual(['File change declined', 'File change declined']);
+  });
+
   it('uses commandExecution outputDelta as command card result when completed item has no aggregate output', async () => {
     const app = new FakeAppServer({
       'turn/start': async () => {

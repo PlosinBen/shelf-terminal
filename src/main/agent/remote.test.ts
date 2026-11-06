@@ -774,3 +774,25 @@ describe('parseRemoteMessage — mid-execution capabilities', () => {
     });
   });
 });
+
+describe('File Diff wire projection', () => {
+  it('preserves every hunk through main and keeps the legacy body readable', async () => {
+    const { parseRemoteMessage } = await import('./remote');
+    const bodies = [
+      { diff: { hunks: [
+        { oldStart: 1, newStart: 1, oldLines: ['a'], newLines: ['b', 'c'] },
+        { oldStart: 10, newStart: 11, oldLines: ['x'], newLines: ['y'] },
+      ] } },
+      { diff: { oldString: 'old', newString: 'new' } },
+    ];
+    for (const body of bodies) {
+      expect(parseRemoteMessage({ type: 'message', msgType: 'fold_diff', msgId: 'edit', label: 'Edit', body }))
+        .toMatchObject({ type: 'message', payload: { type: 'fold_diff', body } });
+    }
+  });
+  it('surfaces malformed hunks instead of manufacturing a pending card', async () => {
+    const { parseRemoteMessage } = await import('./remote');
+    expect(parseRemoteMessage({ type: 'message', msgType: 'fold_diff', msgId: 'bad', label: 'Edit', body: { diff: { hunks: [{}] } } }))
+      .toMatchObject({ payload: { errorMessage: 'Invalid file diff data' } });
+  });
+});

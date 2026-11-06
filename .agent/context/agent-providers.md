@@ -631,3 +631,15 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Do not change casually because**：不要把抑制搬進共用 translator，或以觀測樣本推定所有 model 的 limit、cost、AI-credit 或通知時序。後續整合仍須驗證 finite/nonnegative used、positive size 與資料一致性，並涵蓋 malformed、missing、early 與 late arrival；不能把缺資料當成零。
 
 **Related**：`agent-providers#25`、`agent-providers#26`、`architecture/agent-execution`、`agent-server/providers/copilot/usage-observation.ts`、`e2e/copilot-usage-observation.spec.ts`。
+
+## agent-providers#54 — Codex File Changes 逐檔使用既有 File Diff，多 hunk 共用收合  ·  [Decision]
+
+**Decision**：Codex 完整 `fileChange` snapshot 的一般 update（無 move）解析成每檔一張 `fold_diff`，同檔各 hunk 保留行陣列與兩側起始行號，卡片內分段呈現。沿用 File Diff display 設定，不新增 display type，也不改普通 Markdown 設定。舊字串 diff 與歷史保持相容。Failed／declined 沿用既有 errorMessage 與錯誤呈現，不額外切換成 Markdown。
+
+**Identity／lifecycle**：Pinned Codex 0.163.0 的正式 started／completed clone 相同 changes，並沿用 item ID；逐檔 ID 由獨立 namespace 與 `[itemId, rawPath]` 的 SHA-256 決定，不依陣列位置或狀態。重複通知與重排因此 upsert 同一張卡片，fallback 與 diff 也共用 ID。既有 `item/updated` 相容入口只接受完整且成員不變的 snapshot；正式部分 patch 事件 `item/fileChange/patchUpdated` 不在此路徑處理。升級若改變 snapshot membership，須重新查證生命週期。
+
+**Fallback／diagnostics**：Add、delete、move、CRLF、EOF marker 與不合法 unified patch 逐檔保留原始內容為 Markdown；整檔解析失敗不得只輸出成功的部分 hunk。Code fence 長度超過原文最長 backtick run，保留空白。缺 path／非物件 entry 以 item + index 的異常 namespace 保留原始 JSON；重複 path 合併保留所有 entries；空／非法 changes 顯示明確說明。預期範圍外格式記 debug，畸形資料記 warn，包含遮罩後的 item/path/index/reason，不寫 patch 全文。
+
+**Reason**：多檔 Markdown 會佔據大量畫面，且不受 File Diff 收合設定控制。每 hunk 一卡不能一次收合同檔；串接不連續 hunk 則會假造相鄰內容與錯誤行號。通用多 hunk body 同時滿足每檔收合與資料正確性，無需 renderer 感知 provider。
+
+**Related**：`contracts/agent-wire-protocol`、`agent-server/providers/codex/file-changes.ts`、`src/shared/agent-diff.ts`、`context/testing`。
