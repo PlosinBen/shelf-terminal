@@ -1,11 +1,19 @@
 import { test, expect, openAgentTab, sendAgentPrompt } from './helpers';
 import { _electron as electron, type Page } from '@playwright/test';
 import path from 'node:path';
+import fs from 'node:fs';
 import { IPC } from '../src/shared/ipc-channels';
 import { FAKE_TEST_ENV } from '../agent-server/providers/fake/test-env';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 test.use({ nativePermissions: true });
+test.afterEach(async ({ shelfApp: { userDataDir } }, info) => {
+  const root = path.join(userDataDir, 'logs');
+  if (info.status !== info.expectedStatus && fs.existsSync(root)) {
+    const logs = fs.readdirSync(root, { recursive: true }).filter(name => String(name).endsWith('.log'));
+    for (const name of logs) await info.attach('main-log', { body: fs.readFileSync(path.join(root, String(name))), contentType: 'text/plain' });
+  }
+});
 async function setup(page: Page) {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
   await page.locator('.conn-btn-next').click();

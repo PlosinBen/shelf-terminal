@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openAgentTab, sendAgentPrompt } from './helpers';
+import { FAKE_TEST_ENV } from '../agent-server/providers/fake/test-env';
 
 // Real Shelf main/app-tool/exec queue, fake model only. Result arrival must never
 // create a main turn; A -> collect -> B reuses the same authorized delegation.
@@ -11,8 +12,10 @@ test.describe('worktree Agent delegation', () => {
   test.describe.configure({ timeout: 90_000 });
   let root: string, userData: string, app: ElectronApplication, page: Page;
   async function launch() {
+    // Exercise startup readiness on every run; idle alone must not let the
+    // requester snapshot a target whose capabilities are still loading.
     app = await electron.launch({ args: [path.join(__dirname, '..'), `--user-data-dir=${userData}`],
-      env: { ...process.env, NODE_ENV: 'test', SHELF_TEST_MODE: '1' } });
+      env: { ...process.env, NODE_ENV: 'test', SHELF_TEST_MODE: '1', [FAKE_TEST_ENV.CAPS_DELAY]: '1500' } });
     page = await app.firstWindow(); await page.waitForSelector('.app');
   }
   async function main() {
@@ -38,13 +41,29 @@ test.describe('worktree Agent delegation', () => {
     await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(1);
     await openAgentTab(page);
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+    await expect(page.locator('.agent-textarea:visible')).toBeEditable();
     await page.locator('.sidebar-item.worktree-child').click();
     await page.locator('.connect-prompt').click();
     await openAgentTab(page);
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+    // Idle describes execution, not initialization. Establish readiness before
+    // opening the picker, whose candidate availability is a point-in-time snapshot.
+    await expect(page.locator('.agent-textarea:visible')).toBeEditable();
     await main();
   });
-  test.afterEach(async () => { await app?.close().catch(() => {}); fs.rmSync(root, { recursive: true, force: true }); });
+  test.afterEach(async ({}, info) => {
+    try {
+      const logsRoot = path.join(userData, 'logs');
+      if (info.status !== info.expectedStatus && fs.existsSync(logsRoot)) {
+        for (const name of fs.readdirSync(logsRoot, { recursive: true }).filter(name => String(name).endsWith('.log'))) {
+          await info.attach('main-log', { body: fs.readFileSync(path.join(logsRoot, String(name))), contentType: 'text/plain' });
+        }
+      }
+    } finally {
+      await app?.close().catch(() => {});
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
   async function selectAndStart() {
     await sendAgentPrompt(page, 'delegation_select');
     const picker = page.getByRole('dialog', { name: 'Select delegated Agent' });

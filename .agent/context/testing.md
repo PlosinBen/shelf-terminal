@@ -40,7 +40,10 @@ UI Rescan 恢復，不 mock scan 結果。不要在 Connect 前移走目錄，�
 `npm run test:e2e -- e2e/agent-delegation.spec.ts` 使用真 temporary Git worktree 與
 fake provider 的正式 callMain，走 picker → main service → exec queue → 雙端 UI。
 涵蓋 A→B 接續、結果不自動觸發 main、介入／停止、未提取結果的關閉提醒與重啟
-清空。這不是 live 模型的工具選擇／approval 或 SSH／Docker／WSL 部署證明。
+清空。Fixture 用 fake capabilities delay 保護啟動 readiness 等待：`idle` 只表示
+沒有執行中的 turn，picker 建立候選快照前必須等兩端 input ready。失敗時保存
+main log，避免 fixture 清理 userData 後丟失初始化證據。這不是 live 模型的工具選擇／
+approval 或 SSH／Docker／WSL 部署證明。
 
 ## testing#1 — Promise-bearing tests explain the contract they protect  ·  [Decision]
 
@@ -49,6 +52,16 @@ fake provider 的正式 callMain，走 picker → main service → exec queue �
 **Reason:** Cross-layer tests often look overly specific when read after their original feature context is gone. Recording the contract next to the assertions lets a future reader distinguish deliberate compatibility and safety coverage from replaceable mechanics without coupling the test to transient planning notes or exact prose snapshots.
 
 **Do not change casually because:** Removing or weakening an unexplained assertion can silently break a promise exposed on another surface. Requiring the annotation everywhere would add noise and make the genuinely load-bearing explanations harder to notice.
+
+## testing#2 — Local Electron overrides can change unrelated installed dependencies  ·  [Gotcha]
+
+`npm install --no-save --package-lock=false electron@<version>` can re-resolve other semver
+ranges even though tracked manifests remain unchanged. The runtime-version tests compare
+installed provider packages with pinned deployment versions, so this drift can fail verification
+without a source change. For an Electron-only local override, preserve the lockfile-resolved
+dependency tree and verify installed versions as well as the Electron package and binary.
+Reusing an isolated Electron package requires checking that its dependencies are satisfied by
+the locked tree. A clean package diff alone does not establish an Electron-only environment.
 
 ## Shelf MCP verification
 
@@ -64,6 +77,8 @@ main operation 映射與錯誤回傳。兩者都不呼叫真實模型，也不�
 `e2e/agent-flows.spec.ts` 的 add-tab menu 案例驗證明確 provider 選擇、總 tab
 上限與同 provider 雙 View 的獨立對話；已開啟某 provider 不會禁用其 menu。
 Default／prefs／reconnect 的多 View 隔離由 `e2e/multi-agent-views.spec.ts` 覆蓋。
+Project editor 新增同 provider startup rows 的穩定 session bindings、磁碟保存與
+reconnect 由 `e2e/features.spec.ts` 覆蓋；multi-View 案例失敗時同樣保存 main log。
 兩者使用 fake provider，不代表 live provider 已通過驗證。
 
 `components/agent/AgentInputSourceHeader.test.ts` 驗來源標籤映射、無 metadata 的舊資料

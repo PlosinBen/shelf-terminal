@@ -154,7 +154,7 @@ test('project edit default tabs can add and remove', async ({ shelfApp: { page }
   await page.locator('.settings-close').click();
 });
 
-test('project edit adds Agent startup rows and rejects duplicate providers only on Save', async ({ shelfApp: { page } }) => {
+test('project edit adds Agent startup rows with separate same-provider bindings across reconnect', async ({ shelfApp: { page, userDataDir } }) => {
   await ensureConnected(page);
 
   const item = page.locator('.sidebar-item').first();
@@ -170,24 +170,45 @@ test('project edit adds Agent startup rows and rejects duplicate providers only 
     has: page.locator('.default-tab-kind-agent'),
   });
   await expect(agentRows).toHaveCount(2);
-  const firstProvider = await agentRows.nth(0).locator('.default-tab-provider').inputValue();
-  await expect(agentRows.nth(1).locator('.default-tab-provider')).toHaveValue(firstProvider);
-
-  await editPanel.locator('.project-edit-footer .conn-btn-next').click();
-  await expect(editPanel).toBeVisible();
-  await expect(editPanel.locator('.default-tabs-error')).toContainText('selected more than once');
-
-  await agentRows.nth(1).locator('.default-tab-provider').selectOption('copilot');
-  await agentRows.nth(1).locator('.default-tab-name').fill('Copilot');
+  const names = ['Startup Implementer', 'Startup Reviewer'];
+  for (const [index, name] of names.entries()) {
+    await agentRows.nth(index).locator('.default-tab-provider').selectOption(CLAUDE_PROVIDER);
+    await agentRows.nth(index).locator('.default-tab-name').fill(name);
+  }
   await editPanel.locator('.project-edit-footer .conn-btn-next').click();
   await expect(editPanel).not.toBeVisible({ timeout: 3_000 });
 
+  // Same-provider startup Views own separate stable sessions. Review the Project
+  // and persistence contracts if this changes: visible tabs alone cannot prove
+  // their bindings survive Save and reconnect without sharing or replacing a session.
+  const saved = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
+  const savedAgents = saved.defaultTabs.filter(tab => tab.kind === 'agent');
+  expect(savedAgents.map(tab => tab.name)).toEqual(names);
+  for (const tab of savedAgents) {
+    expect(tab.provider).toBe(CLAUDE_PROVIDER);
+    expect(tab.sessionId).toEqual(expect.stringMatching(/\S/));
+    expect(saved.agentViews[tab.sessionId!].provider).toBe(CLAUDE_PROVIDER);
+  }
+  expect(savedAgents[0].sessionId).not.toBe(savedAgents[1].sessionId);
+  await expect.poll(() => {
+    const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf-8'));
+    const project = document.projects.find((project: { id: string }) => project.id === saved.id);
+    return { defaultTabs: project?.defaultTabs, agentViews: project?.agentViews };
+  }).toEqual({ defaultTabs: saved.defaultTabs, agentViews: saved.agentViews });
+
   await item.click({ button: 'right' });
   await page.locator('.context-menu-item', { hasText: 'Disconnect' }).click();
+  await expect(page.locator('.connect-prompt')).toBeVisible({ timeout: 5_000 });
   await page.locator('.connect-prompt').click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(3, { timeout: 8_000 });
-  await expect(page.locator('.tab-bar .tab', { hasText: 'Claude' })).toHaveCount(1);
-  await expect(page.locator('.tab-bar .tab', { hasText: 'Copilot' })).toHaveCount(1);
+  for (const name of names) {
+    await expect(page.locator('.tab-bar .tab', { hasText: name })).toBeVisible();
+  }
+  const reconnected = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
+  expect(reconnected.defaultTabs).toEqual(saved.defaultTabs);
+  for (const tab of savedAgents) {
+    expect(reconnected.agentViews[tab.sessionId!].provider).toBe(CLAUDE_PROVIDER);
+  }
 });
 
 test('project edit: a web default tab is added, persists, and opens as a web tab on connect', async ({ shelfApp: { page } }) => {
