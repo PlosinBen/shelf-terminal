@@ -99,3 +99,20 @@ editor drafts are outside the guarantee; never describe this as saving all app d
   them without removing tabs. Main's reload shortcut is also blocked while exit preparation is pending.
 - `quitAndInstall` must run inside the approved commit callback, not before the gate or merely after an
   install-confirmation dialog. Shutdown is idempotent because lifecycle events can converge.
+
+## keybindings-shell#8 — Connect-prompt autofocus must preserve overlay focus  ·  [Decision]
+
+**Decision:** A disconnected Project's connect prompt uses a stable callback ref and a Project
+identity key. Autofocus runs on prompt mount/Project switch or when a blocking overlay closes;
+Quick Note, Settings, Command Picker, Project Edit and exit preparation suppress it while open.
+Unrelated store updates must preserve the current input focus and draft.
+
+**Reason:** An inline callback ref is replaced on each App render. React reattaches it, so an
+unconditional `.focus()` steals focus from Quick Note after sidebar or background state updates.
+Quick Note focuses only when opened and cannot repair this later focus loss. Keeping callback
+identity tied only to the blocked state preserves Enter-to-connect after an overlay closes.
+
+**Do not change casually because:** A mount-only callback without overlay transitions loses
+keyboard focus restoration; repeatedly refocusing Quick Note leaves competing focus owners.
+Notes E2E covers sidebar updates, disconnected Project switches with an open draft, and
+Enter-to-connect after closing the overlay.

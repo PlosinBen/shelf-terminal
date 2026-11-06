@@ -172,6 +172,54 @@ test.describe('Notes panel', () => {
 
   // ── Quick Note overlay ──
 
+  test('Quick Note keeps focus across sidebar updates', async () => {
+    await page.keyboard.press(`${modifier}+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused();
+    await page.keyboard.type('before');
+
+    // App/store updates must not let the disconnected Project's prompt take
+    // focus from an open overlay; typing must continue into the same draft.
+    await page.keyboard.press(`${modifier}+Shift+b`);
+    await expect(page.locator('.sidebar')).not.toBeVisible();
+    await expect(textarea).toBeFocused();
+    await page.keyboard.type(' after');
+    await expect(textarea).toHaveValue('before after');
+    await page.keyboard.press(`${modifier}+Shift+b`);
+    await expect(page.locator('.sidebar')).toBeVisible();
+    await expect(textarea).toBeFocused();
+  });
+
+  test('disconnected Project switches preserve overlay focus and restore Enter to connect', async () => {
+    await page.evaluate(cwd => window.shelfApi.project.add({
+      name: 'Second Notes Test', cwd, connection: { type: 'local' }, maxTabs: 5,
+    }), userDataDir);
+    await page.reload();
+    await expect(page.locator('.sidebar-item')).toHaveCount(2);
+    await page.locator('.sidebar-item').nth(0).click();
+    await page.locator('.sidebar-item').nth(1).click();
+    const prompt = page.locator('.connect-prompt');
+    await expect(prompt).toContainText('Second Notes Test');
+    await expect(prompt).toBeFocused();
+
+    await page.keyboard.press(`${modifier}+n`);
+    const textarea = page.locator('.quick-note-textarea');
+    await expect(textarea).toBeFocused();
+    await page.keyboard.type('keep this draft');
+    await page.keyboard.press(`${modifier}+ArrowUp`);
+    await expect(page.locator('.sidebar-item.active')).toContainText('Notes Test');
+    await expect(page.locator('.quick-note-project')).toHaveText('Notes Test');
+    await expect(textarea).toBeFocused();
+    await expect(textarea).toHaveValue('keep this draft');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.quick-note-overlay')).not.toBeVisible();
+    await expect(prompt).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+    await expect(prompt).not.toBeVisible();
+  });
+
   test('mod+n opens quick note overlay', async () => {
     await page.keyboard.press(`${modifier}+n`);
     const overlay = page.locator('.quick-note-overlay');

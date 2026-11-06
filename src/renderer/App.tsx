@@ -4,7 +4,7 @@ import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
 import { debugLog } from './debugLog';
 import { createPrefRecovery } from './agent-model-recovery';
 import { PROJECT_MUTATION, type ProjectMutation, type ProjectMutationResult } from '@shared/project-mutations';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TabBar } from './components/TabBar';
 import { TerminalView } from './components/TerminalView';
@@ -190,7 +190,7 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
 }
 
 export function App() {
-  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode, worktreeScans, appExitPreparing } = useStore();
+  const { projects, activeProjectIndex, activeProjectId, sidebarVisible, settingsVisible, commandPickerVisible, devToolsVisible, notesVisible, skillsVisible, mcpVisible, backupVisible, editingProjectIndex, settings, pmVisible, awayMode, worktreeScans, appExitPreparing, quickNoteVisible } = useStore();
   useKeybindings();
 
   useEffect(() => {
@@ -925,6 +925,13 @@ export function App() {
 
   const activeProject = projects[activeProjectIndex] ?? null;
   const stableProjectViews = listStableProjectViews();
+  const connectPromptFocusBlocked = quickNoteVisible || settingsVisible || commandPickerVisible
+    || editingProjectIndex !== null || appExitPreparing;
+  // Stable across unrelated store updates; reattach only when overlay ownership
+  // changes or the keyed Project prompt mounts. See keybindings-shell#8.
+  const focusConnectPrompt = useCallback((element: HTMLDivElement | null) => {
+    if (element && !connectPromptFocusBlocked) element.focus();
+  }, [connectPromptFocusBlocked]);
 
   return (
     <div className="app">
@@ -953,11 +960,12 @@ export function App() {
           )}
           {activeProject && !isWorktreeUnavailable(activeProject) && !activeProject.folderInvalid && activeProject.tabs.length === 0 && (
             <div
+              key={activeProject.id}
               className="connect-prompt"
               onClick={() => { if (activeProjectId) emit(Events.CONNECT_PROJECT, activeProjectId); }}
               onKeyDown={(e) => { if (e.key === 'Enter' && activeProjectId) emit(Events.CONNECT_PROJECT, activeProjectId); }}
               tabIndex={0}
-              ref={(el) => el?.focus()}
+              ref={focusConnectPrompt}
             >
               Click or press Enter to connect to <strong>{activeProject.name}</strong>
             </div>
