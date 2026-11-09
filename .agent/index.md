@@ -9,6 +9,8 @@ Read this first, then jump to the category you need.
 | Contracts | [contracts/index.md](contracts/index.md) | Interface specs, message formats, routing rules |
 | Context | [context/index.md](context/index.md) | Decisions + gotchas grouped by topic; cited from code as `<topic>#N` |
 | Preserved branches | [SPIKE_ARCHIVE.md](SPIKE_ARCHIVE.md) | Spike／reevaluation backup refs, evidence locations and deletion restrictions |
+| Verification | [verification.md](verification.md) | Available checks, prerequisites, evidence and coverage limits |
+| Improvements | [improvements.md](improvements.md) | Active improvement proposals, evidence and revisit conditions |
 
 > Citation: code comments reference a decision/gotcha as `<topic>#N` (e.g. `skills#4`) → open `context/<topic>.md`, entry N.
 > Project positioning lives in `PRODUCT.md`; release process in `RELEASE_FLOW.md`; upstream issues to re-check each
