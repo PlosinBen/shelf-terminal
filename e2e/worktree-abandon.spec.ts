@@ -42,7 +42,13 @@ function makeRepoWithWorktree(): { root: string; base: string; feature: string }
 }
 
 function seed(userDataDir: string, base: string, feature: string, configured: boolean) {
+  const other = path.join(path.dirname(base), 'other');
+  fs.mkdirSync(other);
   const projects = [
+    {
+      id: 'wt-abandon-other', name: 'Unrelated Project', cwd: other,
+      connection: { type: 'local' }, maxTabs: 5,
+    },
     {
       id: BASE_ID, name: 'Abandon Base', cwd: base, connection: { type: 'local' }, maxTabs: 5,
       ...(configured ? { featureNoteDir: 'notes/future' } : {}),
@@ -125,6 +131,7 @@ test.describe('abandon worktree gate', () => {
 
     // Sub-project gone; base untouched; worktree + branch removed.
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(0, { timeout: 8_000 });
+    await expect(page.locator('.sidebar-item.active')).toContainText('Abandon Base');
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(mainBefore); // base NOT moved
     expect(fs.existsSync(feature)).toBe(false);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toBe('');
@@ -162,6 +169,7 @@ test.describe('abandon worktree gate', () => {
     expect(fs.existsSync(feature)).toBe(true);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveClass(/active/);
   });
 
   test('notes require explicit discard and never move to parent', async () => {
@@ -227,6 +235,7 @@ test.describe('abandon worktree gate', () => {
     const popup = page.locator('.worktree-dialog');
     await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
     await expect(popup.locator('.worktree-error')).toContainText('Unable to check feature notes');
+    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveClass(/active/);
     await expect.poll(() => readLogText(userDataDir)).toContain('"failedStep":"featureNotes"');
     expect(readLogText(userDataDir)).toContain('"operation":"abandon"');
     expect(fs.readFileSync(path.join(feature, '.agent/features'), 'utf8')).toBe('not a directory');

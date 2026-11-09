@@ -59,6 +59,7 @@ User menu
   → non-force remove child checkout
   → optionally delete feature branch with merged/unmerged warning semantics
   → remove child project
+  → focus parent project by identity
 ```
 
 ## Boundaries

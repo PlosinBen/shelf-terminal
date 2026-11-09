@@ -317,7 +317,7 @@ export function WorktreeCloseGate() {
     close();
     if (projects.some((p) => p.id === state.subProjectId)) {
       if (isAbandon) {
-        emit(Events.REMOVE_PROJECT, state.subProjectId);
+        emit(Events.REMOVE_PROJECT, state.subProjectId, { focusProjectId: parent.id });
       } else {
         notifyFinishCompleted(true);
       }

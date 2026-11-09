@@ -94,6 +94,8 @@ Renderer-local `worktree-rescan` carries a project id to the central coordinator
 
 Renderer-local worktree completion uses the event bus, not IPC: `worktree-finish-completed` carries `{ subProjectId, parentProjectId, sourceLabel, targetBranch, worktreeRemoved: boolean }`. `worktreeRemoved: false` reports a successful merge-only operation: retain the child environment and current focus, and set a child project merge-success banner. `worktreeRemoved: true` is emitted only after merge and every cleanup step succeeds: remove the child project, focus the parent, and show the parent completion banner.
 
+After successful Abandon cleanup, the gate emits renderer-local `remove-project(projectId, { focusProjectId: parentProjectId })`. The optional focus target is applied only after project deletion and canonical refresh succeed; a missing target is logged. Callers that omit the option retain the ordinary removal focus behavior. Cancelled or blocked Abandon does not emit this removal request.
+
 ## file-transfer
 
 Surfaced through `shelfApi.connector` (`uploadFile` / `clearUploads` / `getUploadsSize`) over channels `file:upload`, `file:clear-uploads`, `file:uploads-size` — see the connector table above.

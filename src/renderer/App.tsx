@@ -546,7 +546,7 @@ export function App() {
       if (tab?.type === 'agent' && tab.sessionId) void cleanupAgentViews(projectId, [tab.sessionId], settled);
     });
 
-    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string) => queueProjectUpdate(projectId, async () => {
+    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string, options?: { focusProjectId?: string }) => queueProjectUpdate(projectId, async () => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);
       if (projectIndex === -1 || !proj) return;
@@ -556,6 +556,13 @@ export function App() {
       if (staged.status === 'cancelled') return;
       const deleted = await runProjectOperation('delete', () => projectCoordinator.delete(projectId));
       if (deleted.status === 'cancelled') return;
+      if (options?.focusProjectId) {
+        if (getProjectById(options.focusProjectId)) {
+          setActiveProjectById(options.focusProjectId);
+        } else {
+          console.warn('[project-delete] focus target missing', { projectId, focusProjectId: options.focusProjectId });
+        }
+      }
       const settled = Promise.all(proj.tabs.map(teardownTab));
       // Teardown flushes idle pending history. Queue the clears afterwards so
       // those writes cannot resurrect messages belonging to a deleted Project.

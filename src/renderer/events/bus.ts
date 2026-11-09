@@ -27,7 +27,7 @@ export function emit(event: string, ...args: any[]) {
 // AgentEventMap in ./types.ts and use onAgent/emitAgent helpers.
 export const Events = {
   CLOSE_TAB: 'close-tab',           // (projectId, tabIndex)
-  REMOVE_PROJECT: 'remove-project',  // (projectId)
+  REMOVE_PROJECT: 'remove-project',  // (projectId, options?: { focusProjectId?: string })
   NEW_TAB: 'new-tab',               // (projectId)
   CONNECT_PROJECT: 'connect-project',       // (projectId)
   AUTO_CONNECT_PROJECT: 'auto-connect-project', // (projectId) — connect a just-added project once it's in the store
