@@ -11,13 +11,15 @@
 | 查介面規格 / 訊息格式 / 路由規則 | [.agent/contracts/index.md](.agent/contracts/index.md) |
 | 理解為什麼這樣設計、什麼不該改、debug 前先看 | [.agent/context/index.md](.agent/context/index.md) — decisions + gotchas 按 topic；code 以 `<topic>#N` 引用（如 `skills#4` → `context/skills.md` 第 4 條）|
 | 評估新 feature 該不該做、判斷是否偏離產品定位 | [.agent/PRODUCT.md](.agent/PRODUCT.md) |
+| 選擇驗證、查環境前提、證據位置與覆蓋限制 | [.agent/verification.md](.agent/verification.md) |
+| 查相關工作的已知改善提案與再檢視條件 | [.agent/improvements.md](.agent/improvements.md) — 待評估清單，不等於已採納或授權實作 |
 | 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
 | 查封存 spike 成果／清理分支前確認保留限制 | [.agent/SPIKE_ARCHIVE.md](.agent/SPIKE_ARCHIVE.md) — 已移除 worktree 的保留分支、證據位置與刪除條件 |
 | 追蹤「必要回檢」的上游 issue（我方有 workaround/退化、等上游修好回收） | [.agent/UPSTREAM_WATCH.md](.agent/UPSTREAM_WATCH.md) — 薄 index，每次 release 前回檢（綁在 RELEASE_FLOW step 0.6）；rationale 仍在 `context/<topic>` |
 | 開發中 feature 的暫存工作筆記 | [.agent/features/](.agent/features/) — **development-flow** skill 的 transient note（PRD/SDD/Spec/Tasks），收尾 consolidate 進永久 doc 後刪除；**非永久文件**（gitignored、不跨機器同步）|
 
 ### Documentation maintenance
-開發新 feature 走 **development-flow** skill（transient note 累積 → 收尾才 consolidate 進永久 doc）；產生/重整整個 bundle 用 **project-agent-docs** skill；檔案格式信封見 **open-knowledge-format** skill（`index.md` 是 reserved file、無 frontmatter）。
+開發流程依 **development-flow**；文件維護依 **project-agent-docs**；驗證依 **verification-discipline**，專案能力見 [.agent/verification.md](.agent/verification.md)；Git 交付依 **git-change-handoff**；文件格式依 **open-knowledge-format**。
 
 零星改動則直接更新 `.agent/`：**新增/搬移模組** → `map.md`（intent → file + 一行 role）；**改資料流** → `architecture/<topic>.md`（抽象、不提檔名）；**介面/訊息變更** → `contracts/<topic>.md`；**新決策或 gotcha** → 對應 `context/<topic>.md`（append 下一個 `topic#N`，從 code 以 `<topic>#N` 引用）。context entry 寫**現況 + 為什麼**，不留 changelog / 已廢棄 feature / commit hash / 日期。
 
