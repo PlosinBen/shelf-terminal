@@ -125,16 +125,20 @@ test.describe('Notes panel', () => {
     await page.locator('.notes-textarea').fill('# Task\n\nthings to do');
     await page.waitForTimeout(900);
 
-    // Mark done. NotesView's handleToggleDone calls onRequestBack on the
-    // "checked" transition — UI auto-pops back to the list and saves with
-    // isDone=true. Don't click `.notes-back` manually after this — the
-    // button no longer exists by the time we'd click it (Playwright would
-    // wait for it up to test timeout, ending with a confusing
-    // "Target page, context or browser has been closed" error).
-    await page.locator('.notes-done-toggle input').check();
+    // Marking done saves and unmounts NoteEditor. Use click: check() reads
+    // the checkbox again afterward and can retry an already removed input.
+    // Assert the saved state and list outcome instead of the removed DOM.
+    const doneToggle = page.locator('.notes-done-toggle input');
+    await expect(doneToggle).not.toBeChecked();
+    await doneToggle.click();
 
     // Active tab is empty.
     await expect(page.locator('.notes-empty')).toContainText('No notes yet', { timeout: 3_000 });
+
+    const notesDir = path.join(userDataDir, 'projects', PROJECT_ID, 'notes');
+    const noteFiles = fs.readdirSync(notesDir).filter(name => name.endsWith('.md'));
+    expect(noteFiles).toHaveLength(1);
+    expect(fs.readFileSync(path.join(notesDir, noteFiles[0]), 'utf-8')).toContain('is_done: true');
 
     // Done tab has the note.
     await page.locator('.notes-filter-tab', { hasText: 'Done' }).click();
