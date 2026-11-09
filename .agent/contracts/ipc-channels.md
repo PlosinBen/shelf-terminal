@@ -72,7 +72,7 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `worktreeAdd(connection, cwd, branch, newBranch: boolean, startup?)` | invoke `git:worktree-add` with `{ connection, cwd, branch, newBranch, startup? }`; validates startup before Git; returns `WorktreeAddResult` |
 | `worktreeRemove(connection, cwd, worktreePath)` | invoke `git:worktree-remove`; runs non-force Git worktree removal |
 | `migrateNote(connection, baseCwd, worktreeCwd, notePaths)` | invoke `git:migrate-note` → `{ ok, migrated?, error? }`; create-time base→child feature-note move for selected feature-note paths |
-| `restoreNotes(connection, baseCwd, worktreeCwd, featureNoteDir)` | invoke `git:restore-notes` → `{ ok, migrated?, error? }`; Abandon-time child→base restore through the child's stored directory snapshot |
+| `restoreNotes(connection, baseCwd, worktreeCwd, featureNoteDir)` | invoke `git:restore-notes` → `{ ok, migrated?, error? }`; explicit child→base restore utility; not called by Abandon or Finish |
 | `deleteBranch(connection, cwd, branch, force?)` | invoke `git:delete-branch` → `{ ok, error? }` |
 | `branchMerged(connection, cwd, target, branch)` | invoke `git:branch-merged` → `{ merged, aheadCount }` |
 | `listFeatureNotes(connection, cwd, featureNoteDir)` | invoke `git:list-feature-notes` → `{ ok: true, notes: FeatureNoteInfo[] } \| { ok: false, error: string }`; missing/empty directories are successful empty lists, operational failures remain explicit |

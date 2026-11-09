@@ -1,4 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildFeatureNoteListCommand, listFeatureNotes, parseFeatureNoteList } from './feature-notes';
 
 /** Build the shell-dump shape parseFeatureNoteList consumes. */
@@ -137,6 +141,19 @@ describe('listFeatureNotes', () => {
 });
 
 describe('buildFeatureNoteListCommand', () => {
+  it.skipIf(process.platform === 'win32')('lists every note when earlier files have no trailing newline', () => {
+    const root = mkdtempSync(join(tmpdir(), 'shelf-note-list-'));
+    try {
+      mkdirSync(join(root, 'notes'));
+      writeFileSync(join(root, 'notes/a.md'), 'first');
+      writeFileSync(join(root, 'notes/b.md'), 'second');
+      const output = execFileSync('/bin/sh', ['-c', buildFeatureNoteListCommand(root, 'notes')], { encoding: 'utf8' });
+      expect(parseFeatureNoteList(output).map(note => note.path)).toEqual(['notes/a.md', 'notes/b.md']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('guards directory and note symlinks against escaping the physical project root', () => {
     const command = buildFeatureNoteListCommand("/repo's root", 'notes/features');
     expect(command).toContain("root_input='/repo'\\''s root'");

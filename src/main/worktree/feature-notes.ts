@@ -38,7 +38,8 @@ export function buildFeatureNoteListCommand(baseCwd: string, featureNoteDir: str
     'resolved_file=$(realpath "$f") || { echo "Unable to resolve feature note: $f" >&2; exit 1; }; ' +
     'case "$resolved_file" in "$root"|"$root"/*) ;; *) echo "Feature note escapes project root: $f" >&2; exit 1;; esac; ' +
     'fi; ' +
-    "printf '===SHELF_NOTE:%s===\\n' \"${rel_dir}/${f##*/}\"; " +
+    // Start each marker on its own line even if the previous file has no final LF.
+    "printf '\\n===SHELF_NOTE:%s===\\n' \"${rel_dir}/${f##*/}\"; " +
     "sed -n '1,40p' \"$f\"; " +
     'done'
   );

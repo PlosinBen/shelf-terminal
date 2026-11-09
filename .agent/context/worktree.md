@@ -50,13 +50,9 @@ related:
 
 **Do not change casually because:** Moving refs while default status is dirty can make the UI proceed into cleanup even though user work is not represented by the committed feature tip. Adding `--force` to teardown bypasses Git protections for dirty working trees.
 
-## worktree#6 — Abandon restores carried feature notes before teardown  ·  [Decision]
+## worktree#6 — Abandon note handling  ·  [Decision]
 
-**Decision:** When a child has a `featureNoteDir` snapshot, Abandon lists remaining direct markdown notes there, copies them back to the same relative directory in the parent checkout, verifies them, and only then removes the child copies. Full Finish blocks on remaining notes instead of restoring them (worktree#16); merge-only Finish leaves them in the child. An absent snapshot or no child notes is a successful no-op. If listing fails, the parent destination exists, or verification fails, close stops and leaves the child checkout in place.
-
-**Reason:** Feature notes are transient working memory and are normally gitignored, so they do not travel through merge-back. Restoring through the child snapshot preserves that state without turning an already-consolidated/deleted note into an error or letting a later main-project config edit redirect an in-flight worktree transaction.
-
-**Do not change casually because:** Worktree removal is the last chance to avoid losing ignored note files. Overwriting a parent note or silently converting a listing failure into an empty result would be another form of data loss, so both must stay fail-loud.
+**Superseded by worktree#22.**
 
 ## worktree#7 — Finish completion is project UI with an explicit cleanup outcome  ·  [Decision]
 
@@ -70,7 +66,7 @@ related:
 
 **Decision:** When a main project configures `featureNoteDir`, the New Worktree dialog lists its direct `*.md` children except reserved `index.md` and lets the user select zero or more canonical repo-relative paths. Create-time migration accepts those paths as one batch. It copies and verifies every selected note into the child checkout before deleting any base copy; if a copy/verify step fails, base notes stay intact and any child-side copies already made are removed.
 
-**Reason:** A single worktree can intentionally carry several small feature notes, and Abandon restores all remaining child notes. Looping the old single-note move would delete earlier base notes before later notes were proven safe; if the caller then removed the child checkout, those earlier notes could be lost.
+**Reason:** A single worktree can intentionally carry several small feature notes. Create migration must verify the entire batch before deleting base copies, so a later copy failure and child rollback cannot lose an earlier note.
 
 **Do not change casually because:** Feature notes are often gitignored transient working memory. Batch create migration must preserve all-or-nothing semantics across the whole selected set, not just within each individual file.
 
@@ -108,17 +104,17 @@ related:
 
 ## worktree#13 — Project config explicitly binds Shelf to a feature-note directory  ·  [Decision]
 
-**Decision:** Shelf's feature-note mechanism is enabled only by nullable canonical `Project.featureNoteDir`; there is no auto-detection or fallback to `.agent/features`. Shelf owns safe listing, picker handoff, migration, and restore. The workflow or skill owns note semantics and its recommended directory, while the project supplies the binding value. A configured dialog always shows the source directory; missing/empty directories show a successful empty state, while operational failures remain visible and non-blocking for ordinary worktree creation.
+**Decision:** Shelf's feature-note mechanism is enabled only by nullable canonical `Project.featureNoteDir`; there is no auto-detection or fallback to `.agent/features`. Shelf owns safe listing, picker handoff, create-time migration, and close-time note checks. The workflow or skill owns note semantics and its recommended directory, while the project supplies the binding value. A configured dialog always shows the source directory; missing/empty directories show a successful empty state, while operational failures remain visible and non-blocking for ordinary worktree creation.
 
 At child creation, the main project's current value is copied into the child's same field. The shared config interface stays identical, Project Settings makes the child field read-only, and close uses that stored snapshot. Main edits affect future children only. Existing projects and pre-feature children receive no migration or implicit default.
 
-**Reason:** Hardcoding `.agent/features` made Shelf appear to own a convention that actually belongs to the optional `development-flow` workflow. An explicit project binding lets the two cooperate without making either depend on the other. A stored child snapshot matches the worktree transaction: the restore destination is decided when the child is created and should not change underneath it.
+**Reason:** Hardcoding `.agent/features` made Shelf appear to own a convention that actually belongs to the optional `development-flow` workflow. An explicit project binding lets the two cooperate without making either depend on the other. A stored child snapshot matches the worktree transaction: the note inspection directory is decided when the child is created and should not change underneath it.
 
-**Do not change casually because:** A fallback recreates the hidden cross-product contract and makes “unset” indistinguishable from enabled. Live inheritance can redirect close-time restore after a main setting changes. Child-specific config types or generic inheritance metadata add structure without changing the one-field snapshot behavior.
+**Do not change casually because:** A fallback recreates the hidden cross-product contract and makes “unset” indistinguishable from enabled. Live inheritance can redirect close-time note inspection after a main setting changes. Child-specific config types or generic inheritance metadata add structure without changing the one-field snapshot behavior.
 
 ### Gotchas
 
-- A pre-feature child with no snapshot skips restore on close. An ignored note can therefore be discarded on Abandon; this accepted upgrade edge is why the UI must not promise restore when the child field is absent.
+- A child with no snapshot skips note inspection on close. Ignored notes can therefore be discarded on Abandon without a note-specific confirmation; the UI must not promise note discovery when the child field is absent.
 
 ## worktree#14 — Create proposals are valid only for parent projects  ·  [Decision]
 
@@ -140,7 +136,7 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 
 ## worktree#16 — Finish cleanup is optional for the whole worktree environment  ·  [Decision]
 
-**Decision:** Finish shows `Only merge`, unchecked by default. Checked means merge-back only: retain the branch, checkout, sidebar item, tabs, conversations, notes, and current focus. Unchecked means full Finish: before merge, list the child's configured direct markdown notes once (excluding `index.md`, regardless of status). Remaining notes or listing failures block the operation and can be sent to the child agent. Missing/empty directories pass; absent bindings skip note inspection without directory fallback. After the ordinary clean-state and ff-only gates succeed, remove the checkout, project, and source branch when one exists. Abandon retains its independent `Delete branch` option and note restoration.
+**Decision:** Finish shows `Only merge`, unchecked by default. Checked means merge-back only: retain the branch, checkout, sidebar item, tabs, conversations, notes, and current focus. Unchecked means full Finish: before merge, list the child's configured direct markdown notes once (excluding `index.md`, regardless of status). Remaining notes or listing failures block the operation and can be sent to the child agent. Missing/empty directories pass; absent bindings skip note inspection without directory fallback. After the ordinary clean-state and ff-only gates succeed, remove the checkout, project, and source branch when one exists. Abandon retains its independent `Delete branch` option and requires explicit note discard confirmation (worktree#22).
 
 **Reason:** Shelf presents the worktree and its sidebar project as one working environment. Only merge expresses the choice to retain that environment. Git status cannot detect ignored notes; blocking before merge requires explicit note resolution rather than treating transfer to the parent as completed work. One preflight keeps the sequence simple; there is no second note scan, watcher, or external-writer lock.
 
@@ -185,3 +181,11 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 **Reason:** Child project persistence happens after worktree creation and note migration; its non-empty defaultTabs guard cannot prevent those earlier side effects. A separate preflight would not constrain the subsequent Git call. Keeping the guard at the mutation entry enforces the contract without moving the whole renderer transaction.
 
 **Do not change casually because:** Registry membership alone includes internal providers. Main and renderer use the same development-build visibility policy; a fake backend in tests does not make an internal provider selectable in production. Preserve explicit false for Agent-only startup and do not turn invalid input into the legacy omitted-options default.
+
+## worktree#22 — Abandon confirms note deletion without moving files to the parent  ·  [Decision]
+
+**Decision:** Abandon never restores notes to the parent. On approval, a child with a `featureNoteDir` snapshot lists its direct markdown notes (excluding `index.md`). A non-empty list pauses removal and shows the paths with an unchecked discard checkbox. The user must select it and approve again; the gate re-lists and resets consent if the path set changed. Listing failure stops and logs the operation. Cancel or reopening clears consent. Empty lists and absent bindings need no note-specific confirmation. Branch deletion remains an independent choice. Removal uses ordinary non-force Git removal; notes are not deleted separately.
+
+**Reason:** Abandon authorizes discarding a child environment, not writing files into the parent or reintroducing abandoned work there. Explicit discard consent protects ignored notes without making parent filename collisions a prerequisite for abandoning. A failed removal leaves notes in the child instead of partially moving them elsewhere.
+
+**Do not change casually because:** Confirmation covers listed paths, not a content snapshot or an external-writer lock. Notes created after the final scan and ignored files outside the configured direct-markdown scope are not separately protected. Do not add force removal or automatic parent writes to bypass Git errors.

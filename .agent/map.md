@@ -103,7 +103,7 @@ title: shelf-terminal — Intent → File Index
 | Target worktree probes | `connector/worktree-probe.ts` | Target-side Git/path probes, POSIX/PowerShell quoting and missing versus inaccessible classification |
 | Shared worktree state and inheritance | `../shared/worktree.ts`, `../shared/worktree-child-config.ts` | Availability/identity contracts, detached labels and fresh child setup |
 | Finish merge-back | `worktree/merge-back.ts` | ff-only target advancement, feature/base dirty guards, non-ff rebase guidance |
-| Feature note create/close migration | `worktree/note-migration.ts` | create-time base→child batch note move and configured close-time child→base restore |
+| Feature note migration utilities | `worktree/note-migration.ts` | create-time base→child batch note move and explicit child→base restore utility |
 | Feature note listing | `worktree/feature-notes.ts` | 依 project-configured directory 列 direct markdown notes、驗證 repo boundary 並解析 picker frontmatter |
 | Branch merged check | `worktree/branch-merged.ts` | Computes merged/ahead state for Abandon branch-delete warning |
 | Per-repo finish lock | `worktree/repo-lock.ts` | In-process lock around the atomic “check target → fast-forward” merge-back step |
@@ -254,7 +254,7 @@ title: shelf-terminal — Intent → File Index
 | Worktree 建立 | `components/WorktreeDialog.tsx` + `../shared/worktree-child-config.ts` | 顯示 target 與 configured note 狀態、接收 branch/note/agent prefill；共用 startup options、provider/非空驗證，依獨立 Agent/Terminal 選擇建立 fresh sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
-| Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon gate：note preflight、Only merge、Abandon note restore、teardown 與 completion event |
+| Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon gate：note preflight、Only merge、Abandon note discard confirmation、teardown 與 completion event |
 | Project-level notice banner | `components/ProjectNoticeBanner.tsx` + `project-notice.ts` | Parent project completion notice UI + latest-wins/dismiss/timeout state helpers |
 | 刪除確認 | `components/RemoveConfirmDialog.tsx` | Remove project 確認 modal，可勾選清理 worktree files |
 | PM 狀態面板（read-only） | `components/PmView.tsx` | 右側可拖拉 panel，read-only 訊息列表 + markdown，header 含 PM Active/Away/Clear toggle |

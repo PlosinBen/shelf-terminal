@@ -119,7 +119,7 @@ test.describe('abandon worktree gate', () => {
     await expect(popup).toBeVisible({ timeout: 5_000 });
     // Unmerged feature commit + delete-branch checked → the loss warning shows.
     await expect(popup).toContainText('permanently discards');
-    await expect(popup).toContainText('Any remaining feature notes will be restored to the parent project before the worktree is removed.');
+    await expect(popup).toContainText('No notes will be moved to the parent project.');
     await popup.locator('.conn-btn-danger').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
 
@@ -141,7 +141,7 @@ test.describe('abandon worktree gate', () => {
     await expect(popup).toBeVisible({ timeout: 5_000 });
     // Adaptive: merged → reassuring "already merged", NOT the discard warning.
     await expect(popup).toContainText('already merged');
-    await expect(popup).toContainText('Any remaining feature notes will be restored to the parent project before the worktree is removed.');
+    await expect(popup).toContainText('No notes will be moved to the parent project.');
     await expect(popup).not.toContainText('permanently discards');
     await popup.locator('.conn-btn-danger').click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
@@ -164,6 +164,26 @@ test.describe('abandon worktree gate', () => {
     await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
 
+  test('notes require explicit discard and never move to parent', async () => {
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore notes']);
+    const rel = '.agent/features/discard.md';
+    writeFeatureNote(feature, rel, 'abandoned work');
+    await openCloseMenu(page, 'Abandon');
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup.getByLabel('Discard the listed feature notes')).toBeVisible();
+    await expect(popup).toContainText(rel);
+    expect(fs.existsSync(feature)).toBe(true);
+    expect(fs.existsSync(path.join(base, rel))).toBe(false);
+    await popup.getByLabel('Discard the listed feature notes').check();
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+    expect(fs.existsSync(feature)).toBe(false);
+    expect(fs.existsSync(path.join(base, rel))).toBe(false);
+  });
+
   test('disabled child omits restore messaging and skips note restore', async () => {
     const rel = '.agent/features/legacy.md';
     fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/features/\n', 'utf-8');
@@ -182,34 +202,75 @@ test.describe('abandon worktree gate', () => {
     expect(fs.existsSync(path.join(base, rel))).toBe(false);
   });
 
-  test('restore conflict blocks abandon and keeps the worktree note', async () => {
+  test('parent name collision does not block discard or change parent contents', async () => {
     const rel = '.agent/features/carried.md';
+    fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
+    git(feature, ['add', '.gitignore']);
+    git(feature, ['commit', '-m', 'ignore notes']);
     writeFeatureNote(base, rel, 'base note');
     writeFeatureNote(feature, rel, 'worktree note');
-
     await openCloseMenu(page, 'Abandon');
-
-    const popup = page.locator('.worktree-dialog', { hasText: 'Abandon Worktree' });
-    await expect(popup).toBeVisible({ timeout: 5_000 });
-    await popup.locator('.conn-btn-danger').click();
-
-    const err = popup.locator('.worktree-error');
-    await expect(err).toContainText('already exists', { timeout: 8_000 });
-    await expect.poll(() => readLogText(userDataDir), { timeout: 5_000 }).toContain('worktree-close');
-    const logs = readLogText(userDataDir);
-    expect(logs).toContain('"operation":"abandon"');
-    expect(logs).toContain('"failedStep":"restoreNotes"');
-    expect(logs).toContain('"subProjectId":"wt-abandon-sub"');
-    expect(logs).toContain('"parentProjectId":"wt-abandon-base"');
-    expect(logs).toContain('"featureBranch":"feature"');
-    expect(logs).toContain('already exists');
-    expect(fs.existsSync(feature)).toBe(true);
-    expect(fs.readFileSync(path.join(feature, rel), 'utf-8')).toBe('worktree note');
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await popup.getByLabel('Discard the listed feature notes').check();
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup).not.toBeVisible({ timeout: 8_000 });
+    expect(fs.existsSync(feature)).toBe(false);
     expect(fs.readFileSync(path.join(base, rel), 'utf-8')).toBe('base note');
-    expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
-    await expect(page.locator('.sidebar-item.worktree-child', { hasText: 'feature' })).toHaveCount(1);
   });
-  test('keeping branch still restores notes and removes the abandoned worktree', async () => {
+
+  test('listing failure blocks abandon and is logged without changing files', async () => {
+    // A file where the configured directory should be makes real listing fail.
+    fs.mkdirSync(path.join(feature, '.agent'));
+    fs.writeFileSync(path.join(feature, '.agent/features'), 'not a directory');
+    await openCloseMenu(page, 'Abandon');
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup.locator('.worktree-error')).toContainText('Unable to check feature notes');
+    await expect.poll(() => readLogText(userDataDir)).toContain('"failedStep":"featureNotes"');
+    expect(readLogText(userDataDir)).toContain('"operation":"abandon"');
+    expect(fs.readFileSync(path.join(feature, '.agent/features'), 'utf8')).toBe('not a directory');
+    expect(fs.existsSync(path.join(base, '.agent'))).toBe(false);
+    expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
+  });
+
+  test('cancel preserves notes and reopening resets discard consent', async () => {
+    const rel = '.agent/features/cancel.md';
+    writeFeatureNote(feature, rel, 'keep me');
+    await openCloseMenu(page, 'Abandon');
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await popup.getByLabel('Discard the listed feature notes').check();
+    await popup.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(fs.readFileSync(path.join(feature, rel), 'utf8')).toBe('keep me');
+    expect(fs.existsSync(path.join(base, rel))).toBe(false);
+    await openCloseMenu(page, 'Abandon');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup.getByLabel('Discard the listed feature notes')).not.toBeChecked();
+    await expect(popup.getByRole('button', { name: 'Abandon', exact: true })).toBeDisabled();
+  });
+
+  test('new notes invalidate consent and failed removal keeps child notes', async () => {
+    const first = '.agent/features/first.md';
+    const second = '.agent/features/second.md';
+    // Untracked non-ignored notes also exercise Git's non-force removal guard.
+    writeFeatureNote(feature, first, 'first');
+    await openCloseMenu(page, 'Abandon');
+    const popup = page.locator('.worktree-dialog');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await popup.getByLabel('Discard the listed feature notes').check();
+    writeFeatureNote(feature, second, 'second');
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup).toContainText(second);
+    await expect(popup.getByLabel('Discard the listed feature notes')).not.toBeChecked();
+    await popup.getByLabel('Discard the listed feature notes').check();
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await expect(popup.locator('.worktree-error')).toContainText('untracked files');
+    expect(fs.readFileSync(path.join(feature, first), 'utf8')).toBe('first');
+    expect(fs.readFileSync(path.join(feature, second), 'utf8')).toBe('second');
+    expect(fs.existsSync(path.join(base, '.agent'))).toBe(false);
+  });
+  test('keeping branch still requires note discard and leaves parent untouched', async () => {
     const rel = '.agent/features/carried.md';
     fs.writeFileSync(path.join(feature, '.gitignore'), '.agent/\n');
     git(feature, ['add', '.gitignore']);
@@ -220,11 +281,13 @@ test.describe('abandon worktree gate', () => {
     const popup = page.locator('.worktree-dialog');
     await popup.locator('.worktree-checkbox input').uncheck();
     await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
+    await popup.getByLabel('Discard the listed feature notes').check();
+    await popup.getByRole('button', { name: 'Abandon', exact: true }).click();
     await expect(popup).not.toBeVisible({ timeout: 8_000 });
     expect(git(base, ['rev-parse', 'main']).trim()).toBe(before);
     expect(git(base, ['branch', '--list', 'feature']).trim()).toContain('feature');
     expect(fs.existsSync(feature)).toBe(false);
-    expect(fs.readFileSync(path.join(base, rel), 'utf8')).toBe('keep context');
+    expect(fs.existsSync(path.join(base, rel))).toBe(false);
   });
 
 });

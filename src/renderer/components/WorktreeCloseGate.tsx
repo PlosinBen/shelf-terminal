@@ -17,7 +17,7 @@ import { prepareDelegationClose } from '../delegation-events';
 //   finish  = pick target ▾ (default baseBranch) → note preflight for full Finish
 //             → lock+ff merge-back → optional teardown
 //               → delete branch (force; commits are safe on target after the ff)
-//   abandon = restore carried feature notes → teardown
+//   abandon = inspect notes → explicit discard confirmation → teardown
 //             → delete branch (no merge; UNMERGED → commit loss)
 //
 // Merge-only preserves the environment; completion reports whether teardown ran.
@@ -52,6 +52,8 @@ export function WorktreeCloseGate() {
   // Finish defaults to full cleanup; Abandon independently controls branch deletion.
   const [onlyMerge, setOnlyMerge] = useState(false);
   const [deleteBranch, setDeleteBranch] = useState(true);
+  const [abandonNotePaths, setAbandonNotePaths] = useState<string[]>([]);
+  const [discardNotes, setDiscardNotes] = useState(false);
   // abandon only: is the branch already merged into base (→ safe delete) or would
   // a force-delete discard commits (→ loud warning). null until the check returns.
   const [mergeInfo, setMergeInfo] = useState<BranchMergedInfo | null>(null);
@@ -68,6 +70,8 @@ export function WorktreeCloseGate() {
       setError(null);
       setDeleteBranch(true);
       setOnlyMerge(false);
+      setAbandonNotePaths([]);
+      setDiscardNotes(false);
       setBranches([]);
       setMergeInfo(null);
       const base = proj.baseBranch ?? '';
@@ -225,17 +229,23 @@ export function WorktreeCloseGate() {
       }
     }
 
-    // Restore from the child's creation-time snapshot. Disabled/legacy children
-    // have no binding and deliberately skip feature-note handling.
+    // worktree#22: Abandon never writes notes into the parent. Confirm the
+    // listed paths before removal; a changed list requires fresh consent.
     if (isAbandon && sub.featureNoteDir) {
-      const restored = await window.shelfApi.git.restoreNotes(
-        parentConn,
-        parentCwd,
-        featureCwd,
-        sub.featureNoteDir,
-      );
-      if (!restored.ok) {
-        const msg = restored.error ?? 'failed to restore feature notes';
+      try {
+        const listed = await window.shelfApi.git.listFeatureNotes(parentConn, featureCwd, sub.featureNoteDir);
+        if (!listed.ok) throw new Error(listed.error);
+        const paths = listed.notes.map(note => note.path).sort();
+        const samePaths = paths.length === abandonNotePaths.length &&
+          paths.every((path, index) => path === abandonNotePaths[index]);
+        if (paths.length > 0 && (!discardNotes || !samePaths)) {
+          setAbandonNotePaths(paths);
+          setDiscardNotes(false);
+          return;
+        }
+      } catch (error) {
+        const msg = `Unable to check feature notes in ${sub.featureNoteDir}: ${String(error)}`;
+        setDiscardNotes(false);
         logCloseFailure({
           operation: state.kind,
           subProjectId: state.subProjectId,
@@ -244,7 +254,7 @@ export function WorktreeCloseGate() {
           targetBranch: target,
           parentCwd,
           featureCwd,
-          failedStep: 'restoreNotes',
+          failedStep: 'featureNotes',
           error: msg,
         });
         setError(msg);
@@ -350,7 +360,7 @@ export function WorktreeCloseGate() {
                 <> This <strong>permanently discards</strong> any unmerged commits.</>
               )}
               {sub.featureNoteDir && (
-                <> Any remaining feature notes will be restored to the parent project before the worktree is removed.</>
+                <> Remaining feature notes require confirmation before they are deleted with the worktree. No notes will be moved to the parent project.</>
               )}
             </p>
           ) : (
@@ -387,6 +397,23 @@ export function WorktreeCloseGate() {
               ? <>Delete branch {branch ? <strong>{branch}</strong> : ''}</>
               : 'Only merge'}</span>
           </label>
+          {isAbandon && abandonNotePaths.length > 0 && (
+            <div>
+              <p>These feature notes will be deleted with the worktree. Cancel to preserve them before abandoning.</p>
+              <ul>
+                {abandonNotePaths.map(path => <li key={path}>{path}</li>)}
+              </ul>
+              <label className="worktree-checkbox">
+                <input
+                  type="checkbox"
+                  checked={discardNotes}
+                  onChange={e => setDiscardNotes(e.target.checked)}
+                  disabled={busy}
+                />
+                <span>Discard the listed feature notes</span>
+              </label>
+            </div>
+          )}
           {!isAbandon && (
             <p>{onlyMerge
               ? 'Keep the branch, worktree, project, and feature notes after merging.'
@@ -413,7 +440,7 @@ export function WorktreeCloseGate() {
           <button
             className={`conn-btn ${isAbandon ? 'conn-btn-danger' : 'conn-btn-next'}`}
             onClick={approve}
-            disabled={busy}
+            disabled={busy || (isAbandon && abandonNotePaths.length > 0 && !discardNotes)}
           >
             {busy ? 'Working…' : isAbandon ? 'Abandon' : 'Finish'}
           </button>
