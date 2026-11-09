@@ -63,6 +63,19 @@ dependency tree and verify installed versions as well as the Electron package an
 Reusing an isolated Electron package requires checking that its dependencies are satisfied by
 the locked tree. A clean package diff alone does not establish an Electron-only environment.
 
+## testing#3 — Agent-open helpers wait for the newly requested View  ·  [Gotcha]
+
+`openAgentTab` waits for the tab count to increase before checking Agent visibility.
+Main allocates the View asynchronously; an existing Agent can satisfy a visible-pane check
+before the new tab commits. A click can then bind that old textarea just before its pane
+becomes hidden but remains attached, leaving the action retrying an invisible element.
+Visibility alone does not identify the requested new View. Initialization readiness is a
+separate barrier so init-failure/delay tests can still inspect the starting pane.
+
+The temporary-View cleanup E2E delays the real second View allocation and checks the tab
+count immediately after the helper returns; an auto-waiting assertion there would conceal
+premature helper completion. The case then exercises send, close and reconnect normally.
+
 ## Shelf MCP verification
 
 `npm run test:unit -- agent-server/shelf-tool-sdk-smoke.test.ts agent-server/shelf-tool-contract.test.ts`

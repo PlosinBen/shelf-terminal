@@ -127,9 +127,15 @@ export { expect } from '@playwright/test';
  * the fake-provider scenario syntax (`text:`, `picker_single`, etc.).
  */
 export async function openAgentTab(page: Page): Promise<void> {
+  const tabs = page.locator('.tab-bar .tab');
+  const initialCount = await tabs.count();
   const addBtn = page.locator('.tab-add');
   await addBtn.click({ button: 'right' });
   await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
+  // View allocation is asynchronous. A previous Agent can still be visible
+  // until the new tab commits, so visibility alone does not identify this open.
+  // See testing#3.
+  await expect(tabs).toHaveCount(initialCount + 1);
   // `:visible` defends against transient stacking during tab switch and
   // any future fixture-scope changes; harmless under per-test fixture.
   await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });

@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { IPC } from '../src/shared/ipc-channels';
 import { FAKE_TEST_ENV } from '../agent-server/providers/fake/test-env';
+import { PROJECT_MUTATION } from '../src/shared/project-mutations';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 test.use({ nativePermissions: true });
@@ -57,11 +58,28 @@ async function historyRows(page: Page) {
   });
 }
 
-test('closing or disconnecting temporary Views collects only their history and metadata', async ({ shelfApp: { page } }) => {
+test('closing or disconnecting temporary Views collects only their history and metadata', async ({ shelfApp: { app, page } }) => {
   await setup(page);
   await openAgentTab(page); await sendAgentPrompt(page, 'text:keep-default'); await save(page, 1);
   const saved = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
-  await openAgentTab(page); await sendAgentPrompt(page, 'text:discard-temporary');
+  await app.evaluate(({ ipcMain }, { channel, createKind }) => {
+    const original = (ipcMain as any)._invokeHandlers.get(channel);
+    if (!original) throw new Error('Missing Project update handler');
+    let delayNext = true;
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, async (event, projectId, mutation) => {
+      if (delayNext && mutation.kind === createKind) {
+        delayNext = false;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      return original(event, projectId, mutation);
+    });
+  }, { channel: IPC.PROJECT_UPDATE, createKind: PROJECT_MUTATION.CREATE_AGENT_VIEW });
+  await openAgentTab(page);
+  // The helper must return on the new View even while its real allocation is
+  // delayed. Waiting here would hide a helper that returned the old input.
+  expect(await page.locator('.tab-bar .tab').count()).toBe(3);
+  await sendAgentPrompt(page, 'text:discard-temporary');
   await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
   await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
   await expect.poll(async () => Object.keys((await page.evaluate(() => window.shelfApi.project.getAll()))[0].agentViews)).toEqual(Object.keys(saved.agentViews));
