@@ -37,8 +37,9 @@
    git tag vX.X.X && git push origin vX.X.X
    ```
    上述 heredoc 是強制寫法：禁止在 `git commit -m` 參數中用 `\n` 或 `\\n` 拼接 release notes / trailer。字面 escape 會破壞 commit 格式、Co-Authored-By trailer 與 GitHub Actions run title；驗證未通過時不得 push / tag。
-5. GitHub Actions 先自動建立或重用該 tag 的唯一 **draft** release（description 保持空白），再平行 build 三平台（mac/win/linux）並上傳各自 assets；若同 tag 已有多份 release 或已 publish，workflow 會 fail-loud，不會自行選擇或覆寫
-6. 使用者在 GitHub 上 review draft，手動 publish
+4.5. **Agent 操作到確認 workflow 已觸發為止**。Tag push 成功後，僅確認對應 tag／commit 的 release workflow 已觸發，回報版本、tag 與 workflow 連結，隨即結束操作。**不等待 workflow 完成，不持續輪詢 jobs、build、assets 或 draft 狀態**，避免消耗 AI quota。若未能確認觸發，應如實回報「尚未確認」，不得宣稱已觸發。除非使用者另外要求，後續建置結果、draft review 與 publish 皆交由人工確認。
+5. **自動流程（非 agent 等待項目）**：GitHub Actions 先自動建立或重用該 tag 的唯一 **draft** release（description 保持空白），再平行 build 三平台（mac/win/linux）並上傳各自 assets；若同 tag 已有多份 release 或已 publish，workflow 會 fail-loud，不會自行選擇或覆寫
+6. **人工確認**：使用者確認建置結果，在 GitHub 上 review draft，手動 publish
 
 ## Commit Message Format
 
