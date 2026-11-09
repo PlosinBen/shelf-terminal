@@ -42,6 +42,8 @@ Unknown provider ids remain valid stored data. Runtime resolves them through the
 
 `defaultTabs` is the sole connect-time startup source. Its non-empty ordered list contains Terminal, Web, and Agent templates. Canonical Agent rows include `provider` and `sessionId`; the provider must match `agentViews[sessionId]`. Multiple rows may use the same provider, but not the same session. Create/editor drafts may omit sessionId; main materializes a fresh record atomically. Changing a row's provider creates a fresh session, never reuses incompatible context. Connect creates valid templates in order without an implicit fallback. New-project creation materializes one plain Terminal only when the field is omitted.
 
+Worktree creation independently selects an optional Agent provider and Terminal (enabled by default). Child `defaultTabs` contains exactly that selection, Agent first when both are selected. Main allocates fresh Agent identity with empty prefs; parent startup/runtime tabs and Agent records are not copied. An empty selection is rejected before Git creation; worktree discovery without explicit startup options retains one Terminal. These startup options are creation inputs, not new persisted Project fields.
+
 ## Main repository
 
 Authoritative source: `src/main/projects/projects-repository.ts`.

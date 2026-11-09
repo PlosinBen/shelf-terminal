@@ -69,13 +69,15 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `branchList(connection, cwd)` | invoke `git:branch-list` → branch list |
 | `checkDirty(connection, cwd)` | invoke `git:check-dirty` → `boolean` |
 | `checkout(connection, cwd, branch)` | invoke `git:checkout` → `void` |
-| `worktreeAdd(connection, cwd, branch, newBranch: boolean)` | invoke `git:worktree-add` |
+| `worktreeAdd(connection, cwd, branch, newBranch: boolean, startup?)` | invoke `git:worktree-add` with `{ connection, cwd, branch, newBranch, startup? }`; validates startup before Git; returns `WorktreeAddResult` |
 | `worktreeRemove(connection, cwd, worktreePath)` | invoke `git:worktree-remove`; runs non-force Git worktree removal |
 | `migrateNote(connection, baseCwd, worktreeCwd, notePaths)` | invoke `git:migrate-note` → `{ ok, migrated?, error? }`; create-time base→child feature-note move for selected feature-note paths |
 | `restoreNotes(connection, baseCwd, worktreeCwd, featureNoteDir)` | invoke `git:restore-notes` → `{ ok, migrated?, error? }`; Abandon-time child→base restore through the child's stored directory snapshot |
 | `deleteBranch(connection, cwd, branch, force?)` | invoke `git:delete-branch` → `{ ok, error? }` |
 | `branchMerged(connection, cwd, target, branch)` | invoke `git:branch-merged` → `{ merged, aheadCount }` |
 | `listFeatureNotes(connection, cwd, featureNoteDir)` | invoke `git:list-feature-notes` → `{ ok: true, notes: FeatureNoteInfo[] } \| { ok: false, error: string }`; missing/empty directories are successful empty lists, operational failures remain explicit |
+
+`startup` uses `WorktreeStartupOptions` from `src/shared/worktree-child-config.ts`: `{ startupAgentProvider?: AgentProvider; startupTerminal?: boolean }`. Omitted options or Terminal field default to enabled Terminal; explicit false supports Agent-only creation. Main validates runtime shape, provider registry/build visibility, and at least one initial view before creating a connector or executing Git. Invalid selection returns `{ ok: false, error }`; no notes or project creation follows. Proposal prefill types (`WorktreeCreatePrefill` / `WorktreeCreateProposal`) share that module; the final create options reflect user overrides, not the original proposal.
 
 ## worktree (`shelfApi.worktree`)
 
@@ -85,7 +87,7 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `reconcile(projectId)` | invoke `worktree:reconcile` → `WorktreeScanResult` from `src/shared/worktree.ts`: `applied` with canonical projects, `skipped` for confirmed non-Git/no children, or `stale`; scan/persistence failures reject and preserve the last committed collection |
 | `lifecycle(projectId, active)` | invoke `worktree:lifecycle`; brackets a main/child lifecycle transaction, invalidates concurrent scans, rejects overlapping lifecycle starts |
 | `source(projectId)` | invoke `worktree:source` → `{ commit, branch: string \| null, identity }`; rejects unavailable/non-child projects and checkout identity mismatches |
-| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[] }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
+| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[], agent?: AgentProvider }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
 | `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; renderer focuses `projectId`, then opens the Finish gate only |
 
 Renderer-local `worktree-rescan` carries a project id to the central coordinator; it shares the Connect scan path.

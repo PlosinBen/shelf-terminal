@@ -5,6 +5,7 @@ import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
+import { normalizeWorktreeStartup, WORKTREE_STARTUP_REQUIRED, type WorktreeCreatePrefill } from '@shared/worktree-child-config';
 import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
 import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import type { Project } from '@shared/projects';
@@ -68,11 +69,13 @@ export function WorktreeDialog() {
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(() => new Set());
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [startupAgentProvider, setStartupAgentProvider] = useState<AgentProvider | ''>('');
+  const [startupTerminal, setStartupTerminal] = useState(true);
+  const startupSelectionError = !startupAgentProvider && !startupTerminal ? WORKTREE_STARTUP_REQUIRED : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const requestGenerationRef = useRef(0);
 
   useEffect(() => {
-    const off = on(Events.CREATE_WORKTREE, (targetProjectId: string, prefill?: { branch?: string; notePaths?: string[] }) => {
+    const off = on(Events.CREATE_WORKTREE, (targetProjectId: string, prefill?: WorktreeCreatePrefill) => {
       const requestGeneration = ++requestGenerationRef.current;
       const prefilledNotePaths = normalizeWorktreePrefillNotePaths(prefill?.notePaths);
       setProjectId(targetProjectId);
@@ -86,7 +89,8 @@ export function WorktreeDialog() {
       setNoteListError(null);
       setSelectedNotes(new Set());
       setBaseBranch(null);
-      setStartupAgentProvider('');
+      setStartupAgentProvider(prefill?.agent ?? '');
+      setStartupTerminal(true);
 
       // Fetch the base repo's in-progress notes for the picker. Pre-select when
       // there's exactly one (the common case: one feature under discussion);
@@ -143,6 +147,16 @@ export function WorktreeDialog() {
     const proj = projects.find((p) => p.id === projectId);
     if (!proj) return;
 
+    let startup;
+    try {
+      startup = normalizeWorktreeStartup({
+        startupAgentProvider: startupAgentProvider || undefined, startupTerminal,
+      }, import.meta.env.DEV);
+    } catch (err) {
+      setError(errorText(err));
+      debugLog('worktree-create', `projectId=${projectId} invalid startup: ${errorText(err)}`);
+      return;
+    }
     setCreating(true);
     setError(null);
     setFailurePrompt(null);
@@ -153,7 +167,7 @@ export function WorktreeDialog() {
       await window.shelfApi.worktree.lifecycle(proj.id, true);
       lifecycleStarted = true;
     // 1. Create the worktree (captures the parent's baseBranch atomically).
-    const result = await window.shelfApi.git.worktreeAdd(connection, cwd, branch, true);
+    const result = await window.shelfApi.git.worktreeAdd(connection, cwd, branch, true, startup);
     if (!result.ok || !result.path) {
       const createError = result.error ?? 'Failed to create worktree';
       logCreateFailure({
@@ -220,7 +234,7 @@ export function WorktreeDialog() {
         cwd: result.path,
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
-        startupAgentProvider: startupAgentProvider || undefined,
+        ...startup,
       });
       const childProject = await new Promise<Project>((resolve, reject) => {
         emit(Events.ADD_PROJECT, childInput, (settled: { ok: true; project: Project } | { ok: false; error: unknown }) => {
@@ -263,7 +277,7 @@ export function WorktreeDialog() {
       }
     }
 
-  }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider]);
+  }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider, startupTerminal]);
 
   const toggleSelectedNote = useCallback((path: string) => {
     setSelectedNotes((current) => {
@@ -358,19 +372,30 @@ export function WorktreeDialog() {
             </div>
           )}
           <label className="worktree-note-picker">
-            <span className="worktree-note-picker-label">Startup tabs</span>
+            <span className="worktree-note-picker-label">Agent view</span>
             <select
               className="worktree-select worktree-startup-tabs-override"
               value={startupAgentProvider}
-              onChange={(e) => setStartupAgentProvider(e.target.value as AgentProvider | '')}
+              onChange={(e) => { setStartupAgentProvider(e.target.value as AgentProvider | ''); setError((current) => current === WORKTREE_STARTUP_REQUIRED ? null : current); }}
               disabled={creating}
             >
-              <option value="">Terminal</option>
+              <option value="">None</option>
               {visibleAgentProviderEntries(import.meta.env.DEV).map(([id, meta]) => (
-                <option key={id} value={id}>Agent ({meta.label}) + Terminal</option>
+                <option key={id} value={id}>{meta.label}</option>
               ))}
             </select>
           </label>
+          <label className="worktree-startup-terminal-row">
+            <input
+              className="worktree-startup-terminal"
+              type="checkbox"
+              checked={startupTerminal}
+              onChange={(e) => { setStartupTerminal(e.target.checked); setError((current) => current === WORKTREE_STARTUP_REQUIRED ? null : current); }}
+              disabled={creating}
+            />
+            <span>Terminal view</span>
+          </label>
+          {startupSelectionError && <pre className="worktree-error-text worktree-startup-error" role="alert">{startupSelectionError}</pre>}
           {error && (
             <div className="worktree-error">
               <pre className="worktree-error-text">{error}</pre>
@@ -393,7 +418,7 @@ export function WorktreeDialog() {
           <button className="conn-btn conn-btn-cancel" onClick={() => setOpen(false)}>Cancel</button>
           <button
             className="conn-btn conn-btn-next"
-            disabled={!input.trim() || creating}
+            disabled={!input.trim() || creating || !!startupSelectionError}
             onClick={handleCreate}
           >
             {creating ? 'Creating...' : 'Create'}

@@ -1,3 +1,4 @@
+import { validateWorktreeAgent } from '@shared/worktree-child-config';
 import { isWorktreeUnavailable } from '@shared/worktree';
 /**
  * App-tool dispatcher (main side) — executions an `app_tool` request (op + args)
@@ -339,15 +340,17 @@ const REGISTRY: Record<string, AppToolDef> = {
       const project = getProjectsRepository().get(projectId);
       if (!project) throw new Error(`project not found: ${projectId}`);
       if (project.parentProjectId) throw new Error(NESTED_WORKTREE_CREATE_ERROR);
+      const agent = validateWorktreeAgent(args.agent, import.meta.env.DEV);
       const win = getMainWindow();
       if (!win || win.isDestroyed()) throw new Error('cannot open New Worktree dialog: no application window');
       const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;
       const notePaths = await resolveProposedNotePaths(projectId, normalizeProposedNotePaths(args));
-      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths });
+      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths, ...(agent ? { agent } : {}) });
       return {
         opened: true,
         ...(branch ? { branch } : {}),
         notePaths,
+        ...(agent ? { agent } : {}),
         message: 'Opened the New Worktree dialog. The user must review and press Create.',
       };
     },

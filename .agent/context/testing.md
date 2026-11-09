@@ -23,6 +23,10 @@ control、slash picker 的訊息路徑、確認後保存、獨立錯誤與使用
 main log 至 Playwright attachments，fixture 清理不抹掉證據。這不是 live provider 或
 SSH／Docker／WSL 的執行中 setter 支援證明。
 
+## Worktree create verification
+
+`e2e/worktree-manual-create.spec.ts` uses real temporary Git repositories and the production build with a fake Agent backend. It covers the independent startup selections, proposal Agent prefill and user overrides, empty-selection UI/Enter and main IPC rejection, fresh child records and runtime tabs, and note migration. Failure teardown saves main logs and the project document into that test's output directory, plus a screenshot when a live window exists, before removing temporary userData. Legacy-v0 project seeds express their Agent through defaultAgentProvider and legacy session/prefs maps; typed Agent defaultTabs require a later schema.
+
 ## Worktree scan verification
 
 `e2e/worktree-reconciliation.spec.ts` 的首次 target probe 失敗案例，在 Connect

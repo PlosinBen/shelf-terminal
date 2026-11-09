@@ -67,12 +67,14 @@ export const BROWSER_OPEN_DESC =
   + 'decides).';
 
 export const PROPOSE_WORKTREE_CREATE_DESC =
-  'Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch and feature-note file(s). '
-  + 'This tool creates nothing. The user reviews the branch, selected notes, and agent provider. If the user confirms Create, '
-  + 'Shelf creates the Git worktree and child project and migrates the selected note files. The provider defaults to the parent '
-  + "project's resolved default but remains user-selectable; the child inherits openAgentOnConnect but never the parent's agent session. "
+  'Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch, feature-note file(s), '
+  + 'and agent provider key. This tool creates nothing. The user reviews and may override the branch, selected notes, Agent view '
+  + 'and Terminal view before pressing Create. Agent defaults to none and Terminal defaults to enabled; at least one initial view '
+  + 'is required. On confirmation Shelf creates the Git worktree and child project, migrates selected notes, and connects the child. '
+  + 'Startup views follow the final selections; Agent identity and preferences are fresh. Other project setup is inherited. '
   + 'Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note '
-  + 'filename/path), notes (optional feature-note filenames/paths).';
+  + 'filename/path), notes (optional feature-note filenames/paths), agent (optional registered provider key, not a model or session; '
+  + 'invalid or unavailable keys are rejected).';
 
 export const PROPOSE_WORKTREE_FINISH_DESC =
   'Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target '
@@ -159,6 +161,7 @@ export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
       branch: z.string().optional().describe('suggested new branch name'),
       note: z.string().optional().describe('legacy single feature note filename/path to preselect'),
       notes: z.array(z.string()).optional().describe('feature note filenames/paths to preselect'),
+      agent: z.string().optional().describe('registered provider key to preselect for Agent view; not a model or existing session'),
     },
   },
   { name: 'propose_worktree_finish', description: PROPOSE_WORKTREE_FINISH_DESC, inputSchema: {}, operation: 'worktree.propose_finish' },

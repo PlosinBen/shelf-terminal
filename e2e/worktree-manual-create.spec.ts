@@ -51,6 +51,7 @@ function seedProject(
   repo: string,
   featureNoteDir?: string,
   includeDistractor = false,
+  richParent = false,
 ) {
   const project = {
     id: PROJECT_ID,
@@ -60,6 +61,11 @@ function seedProject(
     maxTabs: 5,
     defaultAgentProvider: CLAUDE_PROVIDER,
     featureNoteDir,
+    ...(richParent ? {
+      defaultTabs: [{ name: 'Parent shell', cmd: 'echo parent' }, { name: 'Parent second shell' }],
+      agentSessionIds: { [CLAUDE_PROVIDER]: 'parent-startup-session' },
+      agentPrefs: { [CLAUDE_PROVIDER]: { model: 'parent-model' } },
+    } : {}),
   };
   const projects = includeDistractor
     ? [project, {
@@ -122,7 +128,7 @@ test.describe('user-initiated worktree create', () => {
     if (title.includes('unlistable configured directory')) {
       fs.symlinkSync(os.tmpdir(), path.join(repo, 'outside-notes'));
     }
-    seedProject(userDataDir, repo, featureNoteDir, title.includes('agent proposal'));
+    seedProject(userDataDir, repo, featureNoteDir, title.includes('agent proposal'), title.includes('startup selections'));
     const forceCreateFailure = testInfo.titlePath.join(' ').includes('migration rollback failure');
     app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
@@ -143,7 +149,14 @@ test.describe('user-initiated worktree create', () => {
     await page.waitForSelector('.app', { timeout: 10_000 });
   });
 
-  test.afterEach(async () => {
+  test.afterEach(async ({}, testInfo) => {
+    if (testInfo.status !== testInfo.expectedStatus) {
+      fs.writeFileSync(testInfo.outputPath('main.log'), readLogText(userDataDir));
+      const projectFile = path.join(userDataDir, 'projects.json');
+      if (fs.existsSync(projectFile)) fs.copyFileSync(projectFile, testInfo.outputPath('projects.json'));
+      const currentPage = app.windows()[0];
+      if (currentPage && !currentPage.isClosed()) await currentPage.screenshot({ path: testInfo.outputPath('failure.png') });
+    }
     await app.close().catch(() => {});
     fs.rmSync(userDataDir, { recursive: true, force: true });
     const parent = path.dirname(repo);
@@ -163,9 +176,10 @@ test.describe('user-initiated worktree create', () => {
       .toContainText('.agent/features');
     const startupOverride = dialog.locator('.worktree-startup-tabs-override');
     await expect(startupOverride).toHaveValue('');
-    await expect(startupOverride.locator('option').first()).toHaveText('Terminal');
+    await expect(startupOverride.locator('option').first()).toHaveText('None');
+    await expect(dialog.locator('.worktree-startup-terminal')).toBeChecked();
     await expect(startupOverride.locator(`option[value="${CLAUDE_PROVIDER}"]`))
-      .toHaveText('Agent (Claude) + Terminal');
+      .toHaveText('Claude');
 
     // Every note is pickable regardless of status; rows are filename-first and
     // keep status on the same line as the filename.
@@ -282,6 +296,89 @@ test.describe('user-initiated worktree create', () => {
     expect(Object.values(child?.agentViews ?? {})).toEqual([{ provider: CODEX_PROVIDER, prefs: {} }]);
   });
 
+  for (const choice of [
+    { name: 'Terminal only', agent: '', terminal: true, labels: ['Terminal'] },
+    { name: 'Agent only', agent: CLAUDE_PROVIDER, terminal: false, labels: ['Claude'] },
+    { name: 'Agent and Terminal', agent: CLAUDE_PROVIDER, terminal: true, labels: ['Claude', 'Terminal'] },
+  ]) {
+    test(`startup selections create ${choice.name} with fresh state`, async () => {
+      const dialog = await openNewWorktreeDialog(page);
+      await dialog.locator('.worktree-startup-tabs-override').selectOption(choice.agent);
+      await dialog.locator('.worktree-startup-terminal').setChecked(choice.terminal);
+      await dialog.locator('.worktree-input').fill('feature/selected-startup');
+      await dialog.locator('.conn-btn-next').click();
+      await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('.tab-bar .tab-label')).toHaveText(choice.labels);
+      if (choice.agent) await expect(page.locator('.agent-textarea:visible')).toBeVisible();
+      const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8'));
+      const child = document.projects.find((project: { parentProjectId?: string }) => project.parentProjectId === PROJECT_ID);
+      expect(child.defaultTabs).toEqual([
+        ...(choice.agent ? [{ name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER, sessionId: expect.any(String) }] : []),
+        ...(choice.terminal ? [{ name: 'Terminal' }] : []),
+      ]);
+      expect(Object.values(child.agentViews)).toEqual(choice.agent ? [{ provider: CLAUDE_PROVIDER, prefs: {} }] : []);
+      expect(Object.keys(child.agentViews)).not.toContain('parent-startup-session');
+      const parent = document.projects.find((project: { id: string }) => project.id === PROJECT_ID);
+      expect(parent.defaultTabs).toContainEqual({ name: 'Parent shell', cmd: 'echo parent' });
+      expect(parent.agentViews['parent-startup-session'].prefs.model).toBe('parent-model');
+    });
+  }
+
+  test('empty startup selection blocks Create and Enter, recovers, and resets on reopen', async () => {
+    let dialog = await openNewWorktreeDialog(page);
+    await dialog.locator('.worktree-input').fill('feature/empty-startup');
+    await dialog.locator('.worktree-note-row', { hasText: 'demo.md' }).locator('input').check();
+    await dialog.locator('.worktree-startup-terminal').uncheck();
+    await expect(dialog.locator('.conn-btn-next')).toBeDisabled();
+    await expect(dialog.locator('.worktree-startup-error')).toContainText('Select at least one initial view');
+    await dialog.locator('.worktree-input').press('Enter');
+    await expect(dialog).toBeVisible();
+    expect(fs.existsSync(`${repo}-feature-empty-startup`)).toBe(false);
+    expect(fs.existsSync(path.join(repo, '.agent/features/demo.md'))).toBe(true);
+    await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
+    await dialog.locator('.worktree-startup-tabs-override').selectOption(CODEX_PROVIDER);
+    await expect(dialog.locator('.worktree-startup-error')).toHaveCount(0);
+    await expect(dialog.locator('.worktree-error-text')).toHaveCount(0);
+    await expect(dialog.locator('.conn-btn-next')).toBeEnabled();
+    await dialog.locator('.settings-close').click();
+    dialog = await openNewWorktreeDialog(page);
+    await expect(dialog.locator('.worktree-startup-tabs-override')).toHaveValue('');
+    await expect(dialog.locator('.worktree-startup-terminal')).toBeChecked();
+    await expect(dialog.locator('.worktree-startup-error')).toHaveCount(0);
+  });
+
+  test('main rejects an empty startup selection before a real Git worktree is created', async () => {
+    const savedProjects = fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8');
+    const result = await page.evaluate(async (cwd) => window.shelfApi.git.worktreeAdd(
+      { type: 'local' }, cwd, 'feature/rejected-startup', true, { startupTerminal: false },
+    ), repo);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Select at least one initial view') });
+    expect(fs.existsSync(`${repo}-feature-rejected-startup`)).toBe(false);
+    expect(execFileSync('git', ['branch', '--list', 'feature/rejected-startup'], { cwd: repo, encoding: 'utf8' }).trim()).toBe('');
+    expect(fs.existsSync(path.join(repo, '.agent/features/demo.md'))).toBe(true);
+    await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
+    expect(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8')).toBe(savedProjects);
+  });
+
+  for (const agent of ['', CLAUDE_PROVIDER]) {
+    test(`agent proposal prefill can be overridden to ${agent || 'None'} before Create`, async () => {
+      await openAgentTab(page);
+      const textarea = page.locator('.agent-textarea:visible');
+      await textarea.fill(`worktree_create:feature/override demo.md ${CODEX_PROVIDER}`);
+      await textarea.press('Enter');
+      const dialog = page.locator('.worktree-dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog.locator('.worktree-startup-tabs-override')).toHaveValue(CODEX_PROVIDER);
+      await dialog.locator('.worktree-startup-tabs-override').selectOption(agent);
+      await dialog.locator('.conn-btn-next').click();
+      await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+      await expect(page.locator('.tab-bar .tab-label')).toHaveText(agent ? ['Claude', 'Terminal'] : ['Terminal']);
+      const document = JSON.parse(fs.readFileSync(path.join(userDataDir, 'projects.json'), 'utf8'));
+      const child = document.projects.find((project: { parentProjectId?: string }) => project.parentProjectId === PROJECT_ID);
+      expect(Object.values(child.agentViews)).toEqual(agent ? [{ provider: CLAUDE_PROVIDER, prefs: {} }] : []);
+    });
+  }
+
   test('legacy secret files do not block durable child creation or auto-connect', async () => {
     const legacyFiles = new Map([
       ['project-secrets.json', 'retired side-car: do not parse or copy'],
@@ -305,7 +402,7 @@ test.describe('user-initiated worktree create', () => {
     await page.locator('.context-menu-item', { hasText: 'Agent (Claude)' }).click();
     const textarea = page.locator('.agent-textarea:visible');
     await expect(textarea).toBeVisible({ timeout: 5_000 });
-    await textarea.fill('delay:800|worktree_create:feature/proposed demo.md');
+    await textarea.fill(`delay:800|worktree_create:feature/proposed demo.md ${CODEX_PROVIDER}`);
     await textarea.press('Enter');
 
     const baseProject = page.locator('.sidebar-item', { hasText: 'WT Base' });
@@ -318,6 +415,8 @@ test.describe('user-initiated worktree create', () => {
     await expect(baseProject).toHaveClass(/active/);
     await expect(dialog.locator('.project-requester')).toHaveText('Requested by: WT Base');
     await expect(dialog.locator('.worktree-input')).toHaveValue('feature/proposed');
+    await expect(dialog.locator('.worktree-startup-tabs-override')).toHaveValue(CODEX_PROVIDER);
+    await expect(dialog.locator('.worktree-startup-terminal')).toBeChecked();
     await expect(
       dialog.locator('.worktree-note-row', { hasText: 'demo.md' }).locator('input[type="checkbox"]'),
     ).toBeChecked();

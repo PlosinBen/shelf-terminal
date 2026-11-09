@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { WorktreeStartupOptions, WorktreeCreateProposal } from '@shared/worktree-child-config';
 import { IPC } from '@shared/ipc-channels';
 import { DELEGATION } from '@shared/agent-delegation';
 
@@ -97,8 +98,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
       ipcRenderer.invoke(IPC.GIT_CHECK_DIRTY, { connection, cwd }),
     checkout: (connection: any, cwd: string, branch: string): Promise<void> =>
       ipcRenderer.invoke(IPC.GIT_CHECKOUT, { connection, cwd, branch }),
-    worktreeAdd: (connection: any, cwd: string, branch: string, newBranch: boolean) =>
-      ipcRenderer.invoke(IPC.GIT_WORKTREE_ADD, { connection, cwd, branch, newBranch }),
+    worktreeAdd: (connection: any, cwd: string, branch: string, newBranch: boolean, startup?: WorktreeStartupOptions) =>
+      ipcRenderer.invoke(IPC.GIT_WORKTREE_ADD, { connection, cwd, branch, newBranch, startup }),
     worktreeRemove: (connection: any, cwd: string, worktreePath: string) =>
       ipcRenderer.invoke(IPC.GIT_WORKTREE_REMOVE, { connection, cwd, worktreePath }),
     migrateNote: (connection: any, baseCwd: string, worktreeCwd: string, notePaths: string[]) =>
@@ -120,8 +121,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
     // are user-initiated in the renderer — #lifecycle).
     finishMergeBack: (payload: { connection: any; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string; sourceCommit?: string }) =>
       ipcRenderer.invoke(IPC.WORKTREE_FINISH_MERGE_BACK, payload),
-    onProposeCreate: (callback: (payload: { projectId: string; branch?: string; notePaths?: string[] }) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, payload: { projectId: string; branch?: string; notePaths?: string[] }) => callback(payload);
+    onProposeCreate: (callback: (payload: WorktreeCreateProposal) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, payload: WorktreeCreateProposal) => callback(payload);
       ipcRenderer.on(IPC.WORKTREE_PROPOSE_CREATE, listener);
       return () => ipcRenderer.removeListener(IPC.WORKTREE_PROPOSE_CREATE, listener);
     },

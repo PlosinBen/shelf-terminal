@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Project } from '@shared/projects';
+import { CODEX_PROVIDER, FAKE_PROVIDER } from '@shared/agent-providers';
 import { SHELF_MCP } from '@shared/shelf-mcp';
 import { randomUUID } from 'node:crypto';
 
@@ -210,6 +211,24 @@ describe('app-tool dispatcher (worktree proposals)', () => {
     expect(send).toHaveBeenCalledWith('worktree:propose-create', {
       projectId: 'base', branch: 'feature/worktree', notePaths: ['.agent/features/worktree-flow.md'],
     });
+  });
+
+  it('prefills a provider key and echoes it in the acknowledgement', async () => {
+    const result = await handleAppTool('worktree.propose_create', { agent: CODEX_PROVIDER }, { projectId: 'base' });
+    expect(result).toMatchObject({ ok: true, data: { agent: CODEX_PROVIDER } });
+    expect(send).toHaveBeenCalledWith('worktree:propose-create', {
+      projectId: 'base', notePaths: [], agent: CODEX_PROVIDER,
+    });
+  });
+
+  it.each(['unknown', '', null, 42, FAKE_PROVIDER])('rejects invalid or hidden agent %j without opening UI', async (agent) => {
+    vi.stubEnv('DEV', false);
+    try {
+      const result = await handleAppTool('worktree.propose_create', { agent, note: 'a.md' }, { projectId: 'base' });
+      expect(result).toMatchObject({ ok: false, error: expect.any(String) });
+      expect(send).not.toHaveBeenCalled();
+      expect(listFeatureNotes).not.toHaveBeenCalled();
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it('propose_create rejects a nested worktree before resolving notes or sending IPC', async () => {

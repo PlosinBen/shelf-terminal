@@ -2247,6 +2247,12 @@ button {
   gap: 4px;
 }
 
+.worktree-startup-terminal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .worktree-note-picker-label {
   font-size: 11px;
   color: var(--text-muted);

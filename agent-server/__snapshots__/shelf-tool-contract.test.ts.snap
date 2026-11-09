@@ -316,11 +316,15 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
     "name": "browser_open",
   },
   {
-    "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch and feature-note file(s). This tool creates nothing. The user reviews the branch, selected notes, and agent provider. If the user confirms Create, Shelf creates the Git worktree and child project and migrates the selected note files. The provider defaults to the parent project's resolved default but remains user-selectable; the child inherits openAgentOnConnect but never the parent's agent session. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths).",
+    "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch, feature-note file(s), and agent provider key. This tool creates nothing. The user reviews and may override the branch, selected notes, Agent view and Terminal view before pressing Create. Agent defaults to none and Terminal defaults to enabled; at least one initial view is required. On confirmation Shelf creates the Git worktree and child project, migrates selected notes, and connects the child. Startup views follow the final selections; Agent identity and preferences are fresh. Other project setup is inherited. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths), agent (optional registered provider key, not a model or session; invalid or unavailable keys are rejected).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
       "properties": {
+        "agent": {
+          "description": "registered provider key to preselect for Agent view; not a model or existing session",
+          "type": "string",
+        },
         "branch": {
           "description": "suggested new branch name",
           "type": "string",
@@ -698,13 +702,17 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
     "name": "browser_open",
   },
   {
-    "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch and feature-note file(s). This tool creates nothing. The user reviews the branch, selected notes, and agent provider. If the user confirms Create, Shelf creates the Git worktree and child project and migrates the selected note files. The provider defaults to the parent project's resolved default but remains user-selectable; the child inherits openAgentOnConnect but never the parent's agent session. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths).",
+    "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch, feature-note file(s), and agent provider key. This tool creates nothing. The user reviews and may override the branch, selected notes, Agent view and Terminal view before pressing Create. Agent defaults to none and Terminal defaults to enabled; at least one initial view is required. On confirmation Shelf creates the Git worktree and child project, migrates selected notes, and connects the child. Startup views follow the final selections; Agent identity and preferences are fresh. Other project setup is inherited. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths), agent (optional registered provider key, not a model or session; invalid or unavailable keys are rejected).",
     "execution": {
       "taskSupport": "forbidden",
     },
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "agent": {
+          "description": "registered provider key to preselect for Agent view; not a model or existing session",
+          "type": "string",
+        },
         "branch": {
           "description": "suggested new branch name",
           "type": "string",

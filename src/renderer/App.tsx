@@ -661,14 +661,14 @@ export function App() {
       addTab(projectIndex, undefined, undefined, undefined, 'web', undefined, url);
     });
 
-    const offProposeWorktreeCreate = window.shelfApi.worktree.onProposeCreate(({ projectId, branch, notePaths }) => {
+    const offProposeWorktreeCreate = window.shelfApi.worktree.onProposeCreate(({ projectId, branch, notePaths, agent }) => {
       const projectIndex = getProjectIndexById(projectId);
       if (projectIndex === -1) {
         console.warn(`[worktree] propose-create for unknown project ${projectId}`);
         return;
       }
       setActiveProjectById(projectId);
-      emit(Events.CREATE_WORKTREE, projectId, { branch, notePaths });
+      emit(Events.CREATE_WORKTREE, projectId, { branch, notePaths, agent });
     });
 
     const offProposeWorktreeFinish = window.shelfApi.worktree.onProposeFinish(({ projectId }) => {

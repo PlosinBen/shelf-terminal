@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { CODEX_PROVIDER } from '../src/shared/agent-providers';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startShelfMcpServer, type ShelfMcpHandle } from './shelf-mcp';
@@ -40,7 +41,7 @@ const cases = [
   { name: 'delete_app_skill_file', op: 'app_skill.delete_file', args: { name: 'sample', path: 'ref.md' } },
   { name: 'browser_fetch', op: 'web.fetch', args: { url: 'https://example.com', method: 'POST', headers: { test: 'value' }, body: 'query' } },
   { name: 'browser_open', op: 'web.open', args: { url: 'https://example.com', reason: 'login' } },
-  { name: 'propose_worktree_create', op: 'worktree.propose_create', args: { branch: 'feature', note: 'one.md', notes: ['two.md'] } },
+  { name: 'propose_worktree_create', op: 'worktree.propose_create', args: { branch: 'feature', note: 'one.md', notes: ['two.md'], agent: CODEX_PROVIDER } },
   { name: 'propose_worktree_finish', op: 'worktree.propose_finish', args: {} },
 ] as const;
 
@@ -100,7 +101,7 @@ describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
       it.each([
         { name: 'browser_fetch', args: { url: 'https://example.com' }, op: 'web.fetch', expected: { url: 'https://example.com', method: undefined, headers: undefined, body: undefined } },
         { name: 'browser_open', args: { url: 'https://example.com' }, op: 'web.open', expected: { url: 'https://example.com', reason: undefined } },
-        { name: 'propose_worktree_create', args: {}, op: 'worktree.propose_create', expected: { branch: undefined, note: undefined, notes: undefined } },
+        { name: 'propose_worktree_create', args: {}, op: 'worktree.propose_create', expected: { branch: undefined, note: undefined, notes: undefined, agent: undefined } },
       ])('$name keeps omitted optional arguments compatible', async ({ name, args, op, expected }) => {
         callMainMock.mockResolvedValue({ ok: true, data: 'ok' });
         await expect(invoke(name, args)).resolves.toEqual({ content: [{ type: 'text', text: 'ok' }] });

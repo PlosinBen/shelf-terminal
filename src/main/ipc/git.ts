@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron';
+import { normalizeWorktreeStartup, type WorktreeStartupOptions } from '@shared/worktree-child-config';
 import { IPC } from '@shared/ipc-channels';
 import { createConnector } from '../connector';
 import { migrateFeatureNotes, restoreFeatureNotes } from '../worktree/note-migration';
@@ -68,8 +69,9 @@ export function registerGitHandlers(): void {
 
   ipcMain.handle(
     IPC.GIT_WORKTREE_ADD,
-    async (_event, payload: { connection: Connection; cwd: string; branch: string; newBranch: boolean }): Promise<WorktreeAddResult> => {
+    async (_event, payload: { connection: Connection; cwd: string; branch: string; newBranch: boolean; startup?: WorktreeStartupOptions }): Promise<WorktreeAddResult> => {
       try {
+        normalizeWorktreeStartup(payload.startup, import.meta.env.DEV);
         const connector = createConnector(payload.connection);
         const parentDir = payload.cwd.replace(/\/+$/, '').replace(/[^/]+$/, '').replace(/\/+$/, '');
         const dirName = `${payload.cwd.replace(/\/+$/, '').split('/').pop()}-${payload.branch.replace(/\//g, '-')}`;

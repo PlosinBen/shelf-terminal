@@ -536,12 +536,12 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       return;
     }
 
-    // worktree_create:<branch> [<note>] — opens the real New Worktree dialog
+    // worktree_create:<branch> [<note>] [<agent>] — opens the real New Worktree dialog
     // through the bridge without creating anything. The optional note path has
     // no spaces, matching feature-note filenames.
     if (step.startsWith('worktree_create:')) {
-      const [branch, note] = step.slice('worktree_create:'.length).trim().split(/\s+/, 2);
-      const res = await callMain('worktree.propose_create', { branch, note });
+      const [branch, note, agent] = step.slice('worktree_create:'.length).trim().split(/\s+/, 3);
+      const res = await callMain('worktree.propose_create', { branch, note, ...(agent ? { agent } : {}) });
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `worktree_create ${JSON.stringify(res)}` });
       return;
     }

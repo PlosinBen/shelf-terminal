@@ -87,4 +87,20 @@ describe('buildWorktreeChildConfig', () => {
     expect(overridden).not.toHaveProperty('agentSessionIds');
   });
 
+  it('supports Agent only without inheriting parent records or prefs', () => {
+    const child = buildWorktreeChildConfig(parent, {
+      cwd: '/repo-agent', worktreeBranch: 'agent',
+      startupAgentProvider: CODEX_PROVIDER, startupTerminal: false,
+    });
+    expect(child.defaultTabs).toEqual([{ name: 'Codex', kind: 'agent', provider: CODEX_PROVIDER }]);
+    expect(child).not.toHaveProperty('agentViews');
+    expect(child).not.toHaveProperty('agentPrefs');
+  });
+
+  it('rejects a selection with neither Agent nor Terminal', () => {
+    expect(() => buildWorktreeChildConfig(parent, {
+      cwd: '/repo-empty', worktreeBranch: 'empty', startupTerminal: false,
+    })).toThrow('Select at least one initial view');
+  });
+
 });

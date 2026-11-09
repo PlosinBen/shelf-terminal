@@ -20,6 +20,8 @@ Proposal or user menu
   → optional project feature-note binding
       disabled → omit note discovery
       enabled → list direct note candidates or show a non-blocking listing error
+  → user confirms independent Agent / Terminal startup selection
+  → main validates final selection before any Git creation
   → create child checkout
   → optionally migrate selected feature notes into child as one all-or-nothing batch
   → create child project with the binding captured as a transaction snapshot
@@ -75,7 +77,7 @@ A successful Connect that creates tabs, or an explicit Rescan, sends one project
 
 The scanner reads a complete Git worktree snapshot, checks target checkout identity and access, excludes the main checkout, and matches existing children by repository/worktree identity. Confirmed non-repositories with no children skip the operation. Indeterminate access or inconsistent snapshots fail without changing availability or membership.
 
-The repository serializes batch publication with ordinary project writes. A topology baseline and lifecycle generation reject obsolete results; unrelated session/preference writes remain valid and are preserved. New children inherit current parent environment, initialization, Quick Commands and note binding, but not tabs, conversations or Agent preferences. Their startup is an explicit Terminal, or a selected fresh Agent plus Terminal. Existing children receive only scan-owned metadata. Config persistence precedes canonical publication.
+The repository serializes batch publication with ordinary project writes. A topology baseline and lifecycle generation reject obsolete results; unrelated session/preference writes remain valid and are preserved. New children inherit current parent environment, initialization, Quick Commands and note binding, but not tabs, conversations or Agent preferences. Reconciled new children start with one Terminal. User-created children start with the selected fresh Agent, Terminal, or both; an empty selection is rejected before checkout creation. Existing children receive only scan-owned metadata. Config persistence precedes canonical publication.
 
 Renderer refreshes the current canonical collection, disconnects missing children through the usual tab teardown path, and preserves focus. Missing availability is persisted separately from runtime folder warnings. Recovery clears the validated child's old folder warning and returns it to the disconnected view. Error/busy presentation is runtime state keyed by the main project; errors offer Rescan beside that main without replacing project content. A refresh failure after commit triggers canonical refresh, not batch replay.
 

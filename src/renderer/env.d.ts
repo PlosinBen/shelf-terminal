@@ -71,7 +71,7 @@ interface ShelfApi {
     branchList: (connection: import('../shared/types').Connection, cwd: string) => Promise<import('../shared/types').GitBranchInfo[]>;
     checkDirty: (connection: import('../shared/types').Connection, cwd: string) => Promise<boolean>;
     checkout: (connection: import('../shared/types').Connection, cwd: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
-    worktreeAdd: (connection: import('../shared/types').Connection, cwd: string, branch: string, newBranch: boolean) => Promise<import('../shared/types').WorktreeAddResult>;
+    worktreeAdd: (connection: import('../shared/types').Connection, cwd: string, branch: string, newBranch: boolean, startup?: import('../shared/worktree-child-config').WorktreeStartupOptions) => Promise<import('../shared/types').WorktreeAddResult>;
     worktreeRemove: (connection: import('../shared/types').Connection, cwd: string, worktreePath: string) => Promise<import('../shared/types').WorktreeRemoveResult>;
     migrateNote: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string, notePaths: string[]) => Promise<import('../shared/types').MigrateNoteResult>;
     restoreNotes: (connection: import('../shared/types').Connection, baseCwd: string, worktreeCwd: string, featureNoteDir: string) => Promise<import('../shared/types').MigrateNoteResult>;
@@ -84,7 +84,7 @@ interface ShelfApi {
     reconcile: (projectId: string) => Promise<import('../shared/worktree').WorktreeScanResult>;
     lifecycle: (projectId: string, active: boolean) => Promise<void>;
     finishMergeBack: (payload: { connection: import('../shared/types').Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string; sourceCommit?: string }) => Promise<import('../shared/types').FinishMergeBackResult>;
-    onProposeCreate: (callback: (payload: { projectId: string; branch?: string; notePaths?: string[] }) => void) => () => void;
+    onProposeCreate: (callback: (payload: import('../shared/worktree-child-config').WorktreeCreateProposal) => void) => () => void;
     onProposeFinish: (callback: (payload: { projectId: string }) => void) => () => void;
   };
   settings: {

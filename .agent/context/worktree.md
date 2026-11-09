@@ -28,7 +28,7 @@ related:
 
 ## worktree#3 — A child starts fresh tabs and Agent preferences  ·  [Decision]
 
-**Decision:** New Worktree defaults to one Terminal. Selecting a registry provider creates that provider's fresh Agent plus one Terminal. It never copies parent startup/runtime tabs, Agent records or preferences. Environment, init script, Quick Commands and feature-note binding still inherit. Existing child settings are not reset.
+**Decision:** New Worktree offers an independent Agent provider selector (default none) and Terminal checkbox (default enabled). The final selection creates Terminal only, a fresh Agent only, or a fresh Agent followed by Terminal; an empty selection is rejected. It never copies parent startup/runtime tabs, Agent records or preferences. Environment, init script, Quick Commands and feature-note binding still inherit. Existing child settings are not reset.
 
 **Reason:** No current requirement justifies copying the parent layout. Fresh tabs avoid ambiguous preference inheritance when several parent Views use the same provider, without introducing a source-View selector.
 
@@ -84,7 +84,7 @@ related:
 
 ## worktree#10 — Create proposals accept legacy single-note and preferred multi-note inputs  ·  [Decision]
 
-**Decision:** `propose_worktree_create` accepts `note?: string` as a legacy alias and `notes?: string[]` as the preferred multi-note input. For explicit identifiers, main lists the project's configured candidates and resolves exact canonical paths first, then unique basenames, before sending deduped canonical `notePaths` to renderer prefill. Disabled, unlistable, unknown, or ambiguous input fails before the dialog opens. The fake provider's compact `worktree_create:<branch> [<note>]` command remains single-note shorthand; multi-note behavior is covered through direct app-tool, MCP schema, and renderer prefill tests.
+**Decision:** `propose_worktree_create` accepts `note?: string` as a legacy alias, `notes?: string[]` as the preferred multi-note input, and `agent?: string` as a provider-key prefill. The optional Agent prefill never changes the default-enabled Terminal checkbox and remains user-overridable. For explicit identifiers, main lists the project's configured candidates and resolves exact canonical paths first, then unique basenames, before sending deduped canonical `notePaths` to renderer prefill. Disabled, unlistable, unknown, or ambiguous input fails before the dialog opens. The fake provider's compact `worktree_create:<branch> [<note>] [<agent>]` command remains single-note shorthand; multi-note behavior is covered through direct app-tool, MCP schema, and renderer prefill tests.
 
 **Reason:** Older agents and E2E smoke paths may still call the single-note form, including bare filenames, while migration requires canonical repo-relative paths. Resolving against the authoritative listing at the bridge boundary makes the acknowledgement and audit result truthful and keeps renderer code on one payload shape.
 
@@ -177,3 +177,11 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 **Reason:** A detached worktree is a valid checkout. Its ability to merge depends on ancestry, not whether it has a branch. Saved sidebar metadata can be stale after external checkout commands, so it cannot authorize branch deletion.
 
 **Do not change casually because:** Merge-only still preserves the entire environment. The selected target is explicit; discovering an external child captures the main's current branch as a default, not a historical origin. If the main is detached, leave that default empty and let the existing target selector choose a branch.
+
+## worktree#21 — Startup selection is validated before Git creation  ·  [Decision]
+
+**Decision:** The proposal bridge validates the optional Agent provider key against the registry and build visibility before resolving notes or opening UI. The final user selection travels separately through the Git create IPC. Main rejects malformed options, unavailable providers and empty selections before creating a connector or executing Git. Omitted startup options or Terminal selection retain the enabled-Terminal default. Renderer validates before lifecycle start and passes the same selection snapshot to Git and child config creation.
+
+**Reason:** Child project persistence happens after worktree creation and note migration; its non-empty defaultTabs guard cannot prevent those earlier side effects. A separate preflight would not constrain the subsequent Git call. Keeping the guard at the mutation entry enforces the contract without moving the whole renderer transaction.
+
+**Do not change casually because:** Registry membership alone includes internal providers. Main and renderer use the same development-build visibility policy; a fake backend in tests does not make an internal provider selectable in production. Preserve explicit false for Agent-only startup and do not turn invalid input into the legacy omitted-options default.

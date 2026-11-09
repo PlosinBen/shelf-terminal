@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { CODEX_PROVIDER, FAKE_PROVIDER } from '@shared/agent-providers';
 import type { Connection } from '@shared/types';
 
 // Capture the handlers registered via ipcMain.handle so we can invoke them.
@@ -11,14 +12,15 @@ vi.mock('electron', () => ({
 let execImpl: (cwd: string, cmd: string) => Promise<{ stdout: string; stderr: string }>;
 const execCalls: Array<{ cwd: string; cmd: string }> = [];
 vi.mock('../connector', () => ({
-  createConnector: () => ({
+  createConnector: vi.fn(() => ({
     exec: (cwd: string, cmd: string) => {
       execCalls.push({ cwd, cmd });
       return execImpl(cwd, cmd);
     },
-  }),
+  })),
 }));
 
+const { createConnector } = await import('../connector');
 const { registerGitHandlers } = await import('./git');
 const { IPC } = await import('@shared/ipc-channels');
 
@@ -30,6 +32,7 @@ beforeEach(() => {
   delete process.env.SHELF_TEST_GIT_WORKTREE_REMOVE_ERROR;
   handlers.clear();
   execCalls.length = 0;
+  vi.mocked(createConnector).mockClear();
   execImpl = async () => ({ stdout: '', stderr: '' });
   registerGitHandlers();
 });
@@ -89,6 +92,49 @@ describe('GIT_WORKTREE_ADD captures the parent baseBranch', () => {
 
     expect(res.ok).toBe(true);
     expect(res.baseBranch).toBeUndefined();
+  });
+});
+
+describe('GIT_WORKTREE_ADD startup selection', () => {
+  beforeEach(() => { vi.stubEnv('DEV', false); });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it.each([
+    { startupTerminal: false },
+    { startupTerminal: 'false' },
+    { startupAgentProvider: 'unknown' },
+    { startupAgentProvider: '' },
+    { startupAgentProvider: null },
+    { startupAgentProvider: FAKE_PROVIDER },
+    null,
+  ])('rejects invalid startup %j before invoking Git', async (startup) => {
+    const result = await handlers.get(IPC.GIT_WORKTREE_ADD)!({}, {
+      connection, cwd: '/repo', branch: 'feature/startup', newBranch: true, startup,
+    });
+    expect(result).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(execCalls).toEqual([]);
+    expect(createConnector).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined, {}, { startupTerminal: true },
+    { startupAgentProvider: CODEX_PROVIDER },
+    { startupAgentProvider: CODEX_PROVIDER, startupTerminal: false },
+  ])('accepts compatible startup %j', async (startup) => {
+    const result = await handlers.get(IPC.GIT_WORKTREE_ADD)!({}, {
+      connection, cwd: '/repo', branch: 'feature/startup', newBranch: true, startup,
+    });
+    expect(result.ok).toBe(true);
+    expect(execCalls.some(({ cmd }) => cmd.includes('git worktree add'))).toBe(true);
+  });
+
+  it('allows internal providers only in a development build', async () => {
+    vi.stubEnv('DEV', true);
+    const result = await handlers.get(IPC.GIT_WORKTREE_ADD)!({}, {
+      connection, cwd: '/repo', branch: 'feature/dev', newBranch: true,
+      startup: { startupAgentProvider: FAKE_PROVIDER, startupTerminal: false },
+    });
+    expect(result.ok).toBe(true);
   });
 });
 

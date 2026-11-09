@@ -251,7 +251,7 @@ title: shelf-terminal — Intent → File Index
 | 資料夾瀏覽器 | `components/FolderBrowser.tsx` | 純展示元件，顯示目錄清單和 keyboard hints |
 | 頁內搜尋 | `components/SearchBar.tsx` | terminal tab 走 xterm SearchAddon；agent/web tab 走 main findInPage（`shelfApi.find`）+ 命中計數 |
 | Settings 面板 | `components/SettingsPanel.tsx` | 左側 tab 分頁（Terminal / Agent / Models / PM Agent / Web / Shortcuts）；Backup 是獨立右側 operation panel，不在 Settings |
-| Worktree 建立 | `components/WorktreeDialog.tsx` + `../shared/worktree-child-config.ts` | 顯示 target、configured note source/list 狀態、接收 branch/note prefill、繼承完整 startup tabs 或以 Agent + Terminal 覆蓋後建立 sub-project |
+| Worktree 建立 | `components/WorktreeDialog.tsx` + `../shared/worktree-child-config.ts` | 顯示 target 與 configured note 狀態、接收 branch/note/agent prefill；共用 startup options、provider/非空驗證，依獨立 Agent/Terminal 選擇建立 fresh sub-project |
 | Worktree proposal prefill helper | `worktree-prefill.ts` | 純函式正規化 New Worktree proposal 帶入的多 note path prefill |
 | Feature-note config edit rule | `feature-note-config-edit.ts` | main config canonicalization 與 child snapshot read-only save rule |
 | Worktree 關閉 gate | `components/WorktreeCloseGate.tsx` | Finish/Abandon gate：note preflight、Only merge、Abandon note restore、teardown 與 completion event |

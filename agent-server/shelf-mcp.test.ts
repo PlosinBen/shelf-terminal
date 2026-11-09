@@ -134,6 +134,7 @@ describe('shelf MCP bridge server', () => {
       type: 'object',
       properties: {
         branch: { type: 'string' },
+        agent: { type: 'string' },
         note: { type: 'string' },
         notes: { type: 'array', items: { type: 'string' } },
       },
