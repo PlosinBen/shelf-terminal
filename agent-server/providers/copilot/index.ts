@@ -25,7 +25,7 @@ import type { AgentPrefs } from '@shared/types';
 import { PERMISSION_CONTROL_STRATEGIES, type PermissionControlCapabilities } from '@shared/permission-controls';
 import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import { parseSlashPrefix } from '@shared/slash-prefix';
-import { type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
+import { severityFromUtilization, type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
@@ -45,7 +45,7 @@ import {
   isCopilotCancellationNotice,
 } from './helpers';
 import { refreshCopilotCredit } from './credit';
-import { createCopilotUsageObserver } from './usage-observation';
+import { COPILOT_USAGE_LOG_TAG, createCopilotUsageObserver, summarizeCopilotUsage } from './usage-observation';
 import { startLogin as startCopilotLogin, prefillLoginUrl, type LoginRunner } from './login';
 
 const COPILOT_STALE_SESSION_NOTICE = 'Previous Copilot session was unavailable; started a new session.';
@@ -162,6 +162,23 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   // The active turn's send — the permission bridge rides this lane so requests
   // reach the renderer on the current turn's id.
   let activeExecutionSend: SendFn | null = null;
+  // Keep only the latest sample until session establishment and output binding finish.
+  let pendingContextUsage: { sessionId: string; used: number; size: number } | undefined;
+  function publishContextUsage(): void {
+    if (!pendingContextUsage || !session) return;
+    if (pendingContextUsage.sessionId !== session.sessionId) {
+      serverLog('debug', COPILOT_USAGE_LOG_TAG, 'ignored usage for a different session', {
+        sessionId: pendingContextUsage.sessionId, currentSessionId: session.sessionId,
+      });
+      pendingContextUsage = undefined;
+      return;
+    }
+    const output = sessionSend ?? activeExecutionSend;
+    if (!output) return;
+    const ratio = pendingContextUsage.used / pendingContextUsage.size;
+    output({ type: 'status', contextUsage: { text: `ctx: ${Math.round(ratio * 100)}%`, severity: severityFromUtilization(ratio) } });
+    pendingContextUsage = undefined;
+  }
   // The outstanding ACP prompt is the cancellation acknowledgement boundary.
   // session/cancel itself is a notification; only this prompt resolving with
   // stopReason:'cancelled' confirms that Copilot stopped its model/tool work.
@@ -525,6 +542,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     permissions.cancelAll();
     if (session) driver.forget(session.sessionId);
     session = null;
+    pendingContextUsage = undefined;
     sessionCwd = null;
     sessionAppId = undefined;
     sessionModes = undefined;
@@ -580,8 +598,19 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       name: 'shelf-copilot',
       onRequestPermission,
       onSessionUpdate(notification) {
-        // Observe without enabling context display on CLI upgrades. agent-providers#53
-        if (usageObserver.observe(notification, !!(sessionSend || activeExecutionSend))) return;
+        // Validate at the provider boundary; usage must never change execution state. agent-providers#53
+        if (usageObserver.observe(notification, !!(sessionSend || activeExecutionSend))) {
+          if (conn !== thisConn) {
+            serverLog('debug', COPILOT_USAGE_LOG_TAG, 'ignored usage from a replaced connection', { sessionId: notification.sessionId });
+            return;
+          }
+          const { used, size } = summarizeCopilotUsage(notification.update as { used?: unknown; size?: unknown });
+          if (used.valid && size.valid && used.value! <= size.value!) {
+            pendingContextUsage = { sessionId: notification.sessionId, used: used.value!, size: size.value! };
+            publishContextUsage();
+          }
+          return;
+        }
         observeAutopilotCompletion(notification);
         // Copilot's ACP adapter flattens session.info into agent_message_chunk,
         // so the shared driver cannot distinguish this framework notice from a
@@ -610,6 +639,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       child = null;
       connAppId = undefined;
       session = null;
+      pendingContextUsage = undefined;
       sessionCwd = null;
     });
     return conn;
@@ -637,13 +667,18 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     if (conn && connAppId !== appId) {
       serverLog('debug', 'copilot', `appId changed (${String(connAppId).slice(0, 8)} → ${String(appId).slice(0, 8)}) — respawning connection for COPILOT_HOME`);
       try { conn.close(); } catch { /* best-effort */ }
-      conn = null; child = null; connAppId = undefined; session = null; sessionCwd = null;
+      conn = null; child = null; connAppId = undefined; session = null; pendingContextUsage = undefined; sessionCwd = null;
     }
 
     // Reuse only if cwd AND the MCP/skills context (appId) are unchanged — else
     // recreate so app-level MCP servers + skills take effect at session/new.
-    if (session && sessionCwd === input.cwd && sessionAppId === appId) return session;
+    if (session && sessionCwd === input.cwd && sessionAppId === appId) {
+      publishContextUsage();
+      return session;
+    }
     if (session) driver.forget(session.sessionId);
+    session = null;
+    pendingContextUsage = undefined;
 
     // Skills are already projected to `$COPILOT_HOME/skills` by the agent-server
     // (it calls skillTarget + projectAppSkills before this) — the backend does no
@@ -693,6 +728,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           sessionConfigOptions = restored?.configOptions ?? undefined;
           pendingInitialPerfSessionId = session.sessionId;
           settleObservation(supportsResume ? 'resumed' : 'loaded', session.sessionId);
+          publishContextUsage();
           return session;
         } catch (err) {
           if (!isMissingCopilotSessionError(err, input.resumeId)) throw err;
@@ -727,8 +763,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         });
       }
       settleObservation('created', session.sessionId);
+      publishContextUsage();
       return session;
     } catch (err) {
+      pendingContextUsage = undefined;
       settleObservation('failed');
       throw err;
     }
@@ -934,7 +972,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       }
     },
 
-    bindSessionSend(send: SendFn): void { sessionSend = send; },
+    bindSessionSend(send: SendFn): void { sessionSend = send; publishContextUsage(); },
     configRequiresIdle(key) {
       if (key === CONFIG_EDIT_KEYS.PERMISSION_MODE || key === CONFIG_EDIT_KEYS.NATIVE_APPROVAL) throw new Error(`Copilot does not accept config key "${key}"`);
       return key === CONFIG_EDIT_KEYS.NATIVE_MODE;
@@ -1016,6 +1054,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             child = null;
             connAppId = undefined;
             session = null;
+            pendingContextUsage = undefined;
             sessionCwd = null;
           }
         }
@@ -1052,6 +1091,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       child = null;
       connAppId = undefined;
       session = null;
+      pendingContextUsage = undefined;
       sessionCwd = null;
     },
 
@@ -1067,6 +1107,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       conn = null;
       child = null;
       session = null;
+      pendingContextUsage = undefined;
       sessionCwd = null;
     },
   };

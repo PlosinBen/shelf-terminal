@@ -179,7 +179,7 @@ title: shelf-terminal — Intent → File Index
 | Fake provider | `providers/fake/index.ts` | registered internal provider；可顯式選取，也可在 `SHELF_TEST_MODE=1` 作 requested provider 的 substitute；prompt 走 prefix-matched scenario |
 | Fake provider 測試 | `providers/fake/fake.test.ts` | 每個 scenario 的 wire-shape 驗證 + stop/abort 行為 |
 | Bundle build | `build.mjs` | esbuild → `dist/agent-server/<version>/index.js` 單一 ESM bundle（index/exec/dispatcher 同一 bundle，role 由 argv 選） |
-| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit,usage-observation}.test.ts` | ACP backend wire-shape / native config / restore / login / credit cache / usage suppression 與診斷欄位驗證 |
+| Copilot provider 測試 | `providers/copilot/{copilot,helpers,login,credit,usage-observation}.test.ts` | ACP backend wire-shape / native config / restore / login / credit cache / validated ctx display 與診斷欄位驗證 |
 | ACP toolkit 測試 | `providers/acp/*.test.ts` | connection/client/translate/permission/capabilities/mcp + mock-agent 驅動的 toolkit 驗證 |
 | Dispatcher 單元測試 | `dispatcher.test.ts` | open/close_session / raw relay / reconnect + backoff / inner-ping hung / proc-identity guard / cache 側通道 |
 | Model-cache 單元測試 | `model-cache.test.ts` | TTL hit/miss/expiry evict |

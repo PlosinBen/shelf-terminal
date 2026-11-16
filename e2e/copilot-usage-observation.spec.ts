@@ -4,7 +4,7 @@ import { test, expect, sendAgentPrompt } from './helpers';
 
 test.use({ copilotUsage: true });
 
-test('Copilot observes usage without rendering context and keeps normal replies', async ({ shelfApp: { page, userDataDir } }) => {
+test('Copilot displays validated context usage and keeps normal replies', async ({ shelfApp: { page, userDataDir } }) => {
   await page.locator('.sidebar-btn', { hasText: '+' }).click();
   await page.locator('.conn-btn-next').click();
   await expect(page.locator('.fp-browser-path')).toContainText('/');
@@ -18,11 +18,10 @@ test('Copilot observes usage without rendering context and keeps normal replies'
   await sendAgentPrompt(page, 'Observe token usage');
   await expect(page.locator('.agent-msg-reply:visible')).toContainText('Copilot usage observed');
   await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
-  await expect(page.locator('.agent-status-bar:visible')).not.toContainText('ctx:');
+  await expect(page.locator('.agent-status-bar:visible')).toContainText('ctx: 10%');
   await expect(page.locator('.agent-status-bar:visible')).not.toContainText('premium:');
 
-  // Logs prove both usage fixtures reached the actual provider, so absence in the UI
-  // cannot pass just because the test exercised a fake provider or a missing event.
+  // Logs prove both valid and invalid usage reached the actual Copilot provider.
   const readLogs = () => {
     const dir = path.join(userDataDir, 'logs');
     return fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).map(String).filter((name) => name.endsWith('.log'))
@@ -36,4 +35,7 @@ test('Copilot observes usage without rendering context and keeps normal replies'
   expect(logs).toContain('session_settled');
   expect(logs).toContain('prompt_started');
   expect(logs).toContain('prompt_settled');
+  await sendAgentPrompt(page, '/clear');
+  await expect(page.locator('.agent-msg-system:visible').filter({ hasText: 'Copilot context cleared.' })).toBeVisible();
+  await expect(page.locator('.agent-status-bar:visible')).not.toContainText('ctx:');
 });

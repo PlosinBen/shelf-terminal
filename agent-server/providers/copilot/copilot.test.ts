@@ -174,7 +174,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       expect(out.every(m => m.type === 'capabilities')).toBe(true);
     } finally { backend.dispose(); }
   });
-  it('observes usage without publishing context or credit, while forwarding reply text', async () => {
+  it('publishes validated context without credit or execution state, while forwarding reply text', async () => {
     const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
     const mock = createMockAcpAgent({ updatesOnPrompt: [
       { sessionUpdate: 'usage_update', used: 100, size: 1000, cost: { amount: 0.25, currency: 'USD' }, _meta: { secret: 'DO-NOT-LOG' } },
@@ -184,7 +184,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     const out: OutgoingMessage[] = [];
     try {
       await backend.query({ prompt: 'PRIVATE-PROMPT', cwd: '/tmp/project' }, (m) => out.push(m));
-      expect(out).not.toContainEqual(expect.objectContaining({ contextUsage: expect.anything() }));
+      expect(out).toContainEqual({ type: 'status', contextUsage: { text: 'ctx: 10%', severity: 'normal' } });
       expect(out).not.toContainEqual(expect.objectContaining({ credits: expect.anything() }));
       expect(out).toContainEqual(expect.objectContaining({ type: 'stream', content: 'Still works' }));
       const logs = JSON.stringify(log.mock.calls);
@@ -213,6 +213,22 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     }
   });
 
+  it('ignores invalid counts and accepts authoritative zero usage', async () => {
+    const mock = createMockAcpAgent({ updatesOnPrompt: [
+      { sessionUpdate: 'usage_update', used: 101, size: 100 },
+      { sessionUpdate: 'usage_update', used: -1, size: 100 },
+      { sessionUpdate: 'usage_update', used: 0, size: 100 },
+    ] });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: 'hi', cwd: '/tmp/project' }, m => out.push(m));
+      expect(out.filter(m => m.type === 'status' && m.contextUsage)).toEqual([
+        { type: 'status', contextUsage: { text: 'ctx: 0%', severity: 'normal' } },
+      ]);
+    } finally { backend.dispose(); }
+  });
+
   it('observes restored usage before an output sink is bound', async () => {
     const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
     const mock = createMockAcpAgent({ updatesOnLoadSession: [
@@ -235,6 +251,42 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       backend.dispose();
       log.mockRestore();
     }
+  });
+
+  it('publishes early restored usage when the session sink binds', async () => {
+    const mock = createMockAcpAgent({ updatesOnLoadSession: [
+      { sessionUpdate: 'usage_update', used: 50, size: 100 },
+    ] });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.gatherCapabilities!('/tmp/project', undefined, undefined, undefined, undefined, undefined, {
+        sessionId: 'shelf-session', provider: 'copilot', updatedAt: 1, lastSdkSessionId: 'saved-session',
+      });
+      backend.bindSessionSend!(m => out.push(m));
+      expect(out).toContainEqual({ type: 'status', contextUsage: { text: 'ctx: 50%', severity: 'warning' } });
+      out.length = 0;
+      backend.reconnect!();
+      backend.bindSessionSend!(m => out.push(m));
+      expect(out).not.toContainEqual(expect.objectContaining({ contextUsage: expect.objectContaining({ text: 'ctx: 50%' }) }));
+    } finally { backend.dispose(); }
+  });
+
+  it('publishes late usage without reopening execution and clears it on session replacement', async () => {
+    const mock = createMockAcpAgent({ updatesAfterPrompt: [
+      { sessionUpdate: 'usage_update', used: 80, size: 100 },
+    ] });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    backend.bindSessionSend!(m => out.push(m));
+    try {
+      await backend.query({ prompt: 'hi', cwd: '/tmp/project' }, m => out.push(m));
+      await vi.waitFor(() => expect(out).toContainEqual({ type: 'status', contextUsage: { text: 'ctx: 80%', severity: 'critical' } }));
+      out.length = 0;
+      await backend.query({ prompt: '/clear', cwd: '/tmp/project' }, m => out.push(m));
+      expect(out).toContainEqual({ type: 'status', contextUsage: null });
+      expect(out).not.toContainEqual(expect.objectContaining({ contextUsage: expect.objectContaining({ text: 'ctx: 80%' }) }));
+    } finally { backend.dispose(); }
   });
 
   it('confirms stop only when the active ACP prompt returns cancelled', async () => {
