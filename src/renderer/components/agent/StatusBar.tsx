@@ -155,10 +155,9 @@ export function StatusBar({ tabId, provider }: Props) {
         title="Clear visible messages (agent keeps its memory; use /clear to reset agent context)"
       >Clear History</button>
     </div>
-    {control && <div className="agent-config-feedback" role="status" data-state={control.state}>
+    {control && control.state !== CC.STATE.CONFIRMED && <div className="agent-config-feedback" role="status" data-state={control.state}>
       {control.state === CC.STATE.DEFERRED ? `Waiting for a safe boundary: ${control.key} → ${control.value}`
         : control.state === CC.STATE.APPLYING ? `Applying session setting: ${control.key} → ${control.value}`
-        : control.state === CC.STATE.CONFIRMED ? `Session setting confirmed: ${control.key} = ${control.value}`
         : control.error ?? 'Session configuration was rejected'}
       {control.state === CC.STATE.UNCERTAIN && <>
         {(isExecutionActive || !!tab?.pendingSends.length) && <span>Finish or stop work and cancel queued messages before reconnecting.</span>}

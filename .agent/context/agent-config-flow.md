@@ -168,7 +168,7 @@ InputZone parseSlashPrefix
 **Renderer / Backend 分層（回應「picker 兩邊行為是否不同」— 不同只在 backend）**：
 - **Renderer 對 provider 無感，依入口來源路由**：status-bar 送直接 control；slash-origin picker 補齊原 slash 後走普通訊息。
 - **差異在 backend apply 收斂點**：provider 依 transport 套用或準備下一個 session 的 options；直接控制的 application policy 與錯誤見 `agent-config-flow#16`。
-- 只有 slash／相容 configEdit execution 使用 `formatConfigAck` divider；直接 control 的確認與錯誤只顯示在控制區。
+- 只有 slash／相容 configEdit execution 使用 `formatConfigAck` divider；直接 control 的等待、套用中與錯誤顯示在控制區；成功後收起回饋列，確認後的值由狀態列呈現。
 
 **Do not change casually because**：
 - 不要在 `gatherCapabilities`/`setModel`/`dispatchSlash` 加「model 是否在 `listModels` 清單內」的前置拒絕 — 交給 SDK，錯誤照實回。

@@ -209,7 +209,8 @@ test.describe('agent flows via fake provider', () => {
       await expect(users).toHaveCount(1);
       await page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' }).click();
       await page.locator('.agent-perm-option:visible', { hasText: 'fake-model-pro' }).click();
-      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'confirmed', { timeout: 2000 });
+      await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model-pro' })).toHaveText('fake-model-pro', { timeout: 2000 });
+      await expect(page.locator('.agent-config-feedback')).toHaveCount(0);
       await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
       await expect(users).toHaveCount(1);
       await expect(page.locator('.agent-messages:visible')).not.toContainText('Model set to');
@@ -232,8 +233,8 @@ test.describe('agent flows via fake provider', () => {
       await sendAgentPrompt(page, '/model');
       await page.locator('.agent-perm-option:visible', { hasText: 'fake-model-pro' }).click();
       await expect(page.locator('.agent-msg-queued')).toContainText('/model fake-model-pro');
-      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'confirmed');
       await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'effort:' })).toHaveText('effort: high');
+      await expect(page.locator('.agent-config-feedback')).toHaveCount(0);
       await expect(page.locator('.agent-messages:visible .agent-msg-user').filter({ hasText: '/model fake-model-pro' })).toHaveCount(1);
       await expect(page.locator('.agent-messages:visible')).toContainText('Model set to fake-model-pro');
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
