@@ -1347,9 +1347,9 @@ describe('native app skill invocation', () => {
     const invocation = { kind: SKILL_INVOCATION.KIND, bindingId: 'ad1b0c23-6789-4123-8123-123456789abc', registrationId: 'ad1b0c23-6789-4123-8123-123456789abd', skillName: 'flow', alias: 'dev-flow', args: 'task', payloadDigest: skillPayloadDigest(directory) };
     return { invocation, file: path.join(directory, 'SKILL.md') };
   }
-  it.each(['', 'task'])('uses forceReload plus exact skill path, retains images and args (%s)', async args => {
+  it.each(['flow', 'shelf-skills:flow'].flatMap(nativeName => ['', 'task'].map(args => ({ nativeName, args }))))('uses forceReload plus exact skill path, retains images and args $nativeName ($args)', async ({ nativeName, args }) => {
     const { invocation, file } = selected(); invocation.args = args;
-    const app = new FakeAppServer({ 'skills/list': () => ({ data: [{ cwd: '/repo', skills: [{ name: 'flow', path: file, enabled: true }] }] }) });
+    const app = new FakeAppServer({ 'skills/list': () => ({ data: [{ cwd: '/repo', skills: [{ name: nativeName, path: file, enabled: true }] }] }) });
     const backend = createCodexBackend({ createAppServer: () => app });
     const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: '/dev-flow task', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
     if (!built.ok) throw Error(built.error);
@@ -1357,8 +1357,8 @@ describe('native app skill invocation', () => {
       await backend.query({ prompt: built.message.content, inputMessage: built.message, invocation, cwd: '/repo', appId: 'fixture', attachments: [{ kind: 'image', path: '/fixture/image.png', displayPath: '/fixture/image.png', name: 'image.png' }] }, () => {});
       expect(app.calls.find(call => call.method === 'skills/list')?.params).toMatchObject({ forceReload: true, cwds: ['/repo'] });
       expect(app.calls.find(call => call.method === 'turn/start')?.params).toMatchObject({ input: [
-        { type: 'text', text: `$flow${args ? ` ${args}` : ''}`, text_elements: [] },
-        { type: 'localImage', path: '/fixture/image.png' }, { type: 'skill', name: 'flow', path: fs.realpathSync(file) },
+        { type: 'text', text: `$${nativeName}${args ? ` ${args}` : ''}`, text_elements: [] },
+        { type: 'localImage', path: '/fixture/image.png' }, { type: 'skill', name: nativeName, path: fs.realpathSync(file) },
       ] });
       expect(built.message.content).toBe('/dev-flow task');
     } finally { backend.dispose(); }

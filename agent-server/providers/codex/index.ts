@@ -1,3 +1,4 @@
+import { SKILL_PLUGIN } from '@shared/skill-commands';
 import * as fs from 'node:fs';
 import { SKILL_COMMAND_ERROR as SCE, SkillCommandFailure } from '@shared/skill-invocation';
 import { resolveInvocationSkillPath } from '../skill-invocation';
@@ -625,24 +626,36 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         if (sdkHome) baseEnv.HOME = sdkHome;
         const client = await ensureAppServer(input.appId, baseEnv);
         let selectedSkillPath: string | undefined;
+        let selectedSkillName: string | undefined;
         if (input.invocation) {
           selectedSkillPath = resolveInvocationSkillPath(input.invocation, resolveSkillsPluginRoot(input.appId));
           const listed = asRecord(await client.request('skills/list', { cwds: [input.cwd], forceReload: true }));
           const matches = asArray(listed?.data).flatMap(group => asArray(asRecord(group)?.skills)).filter(raw => {
             const skill = asRecord(raw);
-            if (skill?.name !== input.invocation!.skillName || skill.enabled !== true || typeof skill.path !== 'string' || !path.isAbsolute(skill.path)) return false;
+            if ((skill?.name !== input.invocation!.skillName && skill?.name !== `${SKILL_PLUGIN.NAME}:${input.invocation!.skillName}`) || skill?.enabled !== true || typeof skill.path !== 'string' || !path.isAbsolute(skill.path)) return false;
             try { return fs.realpathSync(skill.path) === selectedSkillPath; }
             catch { return false; } // An unresolvable native path cannot identify the target.
           });
-          if (matches.length !== 1) throw new SkillCommandFailure(SCE.SOURCE, 'Codex did not advertise the enabled app skill at its exact path');
+          if (matches.length !== 1) {
+            const groups = asArray(listed?.data).map(raw => {
+              const group = asRecord(raw);
+              return { errors: group?.errors, candidates: asArray(group?.skills).map(rawSkill => {
+                const skill = asRecord(rawSkill);
+                return { name: skill?.name, path: skill?.path, enabled: skill?.enabled };
+              }) };
+            });
+            serverLog('error', 'skill-invocation', `Native skill source mismatch binding=${input.invocation.bindingId} expected=${selectedSkillPath}`, JSON.stringify(groups));
+            throw new SkillCommandFailure(SCE.SOURCE, 'Codex did not advertise the enabled app skill at its exact path');
+          }
+          selectedSkillName = stringValue(asRecord(matches[0])?.name) ?? undefined;
         }
         const threadId = await ensureThread(client, input, send, baseEnv);
         await waitForTurnCompletion(async () => {
-          const prompt = input.invocation ? `$${input.invocation.skillName}${input.invocation.args ? ` ${input.invocation.args}` : ''}` : modelInputPrompt(input);
+          const prompt = input.invocation ? `$${selectedSkillName}${input.invocation.args ? ` ${input.invocation.args}` : ''}` : modelInputPrompt(input);
           const turnInput = toCodexAppServerInput(prompt, input.images, input.attachments);
           if (input.invocation) {
             resolveInvocationSkillPath(input.invocation, resolveSkillsPluginRoot(input.appId));
-            turnInput.push({ type: 'skill', name: input.invocation.skillName, path: selectedSkillPath });
+            turnInput.push({ type: 'skill', name: selectedSkillName, path: selectedSkillPath });
           }
           const started = await client.request('turn/start', {
             threadId,

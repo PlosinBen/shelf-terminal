@@ -206,3 +206,8 @@ Claude CLI 2.1.159 with SDK 0.3.159 can dispatch namespaced plugin skills with i
 ## skills#16 — Claude app commands verify the live namespace before enqueueing SDK input · [Decision]
 
 Claude app invocation reloads the actual streaming query, verifies the sole Shelf plugin namespace resolves to the expected canonical app root, checks the manifest and live command index, and rechecks the target skill digest before pushing SDK input. A project command named with the full plugin namespace takes precedence over the plugin, so that qualified-name collision is rejected before inference. Commands use the native namespace plus bound args, retaining image blocks; skill instructions are never copied into a prompt. Cancellation during reload or attachment preparation invalidates the pending invocation. Ordinary turns retain their existing foreground registration timing so concurrent model selection cannot be overwritten by an older response.
+
+
+## skills#17 — Codex plugin discovery can qualify the native skill name · [Gotcha]
+
+Codex discovers Shelf's projected plugin manifest and may advertise `shelf-skills:<name>` even though source identity and folder use the leaf name. Native invocation accepts either expected catalog name only when enabled and its canonical path exactly matches the bound app target. Use the matched native name consistently in the text reference and native skill item. Requiring the leaf name alone rejects a valid app projection; trusting a matching name without the exact path can select a project shadow. Source mismatch diagnostics log candidate names/paths/enabled state and loader errors without skill instruction bodies.
