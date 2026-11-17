@@ -1,4 +1,5 @@
 import { test, expect } from './helpers';
+import { _electron as electron } from '@playwright/test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -121,4 +122,97 @@ test('skills: add, edit, switch and delete an aux file', async ({ shelfApp }) =>
   // It was the only aux file → the Files list auto-hides, editor falls back to SKILL.md.
   await expect(page.locator('.skills-files')).toHaveCount(0);
   await expect(ta).toHaveValue(/name: my-skill/);
+});
+
+test.describe('custom skill commands', () => {
+  test.use({ homeProjectDirectories: false });
+
+  test('skills: command settings save with Back, persist on reopen, and unregister independently', async ({ shelfApp }) => {
+    const { page, userDataDir } = shelfApp;
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await expect(page.locator('.skills-view .notes-textarea')).toHaveValue(/name: my-skill/);
+    const toggle = page.getByLabel('Add to slash command menu');
+    await expect(toggle).toBeEnabled();
+    await toggle.check();
+    await page.getByRole('textbox', { name: 'Command', exact: true }).fill('dev-flow');
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Run workflow');
+    await expect(page.locator('.skills-view .notes-send-btn')).toBeEnabled();
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveText('/dev-flow');
+    const source = path.join(userDataDir, 'skills', 'skills', 'my-skill');
+    const metadata = path.join(source, '.shelf-command.json');
+    const first = JSON.parse(fs.readFileSync(metadata, 'utf8'));
+    expect(first).toMatchObject({ version: 1, alias: 'dev-flow', description: 'Run workflow' });
+    await page.locator('.skills-list-item').click();
+    await expect(toggle).toBeChecked();
+    await expect(page.getByRole('textbox', { name: 'Command', exact: true })).toHaveValue('dev-flow');
+    await page.locator('.skills-lock-btn').click();
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Updated workflow');
+    await page.locator('.skills-view .notes-send-btn').click();
+    await expect(page.locator('.skills-view .notes-send-btn')).toBeDisabled();
+    expect(JSON.parse(fs.readFileSync(metadata, 'utf8')).registrationId).toBe(first.registrationId);
+    // Files excludes main-owned settings; an aux switch flushes metadata-only edits.
+    await page.locator('.skills-addfile-btn').click();
+    await page.locator('.skills-file-add-input').fill('reference.md');
+    await page.locator('.skills-file-add-ok').click();
+    await expect(page.locator('.skills-file-name')).toHaveText(['SKILL.md', 'reference.md']);
+    await toggle.uncheck();
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveCount(0);
+    expect(fs.existsSync(metadata)).toBe(false);
+    expect(fs.existsSync(path.join(source, '.disabled'))).toBe(false);
+    expect(fs.existsSync(path.join(source, 'SKILL.md'))).toBe(true);
+  });
+
+  test('skills: invalid command blocks Back and content persistence', async ({ shelfApp }) => {
+    const { page, userDataDir } = shelfApp;
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    const textarea = page.locator('.skills-view .notes-textarea');
+    await expect(textarea).toHaveValue(/name: my-skill/);
+    const file = path.join(userDataDir, 'skills', 'skills', 'my-skill', 'SKILL.md');
+    const before = fs.readFileSync(file, 'utf8');
+    await page.getByLabel('Add to slash command menu').check();
+    await page.getByRole('textbox', { name: 'Command', exact: true }).fill('/invalid');
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Invalid workflow');
+    await textarea.fill('---\nname: renamed\ndescription: new\n---\nnew content');
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-view .skills-error')).toContainText('lowercase kebab-case');
+    await expect(textarea).toHaveValue(/name: renamed/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(userDataDir, 'skills', 'skills', 'renamed'))).toBe(false);
+  });
+
+  test('skills: command registration survives an application restart with the same identity', async ({ shelfApp: { page, app, userDataDir } }) => {
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await expect(page.locator('.skills-view .notes-textarea')).toHaveValue(/name: my-skill/);
+    await page.getByLabel('Add to slash command menu').check();
+    await page.getByRole('textbox', { name: 'Command', exact: true }).fill('restart-flow');
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Survives restart');
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveText('/restart-flow');
+    const metadata = path.join(userDataDir, 'skills', 'skills', 'my-skill', '.shelf-command.json');
+    const before = JSON.parse(fs.readFileSync(metadata, 'utf8'));
+    await app.close();
+    const restarted = await electron.launch({
+      args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
+      env: { ...process.env, NODE_ENV: 'test', SHELF_TEST_MODE: '1' },
+    });
+    try {
+      const reopened = await restarted.firstWindow();
+      await expect(reopened.locator('.app')).toBeVisible();
+      if (!await reopened.locator('.skills-view').isVisible()) await reopened.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+      await expect(reopened.locator('.skills-list-command')).toHaveText('/restart-flow');
+      await reopened.locator('.skills-list-item').click();
+      await expect(reopened.getByLabel('Add to slash command menu')).toBeChecked();
+      await expect(reopened.getByRole('textbox', { name: 'Command', exact: true })).toHaveValue('restart-flow');
+      await expect(reopened.getByRole('textbox', { name: 'Command description', exact: true })).toHaveValue('Survives restart');
+      expect(JSON.parse(fs.readFileSync(metadata, 'utf8'))).toEqual(before);
+    } finally {
+      await restarted.close();
+    }
+  });
+
 });

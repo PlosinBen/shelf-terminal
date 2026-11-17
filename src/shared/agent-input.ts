@@ -1,3 +1,4 @@
+import { validSkillCommandSelection, type SkillCommandSelection } from './skill-invocation';
 import type { AgentAttachment } from './types';
 import { CONFIG_EDIT_KEYS, type ConfigEditKey } from './config-ack';
 
@@ -30,8 +31,8 @@ export interface AgentInputMessage {
 }
 
 export type AgentInputRequest =
-  | { inputMessage: AgentInputMessage; configEdit?: never }
-  | { configEdit: { key: ConfigEditKey; value: string }; inputMessage?: never };
+  | { inputMessage: AgentInputMessage; commandSelection?: SkillCommandSelection; configEdit?: never }
+  | { configEdit: { key: ConfigEditKey; value: string }; inputMessage?: never; commandSelection?: never };
 
 type Result<T> = { ok: true; message: T } | { ok: false; error: string };
 type MessageData = Omit<AgentInputMessage, 'msgId'>;
@@ -101,17 +102,19 @@ export function validateAgentInputMessage(value: unknown): Result<AgentInputMess
 
 export function validateAgentInputRequest(value: unknown, expectedSource?: AgentInputSource['kind']): Result<AgentInputRequest> {
   if (!record(value)) return { ok: false, error: 'Input request must be an object' };
+  if (expectedSource !== undefined && Object.keys(value).some(key => !['tabId', 'inputMessage', 'configEdit', 'commandSelection'].includes(key))) return { ok: false, error: 'Unexpected input envelope fields' };
   if (value.configEdit !== undefined) {
     const edit = value.configEdit;
-    if (value.inputMessage !== undefined || !record(edit)
+    if (value.inputMessage !== undefined || value.commandSelection !== undefined || !record(edit)
       || !Object.values(CONFIG_EDIT_KEYS).includes(edit.key as ConfigEditKey) || typeof edit.value !== 'string') {
       return { ok: false, error: 'Invalid config edit request' };
     }
     return { ok: true, message: { configEdit: { key: edit.key as ConfigEditKey, value: edit.value } } };
   }
+  if (value.commandSelection !== undefined && !validSkillCommandSelection(value.commandSelection)) return { ok: false, error: 'Invalid command selection' };
   const checked = validateAgentInputMessage(value.inputMessage);
   if (checked.ok && expectedSource !== undefined && checked.message.source.kind !== expectedSource) {
     return { ok: false, error: `Input source is not allowed at this entry: ${checked.message.source.kind}` };
   }
-  return checked.ok ? { ok: true, message: { inputMessage: checked.message } } : checked;
+  return checked.ok ? { ok: true, message: { inputMessage: checked.message, ...(value.commandSelection !== undefined ? { commandSelection: value.commandSelection } : {}) } } : checked;
 }

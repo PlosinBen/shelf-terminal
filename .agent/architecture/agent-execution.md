@@ -181,3 +181,9 @@ user approval after an unresponsive renderer may bypass confirmed persistence. R
 attempts have separate identities, so an obsolete result cannot authorize exit. Conversation ownership,
 explicit history clearing and teardown settlement also govern exit writes; the snapshot cannot revive
 collected data. This flow does not restart unfinished executions or persist other editor drafts.
+
+## Explicit app skill execution
+
+Main binds a command submission to a specific source skill and content identity while preserving its canonical message. The execution plane owns FIFO timing, then requests authorization from the source owner after dequeue over a separate control lane. The response is bound to the live process and execution; the provider resolves the host-native target only after approval. Failed validation terminates that execution and leaves subsequent queue items runnable. Stop cancels both pending validation and queued validation generations. Command aliases can change without redirecting a bound turn.
+
+Native app dispatch preserves the selected source across provider resolution. Claude refreshes the live plugin catalog, verifies a unique namespace and canonical root, rejects native namespace shadows, and rechecks consumption identity before supplying namespaced SDK input. Cancellation invalidates pending native preparation as well as queue validation. Copilot remains unavailable where multipart input does not provide equivalent native invocation semantics.

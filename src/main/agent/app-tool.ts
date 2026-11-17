@@ -131,6 +131,14 @@ function delegationText(value: unknown): string {
   return value;
 }
 
+/** Bridge owns authorization; the source store runs this inside its mutation boundary. */
+function agentSkillMutationGuard(name: string) {
+  return async () => {
+    if (await getSkill(name) === null) throw new Error(`skill not found: ${name} (use create_app_skill to make a new one)`);
+    if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
+  };
+}
+
 const REGISTRY: Record<string, AppToolDef> = {
   [D.OP.SELECT]: { safe: false, run: async (args, ctx) => {
     exactDelegationArgs(args, []); return selectDelegationTarget(ctx);
@@ -214,7 +222,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       // Lock = the user's hard "agent, hands off this whole skill" — covers aux
       // files too, enforced here so it holds under bypass permission mode.
       if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
-      const res = await writeSkillFile(name, filePath, content);
+      const res = await writeSkillFile(name, filePath, content, agentSkillMutationGuard(name));
       if (!res.ok) throw new Error(res.error ?? 'failed to write skill file');
       onSkillsChanged();
       return { name, path: filePath };
@@ -231,7 +239,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
       // SKILL.md / .locked are reserved in resolveAuxPath → can never be deleted
       // here, so this op can never orphan a skill's SKILL.md.
-      const res = await deleteSkillFile(name, filePath);
+      const res = await deleteSkillFile(name, filePath, agentSkillMutationGuard(name));
       if (!res.ok) throw new Error(res.error ?? 'failed to delete skill file');
       onSkillsChanged();
       return { name, path: filePath };
@@ -245,7 +253,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       // Materialise a placeholder, then write the real content — its frontmatter
       // `name` becomes the identity (folder renamed to match; collision → error).
       const placeholder = await createSkill();
-      const res = await updateSkill(placeholder.name, content);
+      const res = await updateSkill(placeholder.name, content, agentSkillMutationGuard(placeholder.name));
       if (!res.ok) {
         // Roll back the empty placeholder so a failed create leaves nothing.
         await deleteSkillSafe(placeholder.name);
@@ -386,7 +394,7 @@ const REGISTRY: Record<string, AppToolDef> = {
       // it holds even in bypass permission mode (where the update confirm is
       // pre-granted). The manager UI is the only way to edit/unlock a locked one.
       if (isSkillLocked(name)) throw new Error(`skill '${name}' is locked against agent edits; unlock it in the Skills panel`);
-      const res = await updateSkill(name, content);
+      const res = await updateSkill(name, content, agentSkillMutationGuard(name));
       if (!res.ok) throw new Error(res.error ?? 'failed to update skill');
       onSkillsChanged();
       return { name: res.name };

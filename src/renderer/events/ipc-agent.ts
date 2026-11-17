@@ -1,3 +1,4 @@
+import { setSkillCommandMenu } from '../agentTabStore';
 import type { AgentInitStatus } from '../../shared/types';
 import { onAgent, emitAgent } from './types';
 import { CONFIG_CONTROL as CC } from '../../shared/agent-config-control';
@@ -24,6 +25,20 @@ import { isSubmissionUncertain, SUBMISSION_ERROR as E, type SubmissionError } fr
 // stub window.shelfApi before calling bindAgentIPCGroup().
 export function bindAgentIPCGroup(): () => void {
   const api = window.shelfApi.agent;
+  const commandTabs = new Set<string>();
+  const commandVersions = new Map<string, number>();
+  let disposed = false;
+  const refreshCommands = (tabId: string) => {
+    const version = (commandVersions.get(tabId) ?? 0) + 1;
+    commandVersions.set(tabId, version);
+    void api.skillCommands(tabId).then(menu => {
+      if (!disposed && commandVersions.get(tabId) === version) setSkillCommandMenu(tabId, menu);
+    }).catch(error => {
+      console.error('Skill command catalog failed', { tabId, error });
+      if (!disposed && commandVersions.get(tabId) === version) setSkillCommandMenu(tabId, { entries: [], error: String(error) });
+    });
+  };
+  const offSkills = window.shelfApi.skills.onChanged(() => { for (const tabId of commandTabs) refreshCommands(tabId); });
   const offConfigProgress = api.onConfigControl((tabId, update) => updateConfigControl(tabId, update));
   const offConfigure = onAgent(CC.EVENT, ({ tabId, key, value }) => {
     const request = beginConfigControl(tabId, { key, value });
@@ -58,6 +73,7 @@ export function bindAgentIPCGroup(): () => void {
   });
   const offCapabilities = api.onCapabilities((tabId, caps) => {
     emitAgent('agent:onCapabilities', { tabId, caps });
+    commandTabs.add(tabId); refreshCommands(tabId);
   });
   const offPermission = api.onPermissionRequest((tabId, req) => {
     emitAgent('agent:onPermissionRequest', { tabId, req });
@@ -70,6 +86,7 @@ export function bindAgentIPCGroup(): () => void {
   });
   const offInit = api.onInitStatus((tabId, status: AgentInitStatus) => {
     emitAgent('agent:onInitStatus', { tabId, status });
+    if (status.state === 'ready') { commandTabs.add(tabId); refreshCommands(tabId); }
   });
   const offLoginPrompt = api.onLoginPrompt((tabId, prompt) => {
     emitAgent('agent:onLoginPrompt', { tabId, prompt });
@@ -113,6 +130,7 @@ export function bindAgentIPCGroup(): () => void {
     });
   });
   const offDestroyEvt = onAgent('agent:destroy', ({ tabId }) => {
+    commandTabs.delete(tabId); commandVersions.delete(tabId);
     api.destroy(tabId);
   });
   const offResolvePerm = onAgent('agent:resolvePermission', ({ tabId, toolUseId, allow, scope }) => {
@@ -123,6 +141,8 @@ export function bindAgentIPCGroup(): () => void {
   });
 
   return () => {
+    disposed = true;
+    offSkills();
     offConfigProgress();
     offConfigure();
     offShelfMcp();

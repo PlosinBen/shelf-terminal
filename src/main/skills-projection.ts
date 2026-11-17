@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { app } from 'electron';
 import { log } from '@shared/logger';
+import { isSkillCommandProjectionPath } from '@shared/skill-commands';
 
 /**
  * Local projection of the app-level skills source onto the per-app consumption
@@ -74,6 +75,7 @@ export function listSkillFilesRel(root: string): string[] {
     }
     for (const e of entries) {
       const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (isSkillCommandProjectionPath(childRel)) continue;
       if (e.isDirectory()) walk(path.join(dir, e.name), childRel);
       else if (e.isFile() && e.name !== LOCK_MARKER && e.name !== DISABLED_MARKER) out.push(childRel);
     }
@@ -124,6 +126,7 @@ export function projectSkillsLocal(appId: string): void {
       recursive: true,
       filter: (s) => {
         const base = path.basename(s);
+        if (isSkillCommandProjectionPath(path.relative(src, s).split(path.sep).join('/'))) return false;
         if (base === LOCK_MARKER || base === DISABLED_MARKER) return false;
         if (disabledDirs.has(s)) return false;
         return true;

@@ -169,6 +169,8 @@ App-level Agent Skills (one folder per skill under userData).
 |--------|-------|
 | `list()` | invoke `skills:list` → skill list |
 | `get(name)` | invoke `skills:get` → skill content |
+| `readEditor(name)` | invoke `skills:editor-read` → content plus metadata result; see [skill commands](skill-commands.md) |
+| `saveEditor(request)` | invoke `skills:editor-save` → coordinated Save / partial persistence result; see [skill commands](skill-commands.md) |
 | `create()` | invoke `skills:create` → new skill |
 | `update(name, content)` | invoke `skills:update` |
 | `delete(name)` | invoke `skills:delete` |
@@ -332,3 +334,7 @@ Main → renderer (push; all return an unsubscribe fn):
 | `onLoginDone(cb(tabId, result))` | `agent:login-done` — `{ provider, ok, cancelled?, error? }` |
 | `onInitStatus(cb(tabId, status))` | `agent:init-status` |
 | `onMemoryUsage(cb(summary))` | `agent:memory-usage` — complete app-wide `ProcessMemorySummary`, unconditionally published every 30 seconds. See `contracts/process-memory`. |
+
+### App skill commands
+
+`window.shelfApi.agent.skillCommands(tabId)` invokes `agent:skill-commands` for the session's provider-neutral menu snapshot. Skills changes and capabilities/init updates refresh the snapshot through the central renderer IPC binder. `agent.send` accepts an optional `commandSelection` sibling of `inputMessage`; it never accepts a renderer-owned invocation. Shapes, stale selection and execution control are specified in [skill commands](skill-commands.md).

@@ -5679,3 +5679,28 @@ button {
 .delegation-target-reason { color: var(--warning, #e5b75b); font-size: 12px; }
 .delegation-target:disabled { opacity: .5; cursor: not-allowed; }
 .delegation-picker-empty { padding: 16px 12px; color: var(--text-muted); border: 1px dashed var(--border); border-radius: 5px; }
+
+.skills-command-settings {
+  margin: 6px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.skills-command-toggle { display: flex; align-items: center; gap: 6px; }
+.skills-command-fields { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.skills-command-fields label { display: flex; flex-direction: column; gap: 4px; }
+.skills-command-fields input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  background: var(--bg);
+  font: inherit;
+}
+
+.skills-list-command { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.agent-slash-item[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.agent-command-error { font-size: 12px; color: var(--text-muted); padding: 4px 8px; }

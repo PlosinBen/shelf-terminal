@@ -162,6 +162,8 @@ contextBridge.exposeInMainWorld('shelfApi', {
   skills: {
     list: () => ipcRenderer.invoke(IPC.SKILLS_LIST),
     get: (name: string) => ipcRenderer.invoke(IPC.SKILLS_GET, name),
+    readEditor: (name: string) => ipcRenderer.invoke(IPC.SKILLS_EDITOR_READ, name),
+    saveEditor: (request: import('../shared/skill-editor').SkillEditorSaveRequest) => ipcRenderer.invoke(IPC.SKILLS_EDITOR_SAVE, request),
     create: () => ipcRenderer.invoke(IPC.SKILLS_CREATE),
     update: (name: string, content: string) =>
       ipcRenderer.invoke(IPC.SKILLS_UPDATE, { name, content }),
@@ -343,6 +345,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
     },
   },
   agent: {
+    skillCommands: (tabId: string) => ipcRenderer.invoke(IPC.AGENT_SKILL_COMMANDS, tabId),
     getMemoryUsage: () =>
       ipcRenderer.invoke(IPC.AGENT_MEMORY_USAGE_CURRENT) as Promise<import('../shared/process-memory').ProcessMemorySummary | null>,
     onMemoryUsage: (callback: (summary: import('../shared/process-memory').ProcessMemorySummary) => void) => {

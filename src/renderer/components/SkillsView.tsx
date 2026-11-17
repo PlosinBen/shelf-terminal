@@ -3,12 +3,16 @@ import { toggleRightSidebar } from '../store';
 import { renderMarkdown } from '../utils/markdown';
 import { LockIcon, UnlockIcon, PowerIcon } from './icons';
 import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
+import { SKILL_EDITOR_MAIN_FILE } from '@shared/skill-editor';
+import { useSkillCommandDraft, resetSkillCommandDraft, loadSkillCommandDraft, editSkillCommandDraft, peekSkillCommandDraft, isSkillCommandDirty, markSkillCommandSaved, markSkillEditorUncertain } from '../skillCommandDraftStore';
 
 interface SkillMeta {
   name: string;
   description?: string;
   locked?: boolean;
   disabled?: boolean;
+  commandAlias?: string;
+  commandError?: string;
 }
 
 /**
@@ -81,9 +85,10 @@ export function SkillsView() {
           name={activeName!}
           locked={skills.find((s) => s.name === activeName)?.locked ?? false}
           disabled={skills.find((s) => s.name === activeName)?.disabled ?? false}
+          description={skills.find((s) => s.name === activeName)?.description ?? ''}
           onRenamed={(newName) => setActiveName(newName)}
           onAfterSave={refreshList}
-          onDeleted={handleBack}
+          onDeleted={() => { setActiveName(null); void refreshList(); }}
         />
       ) : (
         <SkillsList skills={skills} onPick={setActiveName} />
@@ -106,6 +111,8 @@ function SkillsList({ skills, onPick }: { skills: SkillMeta[]; onPick: (name: st
         >
           <div className="skills-list-main">
             <div className="skills-list-name">{s.name}</div>
+            {s.commandAlias && <div className="skills-list-command">/{s.commandAlias}</div>}
+            {s.commandError && <div className="skills-error">{s.commandError}</div>}
             {s.description && <div className="skills-list-desc">{s.description}</div>}
           </div>
           <button
@@ -135,17 +142,18 @@ interface SkillEditorHandle {
   flush: () => Promise<boolean>;
 }
 
-const SKILL_MD = 'SKILL.md';
+const SKILL_MD = SKILL_EDITOR_MAIN_FILE;
 const isMarkdownFile = (file: string) => file === SKILL_MD || file.toLowerCase().endsWith('.md');
 
 const SkillEditor = forwardRef<SkillEditorHandle, {
   name: string;
   locked: boolean;
   disabled: boolean;
+  description: string;
   onRenamed: (newName: string) => void;
   onAfterSave: () => void | Promise<void>;
   onDeleted: () => void;
-}>(function SkillEditor({ name, locked, disabled, onRenamed, onAfterSave, onDeleted }, ref) {
+}>(function SkillEditor({ name, locked, disabled, description, onRenamed, onAfterSave, onDeleted }, ref) {
   // Which file the editor body is currently showing. SKILL.md is the privileged
   // default (its own save path: frontmatter validation + rename); aux files
   // (scripts/reference docs) use the generic file IPC. See skills#8.
@@ -160,22 +168,36 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
   const savedRef = useRef<string>('');
   const contentRef = useRef<string>('');
   const activeFileRef = useRef<string>(SKILL_MD);
+  const actualNameRef = useRef(name);
+  const saveInFlight = useRef(false);
+  const command = useSkillCommandDraft();
   activeFileRef.current = activeFile;
 
   const refreshFiles = useCallback(async () => {
-    setFiles(await window.shelfApi.skills.listFiles(name));
+    setFiles(await window.shelfApi.skills.listFiles(actualNameRef.current));
   }, [name]);
 
   useEffect(() => { void refreshFiles(); }, [refreshFiles]);
   // An agent (or external edit) can add/remove aux files while the panel is open.
   useEffect(() => window.shelfApi.skills.onChanged(() => { void refreshFiles(); }), [refreshFiles]);
 
+  useEffect(() => {
+    let cancelled = false;
+    resetSkillCommandDraft();
+    window.shelfApi.skills.readEditor(name).then(result => {
+      if (cancelled) return;
+      if (!result.ok) { setError(result.error); return; }
+      loadSkillCommandDraft(result.value.command, name, description);
+    }).catch(error => { if (!cancelled) setError(String(error)); });
+    return () => { cancelled = true; };
+  }, [name]);
+
   // Load the active file's content whenever the file (or skill) changes.
   useEffect(() => {
     let cancelled = false;
     const load = activeFile === SKILL_MD
-      ? window.shelfApi.skills.get(name)
-      : window.shelfApi.skills.readFile(name, activeFile);
+      ? window.shelfApi.skills.get(actualNameRef.current)
+      : window.shelfApi.skills.readFile(actualNameRef.current, activeFile);
     setContent(null);
     load.then((raw) => {
       if (cancelled) return;
@@ -188,35 +210,40 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
     return () => { cancelled = true; };
   }, [name, activeFile]);
 
-  const dirty = content !== null && content !== savedRef.current;
+  const dirty = content !== null && (content !== savedRef.current || isSkillCommandDirty());
   const canPreview = isMarkdownFile(activeFile);
 
-  // Save the CURRENTLY active file. SKILL.md → skills.update (validation/rename);
-  // an aux file → skills.writeFile. Returns false if rejected (stay on the file).
+  // One coordinator saves the active file plus command draft and reports partial persistence.
   const save = useCallback(async (): Promise<boolean> => {
     const c = contentRef.current;
-    if (c === savedRef.current) return true; // unchanged
-    const file = activeFileRef.current;
+    if (content === null || saveInFlight.current || !command.loaded || command.uncertain) return false;
+    if (c === savedRef.current && !isSkillCommandDirty()) return true;
+    const commandDraft = peekSkillCommandDraft();
+    saveInFlight.current = true;
+    let acknowledged = false;
     setSaving(true);
     try {
-      if (file === SKILL_MD) {
-        const res = await window.shelfApi.skills.update(name, c);
-        if (!res.ok) { setError(res.error ?? 'Save failed'); return false; }
-        setError(null);
-        savedRef.current = c;
-        if (res.name && res.name !== name) onRenamed(res.name);
-        await onAfterSave();
-        return true;
-      }
-      const res = await window.shelfApi.skills.writeFile(name, file, c);
+      const res = await window.shelfApi.skills.saveEditor({ name: actualNameRef.current, activeFile: activeFileRef.current, content: c, commandDraft });
+      acknowledged = true;
+      actualNameRef.current = res.name;
+      if (res.saved.content) savedRef.current = c;
+      if (res.saved.command) markSkillCommandSaved(commandDraft);
+      if (res.uncertain) markSkillEditorUncertain();
       if (!res.ok) { setError(res.error ?? 'Save failed'); return false; }
       setError(null);
-      savedRef.current = c;
+      if (res.name !== name) onRenamed(res.name);
+      await onAfterSave();
       return true;
+    } catch (error) {
+      // Lost IPC acknowledgement leaves persistence unknown. Do not auto-resend.
+      if (!acknowledged) markSkillEditorUncertain();
+      setError(String(error));
+      return false;
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
-  }, [name, onRenamed, onAfterSave]);
+  }, [name, onRenamed, onAfterSave, command.loaded, command.uncertain, content]);
 
   useImperativeHandle(ref, () => ({ flush: save }), [save]);
 
@@ -232,7 +259,7 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
     const p = newPath.trim();
     if (!p) return;
     if (!(await save())) return; // don't lose unsaved edits on the current file
-    const res = await window.shelfApi.skills.writeFile(name, p, '');
+    const res = await window.shelfApi.skills.writeFile(actualNameRef.current, p, '');
     if (!res.ok) { setError(res.error ?? 'Could not create file'); return; }
     setError(null);
     setAdding(false);
@@ -244,7 +271,7 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
   const deleteFile = useCallback(async (file: string) => {
     const ok = await window.shelfApi.dialog.confirm('Delete file', `Delete "${file}" from skill "${name}"?`, 'Delete');
     if (!ok) return;
-    const res = await window.shelfApi.skills.deleteFile(name, file);
+    const res = await window.shelfApi.skills.deleteFile(actualNameRef.current, file);
     if (!res.ok) { setError(res.error ?? 'Delete failed'); return; }
     await refreshFiles();
     if (activeFileRef.current === file) setActiveFile(SKILL_MD);
@@ -263,20 +290,20 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
   // can always toggle it. The list refresh that reflects the new icon arrives
   // via the SKILLS_CHANGED subscription in the parent.
   const toggleLock = useCallback(async () => {
-    await window.shelfApi.skills.setLocked(name, !locked);
+    await window.shelfApi.skills.setLocked(actualNameRef.current, !locked);
   }, [name, locked]);
 
   // Enable/disable is a MOUNT toggle (not an edit gate): disabling removes the
   // skill from the projected tree so agents stop loading it. The list refresh
   // reflecting the new state arrives via the SKILLS_CHANGED subscription.
   const toggleDisabled = useCallback(async () => {
-    await window.shelfApi.skills.setDisabled(name, !disabled);
+    await window.shelfApi.skills.setDisabled(actualNameRef.current, !disabled);
   }, [name, disabled]);
 
   const handleDelete = useCallback(async () => {
     const ok = await window.shelfApi.dialog.confirm('Delete skill', `Delete skill "${name}"? This cannot be undone.`, 'Delete');
     if (!ok) return;
-    await window.shelfApi.skills.delete(name);
+    await window.shelfApi.skills.delete(actualNameRef.current);
     onDeleted();
   }, [name, onDeleted]);
 
@@ -298,7 +325,7 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
         <button
           className="notes-send-btn"
           onClick={() => void save()}
-          disabled={!dirty || saving}
+          disabled={!dirty || saving || !command.loaded || command.uncertain}
           title={activeFile === SKILL_MD ? 'Save (renames the folder if the frontmatter name changed)' : `Save ${activeFile}`}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -320,6 +347,24 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
           {locked ? 'Locked' : 'Lock'}
         </button>
         <button className="notes-delete-btn" onClick={handleDelete} title="Delete this skill">Delete</button>
+      </div>
+
+      <div className="skills-command-settings">
+        <label className="skills-command-toggle">
+          <input type="checkbox" checked={command.enabled} disabled={!command.loaded || saving || command.uncertain}
+            onChange={event => editSkillCommandDraft({ enabled: event.target.checked })} />
+          Add to slash command menu
+        </label>
+        {command.enabled && <div className="skills-command-fields">
+          <label>Command<input aria-label="Command" value={command.alias} placeholder="dev-flow" spellCheck={false}
+            disabled={saving || command.uncertain || !!command.metadataError}
+            onChange={event => editSkillCommandDraft({ alias: event.target.value })} /></label>
+          <label>Description<input aria-label="Command description" value={command.description} maxLength={256}
+            disabled={saving || command.uncertain || !!command.metadataError}
+            onChange={event => editSkillCommandDraft({ description: event.target.value })} /></label>
+        </div>}
+        {command.metadataError && <div className="skills-error">{command.metadataError}. Uncheck and save to remove invalid command settings.</div>}
+        {command.uncertain && <div className="skills-error">Save state is uncertain. Reopen Skills to read the persisted state before retrying.</div>}
       </div>
 
       {showFilesBox && (
@@ -376,6 +421,7 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
             onChange={(e) => { setContent(e.target.value); contentRef.current = e.target.value; }}
             placeholder={activeFile === SKILL_MD ? 'SKILL.md — paste a skill, or fill in the template.' : activeFile}
             spellCheck={false}
+            disabled={saving || command.uncertain}
           />
         ) : (
           <div className="notes-preview" dangerouslySetInnerHTML={{ __html: previewHtml }} />

@@ -1,3 +1,5 @@
+import type { SkillCommandMenu, SkillCommandMenuEntry } from '@shared/skill-invocation';
+import { parseShelfCommandPrefix } from '@shared/skill-commands';
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_CONTROL as CC, isConfigControlPending, type ConfigControlUpdate, type ConfigControlRequest } from '@shared/agent-config-control';
 import type { AgentInputMessage } from '@shared/agent-input';
@@ -75,6 +77,8 @@ export type LocalPicker = { key: ConfigEditKey } & (
 );
 
 export interface AgentTabState {
+  skillCommandMenu?: SkillCommandMenu;
+  selectedSkillCommand?: SkillCommandMenuEntry;
   configControl?: ConfigControlUpdate;
   shelfMcpStatus?: ShelfMcpStatus;
   // identity
@@ -1199,4 +1203,11 @@ export function __getPendingSaveForTests(tabId: string) {
  *  callers should use `useAgentTab` which wires React's useSyncExternalStore. */
 export function __subscribeForTests(tabId: string, listener: () => void) {
   return subscribe(tabId, listener);
+}
+
+export function setSkillCommandMenu(tabId: string, menu: SkillCommandMenu) { update(tabId, prev => ({ ...prev, skillCommandMenu: menu })); }
+export function selectSkillCommand(tabId: string, entry?: SkillCommandMenuEntry) { update(tabId, prev => ({ ...prev, selectedSkillCommand: entry })); }
+export function reconcileSkillCommandSelection(tabId: string, input: string) {
+  const selected = tabs.get(tabId)?.selectedSkillCommand;
+  if (selected && parseShelfCommandPrefix(input)?.alias !== selected.name) selectSkillCommand(tabId);
 }

@@ -453,7 +453,7 @@ describe('app-tool dispatcher (aux-file ops)', () => {
     writeSkillFile.mockResolvedValue({ ok: true });
     const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: 'scripts/build.sh', content: 'echo hi' });
     expect(r).toEqual({ ok: true, data: { name: 'foo', path: 'scripts/build.sh' } });
-    expect(writeSkillFile).toHaveBeenCalledWith('foo', 'scripts/build.sh', 'echo hi');
+    expect(writeSkillFile).toHaveBeenCalledWith('foo', 'scripts/build.sh', 'echo hi', expect.any(Function));
     expect(onSkillsChanged).toHaveBeenCalledTimes(1);
   });
 
@@ -463,7 +463,7 @@ describe('app-tool dispatcher (aux-file ops)', () => {
     writeSkillFile.mockResolvedValue({ ok: true });
     const r = await handleAppTool('app_skill.write_file', { name: 'foo', path: 'empty.txt', content: '' });
     expect(r.ok).toBe(true);
-    expect(writeSkillFile).toHaveBeenCalledWith('foo', 'empty.txt', '');
+    expect(writeSkillFile).toHaveBeenCalledWith('foo', 'empty.txt', '', expect.any(Function));
   });
 
   it('write_file with non-string content → ok:false, touches nothing', async () => {
@@ -508,7 +508,7 @@ describe('app-tool dispatcher (aux-file ops)', () => {
     deleteSkillFile.mockResolvedValue({ ok: true });
     const r = await handleAppTool('app_skill.delete_file', { name: 'foo', path: 'a.txt' });
     expect(r).toEqual({ ok: true, data: { name: 'foo', path: 'a.txt' } });
-    expect(deleteSkillFile).toHaveBeenCalledWith('foo', 'a.txt');
+    expect(deleteSkillFile).toHaveBeenCalledWith('foo', 'a.txt', expect.any(Function));
     expect(onSkillsChanged).toHaveBeenCalledTimes(1);
   });
 
@@ -538,7 +538,7 @@ describe('app-tool dispatcher (write ops)', () => {
     updateSkill.mockResolvedValue({ ok: true, name: 'deploy-helper' });
     const r = await handleAppTool('app_skill.create', { content: '---\nname: deploy-helper\n---\nbody' });
     expect(r).toEqual({ ok: true, data: { name: 'deploy-helper' } });
-    expect(updateSkill).toHaveBeenCalledWith('my-skill', '---\nname: deploy-helper\n---\nbody');
+    expect(updateSkill).toHaveBeenCalledWith('my-skill', '---\nname: deploy-helper\n---\nbody', expect.any(Function));
     expect(onSkillsChanged).toHaveBeenCalledTimes(1);
     expect(deleteSkill).not.toHaveBeenCalled();
   });
@@ -565,7 +565,7 @@ describe('app-tool dispatcher (write ops)', () => {
     updateSkill.mockResolvedValue({ ok: true, name: 'renamed' });
     const r = await handleAppTool('app_skill.update', { name: 'old', content: '---\nname: renamed\n---\nb' });
     expect(r).toEqual({ ok: true, data: { name: 'renamed' } });
-    expect(updateSkill).toHaveBeenCalledWith('old', '---\nname: renamed\n---\nb');
+    expect(updateSkill).toHaveBeenCalledWith('old', '---\nname: renamed\n---\nb', expect.any(Function));
     expect(onSkillsChanged).toHaveBeenCalledTimes(1);
   });
 
@@ -595,4 +595,18 @@ describe('app-tool dispatcher (write ops)', () => {
     expect(r.ok).toBe(false);
     expect(onSkillsChanged).not.toHaveBeenCalled();
   });
+});
+
+it('rechecks agent edit permission at the serialized write boundary', async () => {
+  getSkill.mockResolvedValue('---\nname: foo\n---\nbody');
+  isSkillLocked.mockReturnValue(false);
+  updateSkill.mockImplementationOnce(async (_name: string, _content: string, beforeMutation: () => Promise<void>) => {
+    // A UI lock was queued before this source write got its turn.
+    isSkillLocked.mockReturnValue(true);
+    await beforeMutation();
+    return { ok: true, name: 'foo' };
+  });
+  const result = await handleAppTool('app_skill.update', { name: 'foo', content: '---\nname: foo\n---\nchanged' });
+  expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/locked against agent edits/) });
+  expect(onSkillsChanged).not.toHaveBeenCalled();
 });

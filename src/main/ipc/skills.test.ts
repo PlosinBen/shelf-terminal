@@ -23,6 +23,12 @@ vi.mock('../skills-store', () => ({
   deleteSkillFile: vi.fn(),
 }));
 
+const editorRead = vi.fn();
+const editorSave = vi.fn();
+vi.mock('../skills-editor', () => ({
+  createSkillEditorService: () => ({ read: (...args: unknown[]) => editorRead(...args), save: (...args: unknown[]) => editorSave(...args) }),
+}));
+
 const onSkillsChanged = vi.fn();
 const notifyRendererSkillsChanged = vi.fn();
 vi.mock('../skills-sync', () => ({
@@ -35,6 +41,8 @@ const { IPC } = await import('@shared/ipc-channels');
 
 beforeEach(() => {
   handlers.clear();
+  editorRead.mockReset();
+  editorSave.mockReset();
   setSkillLocked.mockReset();
   setSkillDisabled.mockReset();
   updateSkill.mockReset();
@@ -85,5 +93,28 @@ describe('content mutations still run the full pipeline', () => {
     updateSkill.mockResolvedValue({ ok: true, name: 'a' });
     await handlers.get(IPC.SKILLS_UPDATE)!({}, { name: 'a', content: 'x' });
     expect(onSkillsChanged).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe('editor coordinator handlers', () => {
+  it('returns read state including metadata errors', async () => {
+    const state = { ok: true, value: { content: 'body', command: { ok: false, error: 'invalid metadata' } } };
+    editorRead.mockResolvedValue(state);
+    expect(await handlers.get(IPC.SKILLS_EDITOR_READ)!({}, 'flow')).toEqual(state);
+    expect(editorRead).toHaveBeenCalledWith('flow');
+  });
+  it.each([
+    [true, false, false, 1, 0],
+    [false, true, true, 0, 1],
+    [false, false, false, 0, 0],
+  ])('notifies for actual mutations even on partial failure (%s/%s)', async (contentChanged, commandChanged, ok, full, renderer) => {
+    const result = { ok, name: 'flow', saved: { content: true, command: ok }, contentChanged, commandChanged };
+    editorSave.mockResolvedValue(result);
+    const request = { name: 'flow', activeFile: 'SKILL.md', content: 'body', commandDraft: null };
+    expect(await handlers.get(IPC.SKILLS_EDITOR_SAVE)!({}, request)).toEqual(result);
+    expect(editorSave).toHaveBeenCalledWith(request);
+    expect(onSkillsChanged).toHaveBeenCalledTimes(full);
+    expect(notifyRendererSkillsChanged).toHaveBeenCalledTimes(renderer);
   });
 });

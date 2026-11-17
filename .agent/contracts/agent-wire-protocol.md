@@ -416,3 +416,7 @@ This boundary additionally carries the **cache side-channel** — serviced local
 | `cache_put` | exec → dispatcher | `key; provider; ...value` |
 
 Cache-aside semantics: the execution unit asks the dispatcher on a miss, fetches via its own provider capability, and writes the result back. The dispatcher stores each value as an opaque, TTL-stamped blob it never parses (see `agent-config-flow#8`).
+
+## App skill execution validation
+
+`skill_invocation_validate` is a server-to-main execution control, carrying request/execution/message ids and a main-owned binding. It retains the normal `sid` routing envelope. Main consumes it through the live execution's registered validation callback before renderer event parsing; it is not a rendering primitive or model tool request. The result returns over stdin with matching request/execution/message/binding ids. Source types and timeout/stop semantics are defined in [skill commands](skill-commands.md) and [agent routing](agent-routing.md).

@@ -1,3 +1,4 @@
+import { SKILL_INVOCATION } from '@shared/skill-invocation';
 import { log } from '@shared/logger';
 import type { AgentQueueItem, TaskEvent } from '@shared/types';
 import type { AgentEvent } from './types';
@@ -29,6 +30,7 @@ export type PermissionHandler = (toolUseId: string, toolName: string, input: Rec
 export interface ExecutionDispatcher {
   /** Feed one already-JSON-parsed wire message into the dispatcher. */
   feed(msg: unknown): void;
+  registerSkillValidation(executionId: string, handler: (request: unknown) => void): () => void;
   /**
    * Register a execution so events tagged with `executionId` get routed to the returned
    * AsyncGenerator. MUST be called before the corresponding `send` reaches
@@ -90,12 +92,21 @@ export function createExecutionDispatcher(
   // unused until a feed() branch calls it. See executionId-scoping.
   onSessionEvent?: (event: AgentEvent) => void,
 ): ExecutionDispatcher {
+  const skillValidations = new Map<string, (request: unknown) => void>();
   const executions = new Map<string, ExecutionState>();
   const responseHandlers = new Map<string, (payload: any) => void>();
   let readyResolve: ((ok: boolean) => void) | null = null;
 
   function feed(parsed: unknown): void {
     const m = parsed as any;
+
+    if (m?.type === SKILL_INVOCATION.VALIDATE) {
+      const execution = executions.get(m.executionId);
+      const handler = skillValidations.get(m.executionId);
+      if (execution && !execution.done && handler) handler(m);
+      else log.error('agent-remote', `unmatched skill validation executionId=${m.executionId} requestId=${m.requestId}`);
+      return;
+    }
 
     // Lifecycle: ready signal — fires once when agent-server boots.
     if (m?.type === 'ready') {
@@ -300,6 +311,7 @@ export function createExecutionDispatcher(
         }
       } finally {
         executions.delete(executionId);
+        skillValidations.delete(executionId);
       }
     }
     return drain();
@@ -324,6 +336,7 @@ export function createExecutionDispatcher(
   }
 
   function failAllExecutions(errorMessage: string): void {
+    skillValidations.clear();
     for (const state of executions.values()) {
       // Error first (rendered as an error line), then idle so the generator ends.
       state.events.push({ type: 'error', error: errorMessage } as AgentEvent);
@@ -333,5 +346,11 @@ export function createExecutionDispatcher(
     }
   }
 
-  return { feed, registerExecution, awaitReady, onResponse, failAllExecutions };
+  return {
+    registerSkillValidation(executionId, handler) {
+      skillValidations.set(executionId, handler);
+      return () => { if (skillValidations.get(executionId) === handler) skillValidations.delete(executionId); };
+    },
+    feed, registerExecution, awaitReady, onResponse, failAllExecutions,
+  };
 }

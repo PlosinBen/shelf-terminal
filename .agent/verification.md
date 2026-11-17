@@ -36,7 +36,7 @@ title: Shelf — 驗證能力與執行入口
 ## 環境隔離與副作用
 
 - 一般 E2E 每個 test 建立 `shelf-e2e-*` 暫存 userData，以 `NODE_ENV=test` 啟動隱藏視窗並等待 `.app`。設定使用一個 worker，但不同 checkout 的獨立測試程序仍可能互相影響。
-- 共用 fixture 還會建立及清理主機 home 下固定的 `shelf-test-a`／`shelf-test-b`／`shelf-test-c` 目錄；userData 隔離不代表所有主機資源都隔離。執行前確認不與其他測試或使用者資料衝突。
+- 共用 fixture 預設還會建立及清理主機 home 下固定的 `shelf-test-a`／`shelf-test-b`／`shelf-test-c` 目錄；userData 隔離不代表所有主機資源都隔離。執行前確認不與其他測試或使用者資料衝突。 不使用這些具名專案目錄的測試可在 describe 範圍設定 `test.use({ homeProjectDirectories: false })`，同時略過建立與清理；此選項不隔離產品本身的 home 寫入。
 - Docker／SSH scripts 使用固定 `shelf-test-container` 名稱與 host port 2222；部署 script 也使用固定容器名。先確認可用性，不移除他人的容器以取得空位，不同 runs 避免併發使用這些資源。
 - 部署 fixture 使用跨 run 重用的 runtime cache；驗證首次部署時，必須辨認 cache 對主張的影響。
 - 持久化功能除了 DOM 結果，也應按相應 spec 檢查該次 userData 或目標檔案／資料；不要只以畫面完成狀態推論寫入成功。

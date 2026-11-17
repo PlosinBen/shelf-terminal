@@ -78,6 +78,8 @@ export const IPC = {
   // Skills (app-level Agent Skills — one folder per skill under userData)
   SKILLS_LIST: 'skills:list',
   SKILLS_GET: 'skills:get',
+  SKILLS_EDITOR_READ: 'skills:editor-read',
+  SKILLS_EDITOR_SAVE: 'skills:editor-save',
   SKILLS_CREATE: 'skills:create',
   SKILLS_UPDATE: 'skills:update',
   SKILLS_DELETE: 'skills:delete',
@@ -173,6 +175,7 @@ export const IPC = {
   // Agent (Renderer → Main)
   AGENT_INIT: 'agent:init',
   AGENT_SEND: 'agent:send',
+  AGENT_SKILL_COMMANDS: 'agent:skill-commands',
   AGENT_STOP: 'agent:stop',
   AGENT_DESTROY: 'agent:destroy',
   AGENT_RESOLVE_PERMISSION: 'agent:resolve-permission',

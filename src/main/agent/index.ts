@@ -1,3 +1,11 @@
+import { buildSkillCommandMenu } from './skill-command-menu';
+import { readSkillCommandCatalog } from '../skill-commands';
+import { withSkillsMutation } from '../skills-mutation';
+import { SKILL_COMMAND_ERROR, SkillCommandFailure } from '@shared/skill-invocation';
+import { createSkillInvocationRegistry } from './skill-invocations';
+import { skillsCollectionDir } from '../skills-store';
+import { parseShelfCommandPrefix, SKILL_COMMAND_RESERVED_ALIASES } from '@shared/skill-commands';
+import type { AgentBackendRequest } from './types';
 import { recoveryFromError } from '@shared/agent-init-recovery';
 import { validConfigControl, CONFIG_CONTROL as CC } from '@shared/agent-config-control';
 import { BrowserWindow, ipcMain } from 'electron';
@@ -40,6 +48,7 @@ import { SUBMISSION_ERROR as E, QUEUE_PROJECTION as P, submissionFailed, isSubmi
 import { configureDelegationRuntime, resolveDelegationTarget, cancelDelegationPickers } from './delegation-runtime';
 
 interface SessionInstance {
+  capabilities?: ProviderCapabilities;
   displayName: string;
   ready: boolean;
   connectionDead?: boolean;
@@ -71,9 +80,28 @@ interface SessionInstance {
 }
 
 const sessions = new Map<string, SessionInstance>();
+const skillInvocations = createSkillInvocationRegistry<SessionInstance>(skillsCollectionDir);
 const messageSender = createMessageSender({
   target: (tabId) => sessions.get(tabId),
-  execute: (session, message, written) => executeMessage(session.tabId, session, { inputMessage: message }, message.msgId, written),
+  execute: async (session, message, written, selection) => {
+    const native = new Set([...SKILL_COMMAND_RESERVED_ALIASES, ...(session.capabilities?.slashCommands.map(command => command.name) ?? [])]);
+    let invocation: import('@shared/skill-invocation').SkillInvocation | undefined;
+    let submitted = false;
+    const preserveRejectedInput = () => {
+      if (!submitted && message.source.kind === AGENT_INPUT_SOURCE.AGENT_VIEW && (selection || parseShelfCommandPrefix(message.content))) mirrorInput(session.tabId, message);
+    };
+    try {
+      invocation = await skillInvocations.prepare(session, message, native, selection);
+      if (invocation && (!session.ready || !session.capabilities?.appSkillCommands?.available)) throw new SkillCommandFailure(SKILL_COMMAND_ERROR.UNAVAILABLE, 'Native app skill invocation is not verified for this session');
+      if (sessions.get(session.tabId) !== session) throw new Error('Target Agent View changed before dispatch');
+      const result = await executeMessage(session.tabId, session, { inputMessage: message, invocation }, message.msgId, () => { submitted = true; written(); });
+      if (!submitted && invocation) preserveRejectedInput();
+      return result;
+    } catch (error) {
+      preserveRejectedInput();
+      throw error;
+    } finally { if (invocation) skillInvocations.release(invocation.bindingId); }
+  },
   report: (context, error) => log.warn('agent', `message submission ${context}: ${error instanceof Error ? error.message : JSON.stringify(error)}`),
 });
 function delegationViews(): DelegationView[] {
@@ -114,6 +142,7 @@ function hibernateTab(tabId: string): void {
   const session = sessions.get(tabId);
   if (!session || session.hibernated || session.activeExecutions > 0) return;
   log.info('agent', `[agent:${formatTabLogId(tabId)}] idle-teardown → dispose exec+CLI (resumes on next send)`);
+  skillInvocations.close(session);
   session.backend.dispose();
   session.hibernated = true;
   unregisterExecMemorySource(tabId);
@@ -316,6 +345,17 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
     }
   });
 
+  ipcMain.handle(IPC.AGENT_SKILL_COMMANDS, async (_event, tabId: string) => {
+    return withSkillsMutation(() => {
+      const session = sessions.get(tabId);
+      if (!session) return { entries: [], error: 'Target Agent View is not available' };
+      const catalog = readSkillCommandCatalog(skillsCollectionDir());
+      if (!catalog.ok) return { entries: [], error: catalog.error };
+      const native = new Set([...SKILL_COMMAND_RESERVED_ALIASES, ...(session.capabilities?.slashCommands.map(command => command.name) ?? [])]);
+      return buildSkillCommandMenu(catalog.value, native, session.ready && !session.connectionDead, session.capabilities?.appSkillCommands);
+    });
+  });
+
   ipcMain.handle(IPC.AGENT_SEND, async (_e, payload) => {
     // Renderer can submit user input, never claim Telegram/Agent provenance.
     const checked = validateAgentInputRequest(payload, AGENT_INPUT_SOURCE.AGENT_VIEW);
@@ -327,7 +367,7 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
       try { delegations.assertUserInput(payload.tabId); }
       catch (error) { log.warn('agent', String(error)); return submissionFailed(E.FORBIDDEN, String(error)); }
     }
-    if (checked.message.inputMessage) return messageSender.submit(payload.tabId, checked.message.inputMessage);
+    if (checked.message.inputMessage) return messageSender.submit(payload.tabId, checked.message.inputMessage, { commandSelection: checked.message.commandSelection });
     // Config control is not a message submission: preserve its existing FIFO
     // and completion return until the separate session-control feature lands.
     const session = sessions.get(payload.tabId);
@@ -372,6 +412,7 @@ export function initAgentManager(windowGetter: () => BrowserWindow | null): void
   ipcMain.handle(IPC.AGENT_CHECK_AUTH, async (_e, payload) => {
     const session = sessions.get(payload.tabId);
     if (!session) return false;
+    skillInvocations.close(session);
     const caps = await session.backend.checkAuth(session.cwd, providerCustomModels(session.provider));
     if (!caps) return false;
     return applyPostAuthResult(payload.tabId, session, caps);
@@ -572,6 +613,7 @@ async function startSession(
       // instructions; then flip auth (reusing the existing auth_required
       // routing → setAuthRequired → AuthPane takeover); then mark ready (the
       // chat underneath is harmless while AuthPane covers the pane).
+      session.capabilities = caps;
       send(IPC.AGENT_CAPABILITIES, tabId, caps);
       session.ready = !caps.authRequired; publishDelegations();
       if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(provider));
@@ -591,7 +633,7 @@ async function startSession(
   return true;
 }
 
-async function executeMessage(tabId: string, session: SessionInstance, input: AgentInputRequest, queueMessageId?: string, onSubmitted?: () => void): Promise<boolean> {
+async function executeMessage(tabId: string, session: SessionInstance, input: AgentBackendRequest, queueMessageId?: string, onSubmitted?: () => void): Promise<boolean> {
 
   const tag = `[agent:${formatTabLogId(tabId)}]`;
   log.info('agent', `${tag} send msgId=${input.inputMessage?.msgId ?? '-'} promptLen=${input.inputMessage?.content.length ?? 0}${input.configEdit ? ` configEdit=${input.configEdit.key}` : ''}`);
@@ -621,6 +663,8 @@ async function executeMessage(tabId: string, session: SessionInstance, input: Ag
   try {
     for await (const event of session.backend.query(input, session.cwd, {
       canUseTool,
+      onExecution: input.invocation ? executionId => skillInvocations.attach(session, input.invocation!, input.inputMessage!.msgId, executionId) : undefined,
+      validateSkillInvocation: request => sessions.get(tabId) === session ? skillInvocations.validate(session, request) : Promise.resolve({ ok: false, code: SKILL_COMMAND_ERROR.CHANGED, error: 'Agent View was replaced' }),
       clientMsgId: queueMessageId,
       onSubmitted,
     })) {
@@ -706,6 +750,7 @@ async function reinitAfterLogin(tabId: string): Promise<void> {
   const tag = `[agent:${formatTabLogId(tabId)}]`;
   const provider = session.provider;
   const customModels = providerCustomModels(provider);
+  skillInvocations.close(session);
   session.backend.reconnect?.();
   try {
     const caps = await session.backend.getCapabilities(session.cwd, customModels);
@@ -736,7 +781,7 @@ function applyPostAuthResult(
   caps: ProviderCapabilities,
 ): boolean {
   const current = sessions.get(tabId);
-  if (current) current.ready = !caps.authRequired;
+  if (current) { current.ready = !caps.authRequired; current.capabilities = caps; }
   publishDelegations();
   send(IPC.AGENT_CAPABILITIES, tabId, caps);
   if (caps.authRequired) send(IPC.AGENT_AUTH_REQUIRED, tabId, providerLabel(session.provider));
@@ -765,6 +810,7 @@ function dispatchEvent(tabId: string, event: AgentEvent) {
       send(IPC.AGENT_PLAN, tabId, { content: event.content });
       break;
     case 'capabilities':
+      if (sessions.get(tabId)) sessions.get(tabId)!.capabilities = event.caps;
       // Mid-execution capabilities update (model/effort/permission changed during a
       // execution). Same IPC channel as the initial capabilities so the renderer's
       // onCapabilities → setCapabilities path updates the status bar.
@@ -841,6 +887,7 @@ async function destroySession(tabId: string): Promise<boolean> {
   idleTracker.forget(tabId);
   session.backend.dispose();
   messageSender.close(tabId);
+  skillInvocations.close(session);
   sessions.delete(tabId);
   forgetExecMemoryScope(tabId);
   return true;
@@ -951,6 +998,7 @@ export function disposeAllAgents(): void {
   for (const session of sessions.values()) {
     session.backend.dispose();
     messageSender.close(session.tabId);
+    skillInvocations.close(session);
     forgetExecMemoryScope(session.tabId);
   }
   sessions.clear();

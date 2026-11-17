@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import { skillPayloadDigest } from '@shared/skill-payload';
+import { SKILL_INVOCATION, SKILL_COMMAND_ERROR } from '@shared/skill-invocation';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
@@ -12,6 +15,10 @@ import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-l
 import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
 // Lifecycle tests use fake app-server processes, not a main bootstrap channel.
 vi.mock('../../shelf-mcp', () => ({ getSharedShelfMcp: async () => null }));
+
+const fixture = vi.hoisted(() => ({ root: null as string | null }));
+vi.mock('../shared', async original => ({ ...(await original<typeof import('../shared')>()), resolveSkillsPluginRoot: () => fixture.root }));
+afterEach(() => { if (fixture.root) fs.rmSync(fixture.root, { recursive: true, force: true }); fixture.root = null; });
 
 interface RequestCall {
   method: string;
@@ -1269,5 +1276,45 @@ describe('Codex official app-server backend lifecycle', () => {
 
     expect(refreshAccountStatus).toHaveBeenCalledWith(undefined, expect.any(Function), 'app-1');
     expect(out).toEqual([{ type: 'status', rateLimits: [{ text: '7d: 1%', severity: 'normal' }] }]);
+  });
+});
+
+
+describe('native app skill invocation', () => {
+  function selected() {
+    fixture.root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-skill-'));
+    const directory = path.join(fixture.root, 'skills', 'flow');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, 'SKILL.md'), '---\nname: flow\ndescription: fixture\n---\nAPP');
+    const invocation = { kind: SKILL_INVOCATION.KIND, bindingId: 'ad1b0c23-6789-4123-8123-123456789abc', registrationId: 'ad1b0c23-6789-4123-8123-123456789abd', skillName: 'flow', alias: 'dev-flow', args: 'task', payloadDigest: skillPayloadDigest(directory) };
+    return { invocation, file: path.join(directory, 'SKILL.md') };
+  }
+  it.each(['', 'task'])('uses forceReload plus exact skill path, retains images and args (%s)', async args => {
+    const { invocation, file } = selected(); invocation.args = args;
+    const app = new FakeAppServer({ 'skills/list': () => ({ data: [{ cwd: '/repo', skills: [{ name: 'flow', path: file, enabled: true }] }] }) });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: '/dev-flow task', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
+    if (!built.ok) throw Error(built.error);
+    try {
+      await backend.query({ prompt: built.message.content, inputMessage: built.message, invocation, cwd: '/repo', appId: 'fixture', attachments: [{ kind: 'image', path: '/fixture/image.png', displayPath: '/fixture/image.png', name: 'image.png' }] }, () => {});
+      expect(app.calls.find(call => call.method === 'skills/list')?.params).toMatchObject({ forceReload: true, cwds: ['/repo'] });
+      expect(app.calls.find(call => call.method === 'turn/start')?.params).toMatchObject({ input: [
+        { type: 'text', text: `$flow${args ? ` ${args}` : ''}`, text_elements: [] },
+        { type: 'localImage', path: '/fixture/image.png' }, { type: 'skill', name: 'flow', path: fs.realpathSync(file) },
+      ] });
+      expect(built.message.content).toBe('/dev-flow task');
+    } finally { backend.dispose(); }
+  });
+  it.each(['shadow', 'disabled', 'drift'])('fails closed before turn/start for %s', async variant => {
+    const { invocation, file } = selected();
+    const app = new FakeAppServer({ 'skills/list': () => ({ data: [{ skills: [{ name: 'flow', path: variant === 'shadow' ? '/project/flow/SKILL.md' : file, enabled: variant !== 'disabled' }] }] }) });
+    if (variant === 'drift') fs.appendFileSync(file, 'changed');
+    const backend = createCodexBackend({ createAppServer: () => app }); const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: '/dev-flow task', invocation, cwd: '/repo', appId: 'fixture' }, message => out.push(message));
+      expect(app.calls.some(call => call.method === 'turn/start')).toBe(false);
+      expect(out).toContainEqual(expect.objectContaining({ type: 'error', error: expect.stringContaining(variant === 'drift' ? SKILL_COMMAND_ERROR.PROJECTION : SKILL_COMMAND_ERROR.SOURCE) }));
+      expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+    } finally { backend.dispose(); }
   });
 });

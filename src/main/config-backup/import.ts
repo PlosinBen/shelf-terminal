@@ -16,11 +16,14 @@ import {
   type ImportListResult,
 } from '@shared/config-backup';
 import { log } from '@shared/logger';
+import { isSkillCommandControlPath } from '@shared/skill-commands';
 import { getAppInstanceId } from '../app-instance-id';
-import { parseSkillMeta, skillDirPath } from '../skills-store';
+import { parseSkillMeta, skillDirPath, skillsCollectionDir } from '../skills-store';
+import { readSkillCommandCatalog } from '../skill-commands';
+import { withSkillsMutation, invalidateSkillInvocations } from '../skills-mutation';
 import { validateAuthoredMcpEntry, type McpServerBlock } from '@shared/mcp';
 import { mcpConfigSourcePath } from '../mcp-projection';
-import { onSkillsChanged } from '../skills-sync';
+import { onSkillsChanged, notifyRendererSkillsChanged } from '../skills-sync';
 import { onMcpChanged } from '../mcp-sync';
 import { enumerateLiveItems } from './enumerate';
 import { withConfigBackupOperation } from './operation-lock';
@@ -187,6 +190,7 @@ interface PreparedSkill {
   preparedDirectory: string;
   destination: string;
   changed: boolean;
+  contentChanged: boolean;
 }
 
 interface PreparedMcp {
@@ -212,12 +216,14 @@ export interface ImportApplyDependencies {
   beforeCanonicalWrite?(itemId: string): void;
   beforeRollback?(itemId: string): void;
   notifySkillsChanged(): void;
+  notifyCommandSettingsChanged?(): void;
   notifyMcpChanged(): void;
 }
 
 const DEFAULT_APPLY_DEPENDENCIES: ImportApplyDependencies = {
   createSideCar,
   notifySkillsChanged: onSkillsChanged,
+  notifyCommandSettingsChanged: notifyRendererSkillsChanged,
   notifyMcpChanged: onMcpChanged,
 };
 
@@ -292,7 +298,7 @@ function preserveDestinationMarkers(destination: string, prepared: string): void
   }
 }
 
-function treesEqual(left: string, right: string): boolean {
+function treesEqual(left: string, right: string, excludeRootCommandSettings = false): boolean {
   let leftStat: fs.Stats;
   let rightStat: fs.Stats;
   try {
@@ -311,8 +317,9 @@ function treesEqual(left: string, right: string): boolean {
       && fs.readFileSync(left).equals(fs.readFileSync(right));
   }
   if (!leftStat.isDirectory() || !rightStat.isDirectory()) return false;
-  const leftEntries = fs.readdirSync(left).sort();
-  const rightEntries = fs.readdirSync(right).sort();
+  const include = (entry: string) => !excludeRootCommandSettings || !isSkillCommandControlPath(entry);
+  const leftEntries = fs.readdirSync(left).filter(include).sort();
+  const rightEntries = fs.readdirSync(right).filter(include).sort();
   if (leftEntries.length !== rightEntries.length) return false;
   return leftEntries.every((entry, index) => (
     entry === rightEntries[index]
@@ -387,7 +394,13 @@ function prepareImport(
         preparedDirectory,
         destination,
         changed: !treesEqual(destination, preparedDirectory),
+        contentChanged: !treesEqual(destination, preparedDirectory, true),
       });
+    }
+
+    if (skills.length > 0) {
+      const catalog = readSkillCommandCatalog(skillsCollectionDir(), new Map(skills.map(item => [item.name, item.preparedDirectory])));
+      if (!catalog.ok) return importFailure('validation', `Cannot Import command settings: ${catalog.error}`, 'not-needed');
     }
 
     const destination = mcpConfigSourcePath();
@@ -500,6 +513,7 @@ function commitPreparedImport(
       dependencies.beforeCanonicalWrite?.(item.id);
       const displaced = path.join(operationRoot, 'displaced', item.name);
       fs.mkdirSync(path.dirname(displaced), { recursive: true });
+      invalidateSkillInvocations(item.name);
       const hadDestination = pathExists(item.destination);
       if (hadDestination) fs.renameSync(item.destination, displaced);
       const applied = { item, displaced, hadDestination };
@@ -597,16 +611,21 @@ export async function applyImport(
         return importFailure('source', `Could not load Import source: ${errorMessage(error)}`, 'not-needed');
       }
 
-      const prepared = prepareImport(sourceRoot, operationRoot, selected);
-      if ('ok' in prepared) return prepared;
-      const result = commitPreparedImport(prepared, operationRoot, dependencies);
+      let consumptionChanged = false;
+      const result = await withSkillsMutation(() => {
+        const prepared = prepareImport(sourceRoot, operationRoot, selected);
+        if ('ok' in prepared) return prepared;
+        consumptionChanged = prepared.skills.some(item => item.changed && item.contentChanged);
+        return commitPreparedImport(prepared, operationRoot, dependencies);
+      });
       if (!result.ok) return result;
 
       cleanupOperationDirectory(operationRoot);
       cleaned = true;
       if (result.skillsWritten > 0) {
         try {
-          dependencies.notifySkillsChanged();
+          if (consumptionChanged) dependencies.notifySkillsChanged();
+          else (dependencies.notifyCommandSettingsChanged ?? dependencies.notifySkillsChanged)();
         } catch (error) {
           log.error('config-backup', `post-Import Skills projection failed: ${errorMessage(error)}`);
         }

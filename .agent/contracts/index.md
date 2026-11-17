@@ -15,3 +15,4 @@ Exact interface specs / message formats. Point to source types rather than dupli
 | 磁碟持久化格式 | [persistence-formats](persistence-formats.md) | projects/settings/notes/skills/投影/context layout |
 | app-tool bridge 協定 | [app-tool-bridge](app-tool-bridge.md) | `app_tool` 訊息 + `op=resource.verb` registry |
 | canonical project contract | [projects](projects.md) | canonical model、main repository/IPC operations、flat renderer views、project intents與 feature-note snapshots |
+| Skill commands | [skill-commands](skill-commands.md) | sidecar、editor/menu IPC、submission binding、queue revalidation 與 native dispatch 邊界 |

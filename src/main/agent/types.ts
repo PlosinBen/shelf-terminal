@@ -1,3 +1,4 @@
+import type { SkillInvocation, SkillValidationRequest, SkillValidationResult } from '@shared/skill-invocation';
 import type { AgentMessage, AgentPrefs, AuthMethod, ProviderModel } from '@shared/types';
 import type { AgentInputRequest } from '@shared/agent-input';
 import type { PermissionControlCapabilities } from '@shared/permission-controls';
@@ -77,6 +78,7 @@ export interface AgentStatusPayload {
 }
 
 export interface ProviderCapabilities {
+  appSkillCommands?: import('@shared/skill-invocation').AppSkillCommandCapability;
   /** When present, only this explicit confirmed intent is persisted. Empty means display only. */
   confirmedPrefs?: Partial<import('@shared/types').AgentPrefs>;
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];
@@ -98,7 +100,11 @@ export type PermissionResult =
   | { behavior: 'deny'; message?: string };
 export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
 
+export type AgentBackendRequest = AgentInputRequest & { invocation?: SkillInvocation };
+
 export interface AgentQueryOptions {
+  onExecution?: (executionId: string) => void;
+  validateSkillInvocation?: (request: SkillValidationRequest) => Promise<SkillValidationResult>;
   /** Internal submission boundary: called after the send frame was written, not after completion. */
   onSubmitted?: () => void;
   /** Factory msgId correlation for queue receipts; projection is owned by the main Sender. */
@@ -152,7 +158,7 @@ export type AgentEvent =
   | { type: 'error'; error: string };
 
 export interface AgentBackend {
-  query(input: AgentInputRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
+  query(input: AgentBackendRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent>;
   stop(): Promise<void>;
   dispose(): void;
   /**

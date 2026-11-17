@@ -99,3 +99,8 @@ describe('common message sender', () => {
     await expect(next).resolves.toEqual({ ok: true }); s.finish();
   });
 });
+
+it('preserves a definitive command rejection reason before queue submission', async () => {
+  const sender = createMessageSender({ target: () => ({}), execute: async () => { throw new Error('[native_unavailable] Native app skill is not ready'); }, report: vi.fn() });
+  await expect(sender.submit('tab', message())).resolves.toMatchObject({ ok: false, error: { code: E.NOT_SENT, message: expect.stringContaining('[native_unavailable]') } });
+});

@@ -7,7 +7,7 @@ const BRIEF_PLAIN_TEXT_GUIDANCE =
   + 'Keep it short. If the answer spans multiple topics or issues, just list the topic titles and let me ask which to expand — do not explain them all at once. '
   + 'For long code or command output, say "see Shelf" instead of pasting it.]';
 
-type PromptInput = { prompt: string; inputMessage?: AgentInputMessage };
+type PromptInput = { prompt: string; inputMessage?: AgentInputMessage; invocation?: import('@shared/skill-invocation').SkillInvocation };
 
 /** Preserve the old UI command trimming without modifying canonical content. */
 export function inputPromptForDispatch(input: PromptInput): string {
@@ -17,6 +17,7 @@ export function inputPromptForDispatch(input: PromptInput): string {
 
 /** agent-config-flow#15: apply shared guidance only after native slash dispatch. */
 export function modelInputPrompt(input: PromptInput, content = inputPromptForDispatch(input)): string {
+  if (input.invocation) return content;
   const requirement = input.inputMessage?.replyRequirement ?? AGENT_REPLY_REQUIREMENT.NONE;
   switch (requirement) {
     case AGENT_REPLY_REQUIREMENT.NONE: return content;

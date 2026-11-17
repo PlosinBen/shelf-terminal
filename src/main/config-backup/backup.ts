@@ -14,6 +14,7 @@ import type { McpServerBlock, McpServersFile } from '@shared/mcp';
 import { getAppInstanceId } from '../app-instance-id';
 import { listMcpServers } from '../mcp-store';
 import { skillDirPath } from '../skills-store';
+import { withSkillsMutation } from '../skills-mutation';
 import { loadBinding, thisMachineBranchRef } from './binding-store';
 import { enumerateLiveItems } from './enumerate';
 import { saveIntent } from './intent-store';
@@ -232,7 +233,7 @@ export async function runBackup(
     return validationFailure('Select at least one Skill or MCP server before Back up.');
   }
 
-  const captured = await captureSelected(selectedIds, dependencies);
+  const captured = await withSkillsMutation(() => captureSelected(selectedIds, dependencies));
   if ('ok' in captured) return captured;
   const snapshot = captured;
 

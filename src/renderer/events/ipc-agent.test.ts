@@ -1,3 +1,4 @@
+import { setSkillCommandMenu } from '../agentTabStore';
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { bindAgentIPCGroup } from './ipc-agent';
 import { onAgent, emitAgent } from './types';
@@ -6,7 +7,7 @@ import { SHELF_MCP, SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '../../shared/shel
 import { beginPendingCancel, finishPendingCancel, cancelPendingSend } from '../agentTabStore';
 import { QUEUE_CANCEL as C } from '../../shared/agent-queue-cancel';
 import { SUBMISSION_ERROR as E, submissionFailed } from '../../shared/agent-submission';
-vi.mock('../agentTabStore', () => ({ cancelPendingSend: vi.fn(), beginPendingCancel: vi.fn(() => true), finishPendingCancel: vi.fn(), beginConfigControl: vi.fn(), updateConfigControl: vi.fn() }));
+vi.mock('../agentTabStore', () => ({ setSkillCommandMenu: vi.fn(), cancelPendingSend: vi.fn(), beginPendingCancel: vi.fn(() => true), finishPendingCancel: vi.fn(), beginConfigControl: vi.fn(), updateConfigControl: vi.fn() }));
 
 // Mock the agent IPC surface. Each on* method stores its callback so
 // tests can fire it synchronously; each outbound method records calls
@@ -24,6 +25,7 @@ function makeMockAgentApi() {
   };
   return {
     api: {
+      skillCommands: vi.fn().mockResolvedValue({ entries: [] }),
       init: record('init'),
       send: record('send'),
       stop: record('stop'),
@@ -75,7 +77,7 @@ describe('bindAgentIPCGroup', () => {
     vi.mocked(finishPendingCancel).mockClear();
     __resetBusForTests();
     mock = makeMockAgentApi();
-    (globalThis as any).window = { shelfApi: { agent: mock.api } };
+    (globalThis as any).window = { shelfApi: { agent: mock.api, skills: { onChanged: () => () => {} } } };
     cleanup = bindAgentIPCGroup();
   });
 
@@ -83,6 +85,20 @@ describe('bindAgentIPCGroup', () => {
     cleanup();
     __resetBusForTests();
     delete (globalThis as any).window;
+  });
+
+  it('keeps the latest catalog response when capabilities refreshes overlap', async () => {
+    const pending: Array<(value: any) => void> = [];
+    mock.api.skillCommands.mockImplementation(() => new Promise<any>(resolve => pending.push(resolve)));
+    vi.mocked(setSkillCommandMenu).mockClear();
+    mock.callbacks.onCapabilities('tab-1', {});
+    mock.callbacks.onCapabilities('tab-1', {});
+    pending[1]({ entries: [], error: 'latest' });
+    await Promise.resolve();
+    pending[0]({ entries: [], error: 'stale' });
+    await Promise.resolve();
+    expect(setSkillCommandMenu).toHaveBeenCalledTimes(1);
+    expect(setSkillCommandMenu).toHaveBeenCalledWith('tab-1', { entries: [], error: 'latest' });
   });
 
   describe('inbound (IPC → bus)', () => {
@@ -283,7 +299,7 @@ describe('bindAgentIPCGroup', () => {
       // but the binder's own off* invalidated the IPC mock callback ref.
       // Verify by re-binding and ensuring no double-fire.
       mock = makeMockAgentApi();
-      (globalThis as any).window = { shelfApi: { agent: mock.api } };
+      (globalThis as any).window = { shelfApi: { agent: mock.api, skills: { onChanged: () => () => {} } } };
       cleanup = bindAgentIPCGroup();
       mock.callbacks.onMessage('tab-1', { type: 'text', content: 'hi' });
       expect(handler).toHaveBeenCalledTimes(1);  // only the new binder fires

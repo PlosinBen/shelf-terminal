@@ -71,3 +71,13 @@ describe('canonical Agent input', () => {
     expect(validateAgentInputMessage({ msgId: 'existing', source, content: 'x' })).toMatchObject({ ok: false });
   });
 });
+
+
+it('rejects renderer-owned invocation fields and keeps selection separate from canonical input', () => {
+  const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.AGENT_VIEW }, content: '/dev-flow task' });
+  if (!built.ok) throw Error(built.error);
+  const commandSelection = { registrationId: 'ad1b0c23-6789-4123-8123-123456789abc', catalogRevision: 'a'.repeat(64) };
+  expect(validateAgentInputRequest({ inputMessage: built.message, commandSelection }, AGENT_INPUT_SOURCE.AGENT_VIEW)).toMatchObject({ ok: true, message: { commandSelection } });
+  expect(validateAgentInputRequest({ inputMessage: built.message, invocation: { bindingId: 'forged' } }, AGENT_INPUT_SOURCE.AGENT_VIEW)).toMatchObject({ ok: false });
+  expect(validateAgentInputRequest({ configEdit: { key: 'model', value: 'x' }, commandSelection })).toMatchObject({ ok: false });
+});

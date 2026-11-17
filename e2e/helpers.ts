@@ -51,6 +51,9 @@ export const test = base.extend<{
   // the init-'failed' path so a spec can assert the input-readiness gate. Default
   // false leaves every other spec's launch env unchanged.
   capsFail: boolean;
+  // Specs that do not select named home subdirectories can run without
+  // creating or cleaning the shared shelf-test-a/b/c project fixtures.
+  homeProjectDirectories: boolean;
   // Opt-in: `test.use({ capsDelayMs: N })` holds the fake provider's
   // gatherCapabilities for N ms (SHELF_TEST_CAPS_DELAY), keeping init in
   // 'starting' long enough to assert the not-ready overlay before it clears.
@@ -65,16 +68,17 @@ export const test = base.extend<{
   shelfApp: { app: ElectronApplication; page: Page; userDataDir: string };
 }>({
   capsFail: [false, { option: true }],
+  homeProjectDirectories: [true, { option: true }],
   capsDelayMs: [0, { option: true }],
   loginSuccess: [false, { option: true }],
   postLoginCapsFail: [false, { option: true }],
   nativeApproval: [false, { option: true }],
   nativePermissions: [false, { option: true }],
   copilotUsage: [false, { option: true }],
-  shelfApp: async ({ capsFail, capsDelayMs, loginSuccess, postLoginCapsFail, nativePermissions, nativeApproval, copilotUsage }, use) => {
+  shelfApp: async ({ homeProjectDirectories, capsFail, capsDelayMs, loginSuccess, postLoginCapsFail, nativePermissions, nativeApproval, copilotUsage }, use) => {
     const userDataDir = createTempUserDataDir();
     seedProjectsData(userDataDir);
-    ensureTestDirectories();
+    if (homeProjectDirectories) ensureTestDirectories();
 
     const app = await electron.launch({
       args: [path.join(__dirname, '..'), `--user-data-dir=${userDataDir}`],
@@ -109,7 +113,7 @@ export const test = base.extend<{
 
     // Always runs — even after test failures
     await app.close().catch(() => {});
-    cleanupTestDirectories();
+    if (homeProjectDirectories) cleanupTestDirectories();
     fs.rmSync(userDataDir, { recursive: true, force: true });
   },
 });

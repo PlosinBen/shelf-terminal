@@ -3,12 +3,14 @@ import fs from 'fs';
 import { app } from 'electron';
 import { load as parseYaml, YAMLException } from 'js-yaml';
 import { log } from '@shared/logger';
+import { isSkillCommandControlPath, SKILL_PLUGIN } from '@shared/skill-commands';
+import { withSkillsMutation, invalidateSkillInvocations, type SkillMutationGuard } from './skills-mutation';
 
 /**
  * App-level Agent Skills store (see agent feature `skills-workflows`).
  *
  * Source of truth lives under `<userData>/skills/` — which is ALSO the Claude
- * plugin root, so projection (L2/L3) is a straight whole-tree copy. Layout:
+ * plugin root, so projection (L2/L3) copies the consumption tree, excluding main-only controls. Layout:
  *
  *   <userData>/skills/
  *   ├── .claude-plugin/plugin.json   ← { "name": "shelf-skills" } (Shelf-ensured)
@@ -48,7 +50,7 @@ export interface SkillFileResult {
   error?: string;
 }
 
-const PLUGIN_NAME = 'shelf-skills';
+const PLUGIN_NAME = SKILL_PLUGIN.NAME;
 
 function skillsRoot(): string {
   return path.join(app.getPath('userData'), 'skills');
@@ -85,7 +87,7 @@ function disabledMarkerPath(name: string): string {
   return path.join(skillDir(name), '.disabled');
 }
 function manifestPath(): string {
-  return path.join(skillsRoot(), '.claude-plugin', 'plugin.json');
+  return path.join(skillsRoot(), SKILL_PLUGIN.DIRECTORY, SKILL_PLUGIN.MANIFEST);
 }
 
 /** Top-level files an agent may NOT touch via the generic aux-file ops: SKILL.md
@@ -93,6 +95,7 @@ function manifestPath(): string {
  *  (the user's UI-only agent-handsoff marker), and `.disabled` (the user's
  *  UI-only mount toggle). Reserving them in the path guard is what makes "an
  *  agent can never orphan a skill's SKILL.md" true. */
+// skills#12: command metadata/staging paths are reserved by the shared path guard too.
 const RESERVED_AUX_FILES = new Set(['SKILL.md', '.locked', '.disabled']);
 
 /** Ensure the plugin scaffold exists so the tree is projection-ready. Idempotent. */
@@ -225,7 +228,7 @@ export function isSkillLocked(name: string): boolean {
 
 /** Set/clear a skill's lock. No-op for an invalid name or a skill that doesn't
  *  exist (can't lock what isn't there). */
-export async function setSkillLocked(name: string, locked: boolean): Promise<void> {
+async function setSkillLockedUnlocked(name: string, locked: boolean): Promise<void> {
   if (!isValidSkillName(name) || !fs.existsSync(skillDir(name))) return;
   if (locked) await fs.promises.writeFile(lockMarkerPath(name), '');
   else await fs.promises.rm(lockMarkerPath(name), { force: true });
@@ -242,14 +245,15 @@ export function isSkillDisabled(name: string): boolean {
  *  that doesn't exist. UNLIKE lock, the caller (ipc/skills) must run the full
  *  onSkillsChanged() pipeline afterwards: toggling this changes the projected +
  *  synced tree (and its hash), so live sessions must re-project/hot-reload. */
-export async function setSkillDisabled(name: string, disabled: boolean): Promise<void> {
+async function setSkillDisabledUnlocked(name: string, disabled: boolean): Promise<void> {
   if (!isValidSkillName(name) || !fs.existsSync(skillDir(name))) return;
+  invalidateSkillInvocations(name);
   if (disabled) await fs.promises.writeFile(disabledMarkerPath(name), '');
   else await fs.promises.rm(disabledMarkerPath(name), { force: true });
 }
 
 /** Materialise a new skill from the template under a unique placeholder name. */
-export async function createSkill(): Promise<SkillMeta> {
+async function createSkillUnlocked(): Promise<SkillMeta> {
   ensureScaffold();
   const existing = new Set((await listSkills()).map((s) => s.name));
   const name = uniqueSkillName('my-skill', existing);
@@ -263,7 +267,7 @@ export async function createSkill(): Promise<SkillMeta> {
  * differs from `currentName`, the folder is renamed to match (collision-checked,
  * resources moved with it). Returns the resulting name, or an error.
  */
-export async function updateSkill(currentName: string, content: string): Promise<SkillUpdateResult> {
+async function updateSkillUnlocked(currentName: string, content: string): Promise<SkillUpdateResult> {
   ensureScaffold();
   if (!isValidSkillName(currentName)) return { ok: false, error: 'Invalid current skill name' };
 
@@ -280,6 +284,7 @@ export async function updateSkill(currentName: string, content: string): Promise
   }
 
   if (nextName === currentName) {
+    invalidateSkillInvocations(currentName);
     await fs.promises.mkdir(skillDir(currentName), { recursive: true });
     await fs.promises.writeFile(skillFile(currentName), content, 'utf-8');
     return { ok: true, name: currentName };
@@ -290,6 +295,8 @@ export async function updateSkill(currentName: string, content: string): Promise
     return { ok: false, error: `A skill named "${nextName}" already exists` };
   }
   try {
+    invalidateSkillInvocations(currentName);
+    invalidateSkillInvocations(nextName);
     if (fs.existsSync(skillDir(currentName))) {
       await fs.promises.rename(skillDir(currentName), skillDir(nextName));
     } else {
@@ -303,8 +310,9 @@ export async function updateSkill(currentName: string, content: string): Promise
   }
 }
 
-export async function deleteSkill(name: string): Promise<void> {
+async function deleteSkillUnlocked(name: string): Promise<void> {
   if (!isValidSkillName(name)) return;
+  invalidateSkillInvocations(name);
   await fs.promises.rm(skillDir(name), { recursive: true, force: true });
 }
 
@@ -329,11 +337,11 @@ export function resolveAuxPath(name: string, rel: string): string | null {
   const relToDir = path.relative(dir, resolved);
   // Empty = the folder itself; `..`-prefixed / absolute = outside it.
   if (relToDir === '' || relToDir.startsWith('..') || path.isAbsolute(relToDir)) return null;
-  if (RESERVED_AUX_FILES.has(relToDir)) return null;
+  if (RESERVED_AUX_FILES.has(relToDir) || isSkillCommandControlPath(relToDir)) return null;
   return resolved;
 }
 
-/** List a skill's aux files (everything except SKILL.md / .locked / .disabled) as sorted,
+/** List a skill's aux files (excluding identity, markers and command control paths) as sorted,
  *  POSIX-relative paths. Empty for an unknown/invalid skill. */
 export async function listSkillAuxFiles(name: string): Promise<string[]> {
   if (!isValidSkillName(name)) return [];
@@ -349,6 +357,7 @@ export async function listSkillAuxFiles(name: string): Promise<string[]> {
     }
     for (const e of entries) {
       const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (isSkillCommandControlPath(childRel)) continue;
       if (e.isDirectory()) await walk(path.join(cur, e.name), childRel);
       else if (e.isFile() && !RESERVED_AUX_FILES.has(childRel)) out.push(childRel);
     }
@@ -372,11 +381,12 @@ export async function readSkillFile(name: string, rel: string): Promise<string |
 /** Create/overwrite one aux file (utf-8), making parent dirs as needed. The path
  *  guard + skill-exists check are re-asserted here so the store is safe even if a
  *  caller skips the bridge guards. */
-export async function writeSkillFile(name: string, rel: string, content: string): Promise<SkillFileResult> {
+async function writeSkillFileUnlocked(name: string, rel: string, content: string): Promise<SkillFileResult> {
   const abs = resolveAuxPath(name, rel);
   if (!abs) return { ok: false, error: `Invalid or reserved skill file path: ${rel}` };
   if (!fs.existsSync(skillDir(name))) return { ok: false, error: `skill not found: ${name}` };
   try {
+    invalidateSkillInvocations(name);
     await fs.promises.mkdir(path.dirname(abs), { recursive: true });
     await fs.promises.writeFile(abs, content, 'utf-8');
     return { ok: true };
@@ -387,11 +397,12 @@ export async function writeSkillFile(name: string, rel: string, content: string)
 }
 
 /** Delete one aux file. Cannot touch SKILL.md / .locked / .disabled (reserved → guard null). */
-export async function deleteSkillFile(name: string, rel: string): Promise<SkillFileResult> {
+async function deleteSkillFileUnlocked(name: string, rel: string): Promise<SkillFileResult> {
   const abs = resolveAuxPath(name, rel);
   if (!abs) return { ok: false, error: `Invalid or reserved skill file path: ${rel}` };
   try {
     if (!fs.existsSync(abs)) return { ok: false, error: `file not found: ${rel}` };
+    invalidateSkillInvocations(name);
     await fs.promises.rm(abs, { force: true });
     return { ok: true };
   } catch (err: any) {
@@ -399,3 +410,46 @@ export async function deleteSkillFile(name: string, rel: string): Promise<SkillF
     return { ok: false, error: 'Failed to delete skill file' };
   }
 }
+
+export function createSkill(): Promise<SkillMeta> {
+  return withSkillsMutation(() => createSkillUnlocked());
+}
+
+export function updateSkill(currentName: string, content: string, beforeMutation?: SkillMutationGuard): Promise<SkillUpdateResult> {
+  return withSkillsMutation(async () => {
+    await beforeMutation?.();
+    return updateSkillUnlocked(currentName, content);
+  });
+}
+
+export function deleteSkill(name: string): Promise<void> {
+  return withSkillsMutation(() => deleteSkillUnlocked(name));
+}
+
+export function setSkillLocked(name: string, locked: boolean): Promise<void> {
+  return withSkillsMutation(() => setSkillLockedUnlocked(name, locked));
+}
+
+export function setSkillDisabled(name: string, disabled: boolean): Promise<void> {
+  return withSkillsMutation(() => setSkillDisabledUnlocked(name, disabled));
+}
+
+export function writeSkillFile(name: string, rel: string, content: string, beforeMutation?: SkillMutationGuard): Promise<SkillFileResult> {
+  return withSkillsMutation(async () => {
+    await beforeMutation?.();
+    return writeSkillFileUnlocked(name, rel, content);
+  });
+}
+
+export function deleteSkillFile(name: string, rel: string, beforeMutation?: SkillMutationGuard): Promise<SkillFileResult> {
+  return withSkillsMutation(async () => {
+    await beforeMutation?.();
+    return deleteSkillFileUnlocked(name, rel);
+  });
+}
+
+/** Editor coordinator only: caller must already hold withSkillsMutation. */
+export const skillEditorMutations = {
+  update: updateSkillUnlocked,
+  writeFile: writeSkillFileUnlocked,
+};

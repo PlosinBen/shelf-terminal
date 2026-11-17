@@ -1,3 +1,4 @@
+import { SKILL_COMMAND_FILE, SKILL_COMMAND_TEMP_PREFIX, SKILL_COMMAND_VERSION } from '@shared/skill-commands';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
@@ -79,4 +80,14 @@ describe('validateSkillPayload', () => {
       reason: expect.stringContaining('valid UTF-8'),
     });
   });
+});
+
+it('backs up validated portable command settings but never temporary files', () => {
+  const directory = seedSkill('demo');
+  const command = { version: SKILL_COMMAND_VERSION, registrationId: 'ad1b0c23-6789-4123-8123-123456789abc', alias: 'demo', description: 'Demo' };
+  fs.writeFileSync(path.join(directory, SKILL_COMMAND_FILE), JSON.stringify(command));
+  fs.writeFileSync(path.join(directory, `${SKILL_COMMAND_TEMP_PREFIX}fixture`), 'partial');
+  expect(validateSkillPayload('demo', directory)).toEqual({ valid: true, payloadFiles: [SKILL_COMMAND_FILE, 'SKILL.md'].sort() });
+  fs.writeFileSync(path.join(directory, SKILL_COMMAND_FILE), JSON.stringify({ ...command, version: 2 }));
+  expect(validateSkillPayload('demo', directory)).toMatchObject({ valid: false, reason: expect.stringMatching(/version/) });
 });

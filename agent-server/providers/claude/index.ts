@@ -1,3 +1,6 @@
+import { SKILL_PLUGIN } from '@shared/skill-commands';
+import { resolveInvocationSkillPath } from '../skill-invocation';
+import { SKILL_INVOCATION, SkillCommandFailure, SKILL_COMMAND_ERROR as SCE } from '@shared/skill-invocation';
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
@@ -6,7 +9,7 @@ import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } 
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, realpathSync, readFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { resolve, join, dirname } from 'path';
 import type { QueryInput, SendFn, ServerBackend, ProviderCapabilities, StatusSegment, PickerResolvePayload, ReapableTask } from '../types';
@@ -345,6 +348,7 @@ export function createClaudeBackend(): ServerBackend {
   }
   interface Session {
     query: Query;
+    skillPluginRoot: string | null;
     abort: AbortController;
     pushUser: (content: SDKUserMessage['message']['content']) => void;
     closeInput: () => void;
@@ -352,6 +356,7 @@ export function createClaudeBackend(): ServerBackend {
   }
   let session: Session | null = null;
   let creatingSession: Promise<Session> | null = null;
+  let invocationEpoch = 0;
   let sessionCwd = '';
   const pendingPush: ForegroundTurn[] = [];
   // The single active turn (foreground OR server). Turns are strictly serial
@@ -643,6 +648,7 @@ export function createClaudeBackend(): ServerBackend {
 
   function buildCapabilities(customModels?: ProviderModel[]): ProviderCapabilities {
     return {
+      appSkillCommands: { available: true },
       models: mergeClaudeModels(cache.models ?? [], customModels),
       permissionModes: pickPermissionModes(['default', 'acceptEdits', 'bypassPermissions', 'plan']),
       permissionControl: SHELF_PERMISSION_CONTROL,
@@ -739,6 +745,7 @@ export function createClaudeBackend(): ServerBackend {
     sessionCwd = cwd;
     const s: Session = {
       query: q,
+      skillPluginRoot: skillsPluginRoot ? realpathSync(skillsPluginRoot) : null,
       abort,
       pushUser: (content) => {
         queue.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
@@ -1237,7 +1244,7 @@ export function createClaudeBackend(): ServerBackend {
       // it. Intercept-and-return here keeps these slashes entirely out of the
       // SDK (and avoids building a never-consumed sdkQuery). /clear and /compact
       // intentionally fall through below — they need the real SDK turn.
-      const slash = parseSlashPrefix(inputPromptForDispatch(input));
+      const slash = input.invocation ? null : parseSlashPrefix(inputPromptForDispatch(input));
       if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
         // No-args normally never reaches here — InputZone intercepts optioned
         // slashes with no arg and opens a renderer-side picker instead. This is
@@ -1288,6 +1295,47 @@ export function createClaudeBackend(): ServerBackend {
       // Ensure the single persistent streaming-input session exists (created
       // lazily on the first real turn; reused thereafter — Architecture B).
       const s = ensureSession(input.cwd, input.resume, input.appId);
+      const epoch = invocationEpoch;
+      let nativePrompt: string | undefined;
+      if (input.invocation) {
+        try {
+          const invocation = input.invocation;
+          const root = resolveSkillsPluginRoot(input.appId);
+          resolveInvocationSkillPath(invocation, root);
+          const canonicalRoot = realpathSync(root!);
+          if (s.skillPluginRoot !== canonicalRoot) throw new SkillCommandFailure(SCE.SOURCE, 'Live session belongs to a different app skill plugin');
+          const manifest = () => JSON.parse(readFileSync(join(canonicalRoot, SKILL_PLUGIN.DIRECTORY, SKILL_PLUGIN.MANIFEST), 'utf8'));
+          if (manifest().name !== SKILL_PLUGIN.NAME) throw new SkillCommandFailure(SCE.SOURCE, 'Unexpected app skill plugin namespace');
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const refreshed = await Promise.race([
+            s.query.reloadPlugins(),
+            new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new SkillCommandFailure(SCE.TIMEOUT, 'Native plugin reload timed out')), SKILL_INVOCATION.TIMEOUT_MS); }),
+          ]).finally(() => clearTimeout(timer));
+          const plugins = refreshed.plugins.filter(plugin => plugin.name === SKILL_PLUGIN.NAME);
+          if (refreshed.error_count !== 0 || plugins.length !== 1 || realpathSync(plugins[0].path) !== canonicalRoot) {
+            throw new SkillCommandFailure(SCE.SOURCE, 'Live plugin source is unavailable or ambiguous');
+          }
+          const qualifiedName = `${SKILL_PLUGIN.NAME}:${invocation.skillName}`;
+          // The pinned CLI lists plugin skills by their leaf name. A project
+          // command with this qualified name wins over the plugin at dispatch.
+          if (refreshed.commands.some(command => command.name === qualifiedName)) {
+            throw new SkillCommandFailure(SCE.CONFLICT, 'A native command shadows the app skill namespace');
+          }
+          if (!refreshed.commands.some(command => command.name === invocation.skillName)) {
+            throw new SkillCommandFailure(SCE.UNAVAILABLE, 'Requested skill is missing from the live command index');
+          }
+          resolveInvocationSkillPath(invocation, root);
+          if (manifest().name !== SKILL_PLUGIN.NAME || epoch !== invocationEpoch || session !== s) throw new SkillCommandFailure(SCE.STALE, 'Invocation session changed during native validation');
+          nativePrompt = `/${SKILL_PLUGIN.NAME}:${invocation.skillName}${invocation.args ? ` ${invocation.args}` : ''}`;
+        } catch (err) {
+          const error = (err as Error)?.message ?? String(err);
+          serverLog('error', 'claude', `App skill invocation rejected binding=${input.invocation.bindingId} skill=${input.invocation.skillName}`, error);
+          send({ type: 'error', error });
+          send({ type: 'status', state: 'idle' });
+          return;
+        }
+      }
+
 
       // Per-turn render state. executionSend de-dupes idle (the result case and the
       // turn-close path can both emit one).
@@ -1326,6 +1374,33 @@ export function createClaudeBackend(): ServerBackend {
         stoppable = false;
       }
 
+      const buildContent = async (text: string) => {
+        const imageBlocks = (input.images ?? [])
+          .map(dataUrlToImageBlock)
+          .filter((b): b is NonNullable<typeof b> => b !== null);
+        const uploadedImageBlocks = (await readUploadedImageAttachments(input.attachments))
+          .map(({ mimeType, data }) => imageDataToImageBlock(mimeType, data))
+          .filter((b): b is NonNullable<typeof b> => b !== null);
+        const allImageBlocks = [...imageBlocks, ...uploadedImageBlocks];
+        return allImageBlocks.length > 0
+          ? [...allImageBlocks, ...(text ? [{ type: 'text' as const, text }] : [])]
+          : text;
+      };
+      let invocationContent: Awaited<ReturnType<typeof buildContent>> | undefined;
+      if (input.invocation) {
+        try {
+          invocationContent = await buildContent(nativePrompt!);
+          resolveInvocationSkillPath(input.invocation, resolveSkillsPluginRoot(input.appId));
+          if (epoch !== invocationEpoch || session !== s) throw new SkillCommandFailure(SCE.STALE, 'Invocation stopped before dispatch');
+        } catch (err) {
+          const error = (err as Error)?.message ?? String(err);
+          serverLog('error', 'claude', `App skill dispatch rejected binding=${input.invocation.bindingId} skill=${input.invocation.skillName}`, error);
+          send({ type: 'error', error });
+          send({ type: 'status', state: 'idle' });
+          return;
+        }
+      }
+
       // Register the foreground turn, then push its prompt into the live
       // session. The consumer loop attributes the SDK's reply back to this
       // entry (FIFO) and resolves `done` at the foreground result.
@@ -1334,22 +1409,13 @@ export function createClaudeBackend(): ServerBackend {
       pendingPush.push(turn);
       notePush(router);
 
-      const imageBlocks = (input.images ?? [])
-        .map(dataUrlToImageBlock)
-        .filter((b): b is NonNullable<typeof b> => b !== null);
-      const uploadedImageBlocks = (await readUploadedImageAttachments(input.attachments))
-        .map(({ mimeType, data }) => imageDataToImageBlock(mimeType, data))
-        .filter((b): b is NonNullable<typeof b> => b !== null);
-      const allImageBlocks = [...imageBlocks, ...uploadedImageBlocks];
-      const prompt = modelInputPrompt(input);
-      const content = allImageBlocks.length > 0
-        ? [...allImageBlocks, ...(prompt ? [{ type: 'text' as const, text: prompt }] : [])]
-        : prompt;
+      const content = invocationContent ?? await buildContent(modelInputPrompt(input));
       s.pushUser(content as SDKUserMessage['message']['content']);
       await done;
     },
 
     async stop() {
+      invocationEpoch++;
       // Silently ignore mid-compaction (or any other critical section the
       // provider sets `stoppable = false` for). Interrupting `/compact`
       // half-way leaves the session in an indeterminate state.
@@ -1380,6 +1446,7 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     reconnect() {
+      invocationEpoch++;
       // Auth can expire after the initial capabilities probe. Retry reaches
       // this hook before probing again: discard the query that captured the old
       // OAuth token, but preserve lastSessionId so the next turn resumes history.
@@ -1400,6 +1467,7 @@ export function createClaudeBackend(): ServerBackend {
     },
 
     dispose() {
+      invocationEpoch++;
       if (session) {
         try { session.closeInput(); } catch { /* best-effort */ }
         try { session.query.close(); } catch { /* best-effort */ }
@@ -1427,10 +1495,8 @@ export function createClaudeBackend(): ServerBackend {
      * Best-effort: no live session → nothing to reload; failure logs and leaves
      * the current state (change still lands on next session init). We refresh the
      * `/skills` `/mcp` cache from the reload result so the cards reflect the new
-     * set immediately. NOTE: reload makes a NEW skill model-invocable but does
-     * not rebuild Claude's `/` slash parser index — a brand-new skill may still
-     * be missing from `/` autocomplete until a full restart (editing an existing
-     * skill is unaffected). See GOTCHAS.
+     * set immediately. Explicit app commands additionally verify the live
+     * plugin source and command index before every dispatch. See skills#15.
      */
     async reloadSkills() {
       const q = session?.query;

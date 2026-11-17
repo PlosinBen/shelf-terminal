@@ -1,8 +1,10 @@
+import type { SkillCommandSelection } from '@shared/skill-invocation';
 import { validateAgentInputMessage, type AgentInputMessage } from '@shared/agent-input';
 import { SUBMISSION_ERROR as E, QUEUE_PROJECTION as P, submissionFailed, type QueueProjection, type SubmissionResult } from '@shared/agent-submission';
 import type { AgentQueueItem } from '@shared/types';
 
 interface SubmitOptions {
+  commandSelection?: SkillCommandSelection;
   projection?: QueueProjection;
   onReceived?: () => void;
   onDispatch?: () => void;
@@ -11,7 +13,7 @@ interface SubmitOptions {
 /** agent-core#13: owns submission confirmation, never provider completion or Caller presentation. */
 export function createMessageSender<T>(deps: {
   target: (tabId: string) => T | undefined;
-  execute: (target: T, message: AgentInputMessage, written: () => void) => Promise<unknown>;
+  execute: (target: T, message: AgentInputMessage, written: () => void, selection?: SkillCommandSelection) => Promise<unknown>;
   report: (context: string, error: unknown) => void;
   timeoutMs?: number;
 }) {
@@ -52,8 +54,11 @@ export function createMessageSender<T>(deps: {
       // Register before starting: even an immediate running snapshot must match.
       try {
         options.onDispatch?.();
-        void deps.execute(target, message, () => { p.written = true; })
-          .catch(error => report(tabId, message.msgId, error))
+        void deps.execute(target, message, () => { p.written = true; }, options.commandSelection)
+          .catch(error => {
+            report(tabId, message.msgId, error);
+            finish(tabId, message.msgId, p, error instanceof Error ? error.message : String(error));
+          })
           .finally(() => finish(tabId, message.msgId, p, 'Execution ended without queue confirmation'));
       } catch (error) {
         report(tabId, message.msgId, error);

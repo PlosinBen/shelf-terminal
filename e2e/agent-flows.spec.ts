@@ -1273,3 +1273,142 @@ test.describe('agent flows via fake provider', () => {
     expect(scrollTop).toBeGreaterThan(0);
   });
 });
+
+test.describe('custom skill commands', () => {
+  test.use({ homeProjectDirectories: false });
+
+  test('app skill command: registered menu entry executes the bound skill with original message', async ({ shelfApp: { page, userDataDir } }) => {
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await expect(page.locator('.skills-view .notes-textarea')).toHaveValue(/name: my-skill/);
+    await page.getByLabel('Add to slash command menu').check();
+    await page.getByRole('textbox', { name: 'Command', exact: true }).fill('dev-flow');
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Run fixture flow');
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveText('/dev-flow');
+    await page.locator('.skills-view .notes-close').click();
+    await setupProject(page); await openAgentTab(page);
+    const input = page.locator('.agent-textarea:visible');
+    await expect(input).toBeEnabled();
+    await input.fill('/dev-');
+    const command = page.locator('.agent-slash-item', { hasText: '/dev-flow' });
+    await expect(command).toBeVisible();
+    await expect(command).toHaveAttribute('aria-disabled', 'false');
+    await command.click();
+    await input.fill('/dev-flow task');
+    await input.press('Enter');
+    await expect(page.locator('.agent-view')).toContainText('App skill my-skill: task');
+    await expect(page.locator('.agent-view')).toContainText('/dev-flow task');
+    await input.evaluate(target => {
+      const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], 'command-shot.png', { type: 'image/png' }));
+      target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+    });
+    await expect(page.locator('.agent-attachment-chip')).toHaveCount(1);
+    await input.fill('/dev-flow'); await input.press('Enter');
+    await expect(page.locator('.agent-messages:visible')).toContainText('Attachments: 1');
+    await expect.poll(async () => (await storedAgentMessages(page)).find(row => row.type === 'user' && row.content === '/dev-flow')?.inputMessage?.attachments, { timeout: 15_000 }).toEqual([
+      expect.objectContaining({ kind: 'image', name: 'command-shot.png' }),
+    ]);
+    expect(JSON.parse(fs.readFileSync(path.join(userDataDir, 'skills', 'skills', 'my-skill', '.shelf-command.json'), 'utf8')).alias).toBe('dev-flow');
+  });
+
+  test('app skill command: a stale menu choice is rejected and the original input is retained', async ({ shelfApp: { page } }) => {
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await expect(page.locator('.skills-view .notes-textarea')).toHaveValue(/name: my-skill/);
+    await page.getByLabel('Add to slash command menu').check();
+    await page.getByRole('textbox', { name: 'Command', exact: true }).fill('dev-flow');
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Run fixture flow');
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveText('/dev-flow');
+    await page.locator('.skills-view .notes-close').click();
+    await setupProject(page); await openAgentTab(page);
+    const input = page.locator('.agent-textarea:visible');
+    await expect(input).toBeEnabled(); await input.fill('/dev-');
+    await page.locator('.agent-slash-item', { hasText: '/dev-flow' }).click();
+    await input.fill('/dev-flow retained task');
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-list-item').click();
+    await page.getByLabel('Add to slash command menu').uncheck();
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveCount(0);
+    await page.locator('.skills-view .notes-close').click();
+    await input.press('Enter');
+    await expect(page.locator('.agent-view')).toContainText('stale_selection');
+    await expect(page.locator('.agent-view')).toContainText('/dev-flow retained task');
+    await expect(page.locator('.agent-view')).not.toContainText('App skill my-skill: retained task');
+  });
+
+  async function registerCommand(page: Page, alias: string) {
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-view .notes-new-btn').click();
+    await expect(page.locator('.skills-view .notes-textarea')).toHaveValue(/name: my-skill/);
+    await page.getByLabel('Add to slash command menu').check();
+    await page.getByRole('textbox', { name: 'Command', exact: true }).fill(alias);
+    await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Run fixture flow');
+    await page.locator('.skills-view .notes-back').click();
+    await expect(page.locator('.skills-list-command')).toHaveText(`/${alias}`);
+    await page.locator('.skills-view .notes-close').click();
+  }
+
+  test('app skill command: disabled entries cannot be selected and become ready after enabling', async ({ shelfApp: { page } }) => {
+    await registerCommand(page, 'dev-flow');
+    await setupProject(page); await openAgentTab(page);
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-enable-toggle').click();
+    await expect(page.locator('.skills-list-item.disabled')).toBeVisible();
+    await page.locator('.skills-view .notes-close').click();
+    const input = page.locator('.agent-textarea:visible');
+    await input.fill('/dev-');
+    const command = page.locator('.agent-slash-item', { hasText: '/dev-flow' });
+    await expect(command).toHaveAttribute('aria-disabled', 'true');
+    await expect(command).toContainText('Skill is disabled');
+    await command.click();
+    await expect(input).toHaveValue('/dev-');
+    await input.fill('');
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-enable-toggle').click();
+    await expect(page.locator('.skills-list-item.disabled')).toHaveCount(0);
+    await page.locator('.skills-view .notes-close').click();
+    await input.fill('/dev-');
+    await expect(command).toHaveAttribute('aria-disabled', 'false');
+    await command.click(); await input.fill('/dev-flow enabled'); await input.press('Enter');
+    await expect(page.locator('.agent-messages:visible')).toContainText('App skill my-skill: enabled');
+  });
+
+  test('app skill command: native collisions retain both menu rows and dispatch the native command', async ({ shelfApp: { page } }) => {
+    await registerCommand(page, 'alpha');
+    await setupProject(page); await openAgentTab(page);
+    const input = page.locator('.agent-textarea:visible');
+    await input.fill('/alp');
+    const commands = page.locator('.agent-slash-item', { hasText: '/alpha' });
+    await expect(commands).toHaveCount(2);
+    await expect(commands.nth(1)).toHaveAttribute('aria-disabled', 'true');
+    await expect(commands.nth(1)).toContainText('A native command owns this name');
+    await commands.first().click(); await input.fill('/alpha native'); await input.press('Enter');
+    await expect(page.locator('.agent-messages:visible')).toContainText('fake-echo: /alpha native');
+    await expect(page.locator('.agent-messages:visible')).not.toContainText('App skill my-skill:');
+  });
+
+  test('app skill command: queued skill disabled before execution fails and the following input still runs', async ({ shelfApp: { page } }) => {
+    await registerCommand(page, 'dev-flow');
+    await setupProject(page); await openAgentTab(page);
+    await sendAgentPrompt(page, 'delay:5000|text:blocker-finished');
+    await expect(page.locator('.agent-loading')).toBeVisible();
+    await sendAgentPrompt(page, '/dev-flow queued');
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(1);
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await page.locator('.skills-enable-toggle').click();
+    await expect(page.locator('.skills-list-item.disabled')).toBeVisible();
+    await page.locator('.skills-view .notes-close').click();
+    await sendAgentPrompt(page, 'text:after-rejection');
+    const messages = page.locator('.agent-messages:visible');
+    await expect(messages).toContainText('target_disabled', { timeout: 15000 });
+    await expect(messages).toContainText('after-rejection', { timeout: 15000 });
+    await expect(messages).not.toContainText('App skill my-skill: queued');
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+  });
+
+});

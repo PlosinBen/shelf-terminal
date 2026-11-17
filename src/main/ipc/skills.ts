@@ -1,8 +1,14 @@
 import { ipcMain } from 'electron';
 import { IPC } from '@shared/ipc-channels';
+import { log } from '@shared/logger';
+import { SKILL_COMMAND_RESERVED_ALIASES } from '@shared/skill-commands';
+import type { SkillEditorSaveRequest } from '@shared/skill-editor';
+import { createSkillEditorService } from '../skills-editor';
+import { readSkillCommandFile } from '../skill-commands';
+import { withSkillsMutation } from '../skills-mutation';
 import {
   listSkills, getSkill, createSkill, updateSkill, deleteSkill, setSkillLocked, setSkillDisabled,
-  listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile,
+  listSkillAuxFiles, readSkillFile, writeSkillFile, deleteSkillFile, skillDirPath,
 } from '../skills-store';
 import { onSkillsChanged, notifyRendererSkillsChanged } from '../skills-sync';
 
@@ -12,8 +18,21 @@ import { onSkillsChanged, notifyRendererSkillsChanged } from '../skills-sync';
 // live in one place. Best-effort — the store write already succeeded.
 
 export function registerSkillsHandlers(): void {
+  const editor = createSkillEditorService(SKILL_COMMAND_RESERVED_ALIASES);
+  ipcMain.handle(IPC.SKILLS_EDITOR_READ, async (_event, name: string) => editor.read(name));
+  ipcMain.handle(IPC.SKILLS_EDITOR_SAVE, async (_event, request: SkillEditorSaveRequest) => {
+    const result = await editor.save(request);
+    // Partial success still changed the source. Refresh the appropriate consumers.
+    if (result.contentChanged) onSkillsChanged();
+    else if (result.commandChanged) notifyRendererSkillsChanged();
+    return result;
+  });
   ipcMain.handle(IPC.SKILLS_LIST, async () => {
-    return listSkills();
+    return withSkillsMutation(async () => (await listSkills()).map(skill => {
+      const result = readSkillCommandFile(skillDirPath(skill.name));
+      if (!result.ok) log.error('skills', `command list failed skill=${skill.name}: ${result.error}`);
+      return { ...skill, ...(result.ok ? { commandAlias: result.value?.alias } : { commandError: result.error }) };
+    }));
   });
 
   ipcMain.handle(IPC.SKILLS_GET, async (_event, name: string) => {

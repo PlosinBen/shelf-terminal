@@ -111,8 +111,10 @@ interface ShelfApi {
     readImage: (projectId: string, filename: string) => Promise<ArrayBuffer | null>;
   };
   skills: {
-    list: () => Promise<Array<{ name: string; description?: string; locked?: boolean; disabled?: boolean }>>;
+    list: () => Promise<Array<{ name: string; description?: string; locked?: boolean; disabled?: boolean; commandAlias?: string; commandError?: string }>>;
     get: (name: string) => Promise<string | null>;
+    readEditor: (name: string) => Promise<import('../shared/skill-commands').SkillCommandResult<import('../shared/skill-editor').SkillEditorState>>;
+    saveEditor: (request: import('../shared/skill-editor').SkillEditorSaveRequest) => Promise<import('../shared/skill-editor').SkillEditorSaveResult>;
     create: () => Promise<{ name: string; description?: string }>;
     update: (name: string, content: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
     delete: (name: string) => Promise<void>;
@@ -227,6 +229,7 @@ interface ShelfApi {
     onPickerClose(callback: (value: { requestId: string }) => void): () => void;
   };
   agent: {
+    skillCommands: (tabId: string) => Promise<import('../shared/skill-invocation').SkillCommandMenu>;
     getMemoryUsage: () => Promise<import('../shared/process-memory').ProcessMemorySummary | null>;
     onMemoryUsage: (callback: (summary: import('../shared/process-memory').ProcessMemorySummary) => void) => () => void;
     init: (tabId: string, cwd: string, connection: import('../shared/types').Connection, provider: string, sessionId?: string, opts?: Record<string, unknown>) => Promise<boolean>;

@@ -1,3 +1,5 @@
+import { SKILL_COMMAND_AVAILABILITY as SCA } from '@shared/skill-invocation';
+import { selectSkillCommand, reconcileSkillCommandSelection } from '../../agentTabStore';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentAttachment, Connection } from '@shared/types';
 import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
@@ -138,6 +140,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
   const statusModel = tab?.actualModel ?? null;
 
   const [input, setInput] = useState('');
+  useEffect(() => reconcileSkillCommandSelection(tabId, input), [tabId, input]);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [slashSelection, setSlashSelection] = useState(0);
@@ -243,7 +246,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     }
   }, [input]);
 
-  const { filteredCommands, allCommandNames } = useSlashCommands(capabilities, slashFilter);
+  const { filteredCommands, allCommandNames } = useSlashCommands(capabilities, slashFilter, tab?.skillCommandMenu?.entries);
 
   const handleSend = useCallback(() => {
     const text = input;
@@ -298,11 +301,14 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     // for history; provider-bound payload uses uploaded attachments.
     const message = built.message;
     enqueuePendingSend(tabId, message.msgId, text, images, files.length > 0 ? files : undefined, message);
+    const commandSelection = tab?.selectedSkillCommand?.selection;
+    selectSkillCommand(tabId);
     emitAgent('agent:send', {
       tabId,
       inputMessage: message,
+      ...(commandSelection ? { commandSelection } : {}),
     });
-  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady, delegationLocked, capabilities]);
+  }, [tabId, input, pendingFiles, pendingImages, stagingImages, initReady, delegationLocked, capabilities, tab?.selectedSkillCommand]);
 
   const handleStop = useCallback(() => {
     // ESC-twice (stop) means "abort this execution AND drop everything I queued up
@@ -325,7 +331,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
     // - Hide on exact match (nothing more to autocomplete; keeping it
     //   open would block Enter from submitting)
     // - Hide once a space appears (now in args territory)
-    const matchesSlashShape = /^\/\w*$/.test(val);
+    const matchesSlashShape = /^\/[a-zA-Z0-9_:-]*$/.test(val);
     const filter = val.slice(1);
     const isExactMatch = filter.length > 0 && allCommandNames.has(filter);
     if (matchesSlashShape && !isExactMatch) {
@@ -338,6 +344,8 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
   };
 
   const handleSlashSelect = (cmd: SlashCommand) => {
+    if (cmd.shelf && cmd.shelf.availability !== SCA.READY) return;
+    selectSkillCommand(tabId, cmd.shelf);
     setInput(`/${cmd.name} `);
     setShowSlashMenu(false);
     inputRef.current?.focus();
@@ -391,6 +399,7 @@ export function InputZone({ tabId, projectId, cwd, connection, visible, rootRef 
 
   return (
     <div className="agent-input-area">
+      {tab?.skillCommandMenu?.error && <div className="agent-command-error" role="status">App commands unavailable: {tab.skillCommandMenu.error}</div>}
       {showSlashMenu && filteredCommands.length > 0 && (
         <SlashMenu
           commands={filteredCommands}

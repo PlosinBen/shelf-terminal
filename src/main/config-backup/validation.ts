@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { TextDecoder } from 'util';
 import { SKILL_CONTROL_MARKERS } from '@shared/config-backup';
+import { isSkillCommandTemporaryPath } from '@shared/skill-commands';
+import { readSkillCommandFile } from '../skill-commands';
 import {
   isValidSkillName,
   parseSkillMeta,
@@ -51,7 +53,7 @@ export function validateSkillPayload(name: string, directory: string): SkillPayl
 
     for (const entry of entries) {
       const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-      if (!relativeDir && CONTROL_MARKERS.has(entry.name)) continue;
+      if (!relativeDir && (CONTROL_MARKERS.has(entry.name) || isSkillCommandTemporaryPath(entry.name))) continue;
 
       const absolute = path.resolve(current, entry.name);
       const contained = path.relative(root, absolute);
@@ -99,6 +101,9 @@ export function validateSkillPayload(name: string, directory: string): SkillPayl
   if (declaredName !== name) {
     return invalid(`SKILL.md name "${declaredName}" does not match folder "${name}"`);
   }
+
+  const command = readSkillCommandFile(directory);
+  if (!command.ok) return invalid(command.error);
 
   return { valid: true, payloadFiles: payloadFiles.sort() };
 }

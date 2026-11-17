@@ -100,19 +100,22 @@ The on-disk artifacts Shelf persists and their layout. Two roots: `<userData>` (
 ## `<userData>/skills/` — Agent Skills plugin tree
 
 - **Path**: `<userData>/skills/`
-- **Format**: a Claude **plugin root** (the source of truth that gets projected verbatim, below). File tree:
+- **Format**: a Claude **plugin root** (source of truth; main-only controls are excluded from projection). File tree:
 
   ```
   skills/
   ├── .claude-plugin/plugin.json     ← { "name": "shelf-skills" } (Shelf-ensured scaffold)
   └── skills/<name>/
       ├── SKILL.md                    ← user-authored markdown; <name> = folder = identity
-      └── .locked                     ← optional marker: skill locked against AGENT edits
+      ├── .locked                     ← optional marker: skill locked against AGENT edits
+      ├── .disabled                   ← optional marker: excluded from consumption
+      └── .shelf-command.json         ← optional portable registration; source-only control
   ```
 
   - `<name>` is kebab-case (`^[a-z0-9]+(?:-[a-z0-9]+)*$`) and equals the folder name. The frontmatter `name:` is authoritative; the folder is renamed to match on save.
   - `SKILL.md`: opaque user markdown written verbatim. The store only parses `name` / `description` from its YAML frontmatter (lenient regex for the list view; strict `js-yaml` validation at save time to reject frontmatter Copilot would silently skip).
 - **Source of truth**: `src/main/skills-store.ts` (types `SkillMeta` / `SkillUpdateResult`). Note the deliberate two-layer `skills/skills/` nesting (outer = plugin root, inner = skill collection) — must not be collapsed.
+- **Command registration**: `src/main/skill-commands.ts`; source API/schema in [skill-commands](skill-commands.md). Metadata follows whole-skill rename/delete and validated Backup/Import, but is reserved from aux APIs and excluded with its staging files from consumption copies/hashes. The registration does not yet expose a command UI or dispatch path.
 
 ## `<userData>/app-instance-id`
 

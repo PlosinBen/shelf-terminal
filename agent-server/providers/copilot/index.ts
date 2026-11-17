@@ -1,3 +1,4 @@
+import { SKILL_COMMAND_ERROR as SCE } from '@shared/skill-invocation';
 import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-recovery';
 // Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
 // Uses the shared, semantics-free acp/ toolkit for the runtime and OWNS copilot
@@ -785,6 +786,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     async query(input: QueryInput, send: SendFn): Promise<void> {
       activeExecutionSend = send;
       try {
+        if (input.invocation) throw new Error(`[${SCE.SOURCE}] Copilot app skill source and live slash dispatch are not verified`);
         // A config-edit turn (picker / status-bar) carries no prompt — apply it
         // imperatively (set-mode / set-config-option) and return, rather than
         // driving an empty prompt. Ordinary input does not replay preferences.

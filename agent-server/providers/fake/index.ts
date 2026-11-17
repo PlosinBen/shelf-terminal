@@ -255,6 +255,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         { value: 'medium', displayName: 'medium' },
         { value: 'high', displayName: 'high' },
       ],
+      appSkillCommands: { available: true },
       slashCommands: [],
       currentModel,
       currentEffort,
@@ -755,6 +756,13 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       const signal = abortController.signal;
       lastSend = send;
 
+      if (input.invocation) {
+        send({ type: 'status', state: 'streaming' });
+        send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `App skill ${input.invocation.skillName}: ${input.invocation.args}${input.attachments?.length ? `\nAttachments: ${input.attachments.length}` : ''}` });
+        send({ type: 'status', state: 'idle' });
+        return;
+      }
+
       // Config-edit turn: mirror the real providers — emit a `system` divider
       // and close the turn. No scenario chain runs (prompt is empty).
       if (input.configEdit) {
@@ -927,6 +935,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         // Enough entries to OVERFLOW the slash-menu fold (max-height scroll) so
         // e2e can exercise render-all + scroll-into-view. mcp/skills stay first
         // for the dispatch tests; the rest are inert autocomplete-only fillers.
+        appSkillCommands: { available: true },
         slashCommands: [
           { name: 'mcp', description: 'List loaded MCP servers' },
           { name: 'skills', description: 'List loaded skills' },

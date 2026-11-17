@@ -1,3 +1,4 @@
+import { SKILL_INVOCATION } from '@shared/skill-invocation';
 import { describe, it, expect, vi } from 'vitest';
 import { createExecutionDispatcher, type PermissionHandler } from './execution-dispatcher';
 import type { AgentEvent } from './types';
@@ -422,4 +423,20 @@ describe('createExecutionDispatcher', () => {
     // The generator carried ONLY status (no message/stream).
     expect(genEvents.every((e) => e.type === 'status')).toBe(true);
   });
+});
+
+it('routes validation control to its live execution outside content parsing and drops it after settlement', async () => {
+  const parser = vi.fn(() => null); const handle = vi.fn();
+  const dispatcher = createExecutionDispatcher(parser);
+  const events = dispatcher.registerExecution('execution', () => {});
+  const off = dispatcher.registerSkillValidation('execution', handle);
+  const request = { type: SKILL_INVOCATION.VALIDATE, executionId: 'execution', requestId: 'request' };
+  dispatcher.feed(request);
+  expect(handle).toHaveBeenCalledWith(request);
+  expect(parser).not.toHaveBeenCalled();
+  dispatcher.failAllExecutions('channel closed');
+  dispatcher.feed(request);
+  expect(handle).toHaveBeenCalledTimes(1);
+  off();
+  for await (const _event of events) { /* release the registered execution */ }
 });

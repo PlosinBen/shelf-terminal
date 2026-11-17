@@ -796,3 +796,31 @@ describe('File Diff wire projection', () => {
       .toMatchObject({ payload: { errorMessage: 'Invalid file diff data' } });
   });
 });
+
+describe('skill invocation control transport', () => {
+  it('propagates the binding and returns a correlated validation reply on the same execution', async () => {
+    const { SKILL_INVOCATION: I } = await import('@shared/skill-invocation');
+    const { child, writes } = capabilitiesChild({ appSkillCommands: { available: true } });
+    vi.mocked(spawn).mockReset().mockImplementationOnce(() => {
+      setTimeout(() => child.stdout.emit('data', Buffer.from('{"type":"ready"}\n')), 0);
+      return child;
+    });
+    const { createRemoteBackend } = await import('./remote');
+    const backend = createRemoteBackend({ type: 'local' });
+    const invocation = { kind: I.KIND, bindingId: 'ad1b0c23-6789-4123-8123-123456789abc', registrationId: 'ad1b0c23-6789-4123-8123-123456789abd', skillName: 'flow', alias: 'dev-flow', args: 'task', payloadDigest: 'a'.repeat(64) };
+    const input = { ...agentInput('/dev-flow task'), invocation };
+    const validate = vi.fn(async () => ({ ok: true as const })); const attach = vi.fn();
+    const done = (async () => { for await (const _event of backend.query(input, '/tmp', { onExecution: attach, validateSkillInvocation: validate })) { /* drain */ } })();
+    try {
+      await vi.waitFor(() => expect(writes.some(message => message.type === 'send')).toBe(true));
+      const execution = writes.find(message => message.type === 'send');
+      expect(execution).toMatchObject({ invocation, inputMessage: input.inputMessage });
+      expect(attach).toHaveBeenCalledWith(execution.executionId);
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: I.VALIDATE, requestId: 'validate-request', executionId: execution.executionId, msgId: input.inputMessage.msgId, invocation }) + '\n'));
+      await vi.waitFor(() => expect(writes.some(message => message.type === I.RESULT)).toBe(true));
+      expect(writes.find(message => message.type === I.RESULT)).toMatchObject({ requestId: 'validate-request', executionId: execution.executionId, msgId: input.inputMessage.msgId, bindingId: invocation.bindingId, ok: true });
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'status', state: 'idle', executionId: execution.executionId }) + '\n'));
+      await done;
+    } finally { backend.dispose(); }
+  });
+});

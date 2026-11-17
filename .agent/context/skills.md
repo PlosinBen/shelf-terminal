@@ -169,3 +169,40 @@ related:
 **Do not change casually because**：別把 `SKILLS_SET_DISABLED` 降級成 badge-only（會讓 live agent 不掉 skill);別只改一個 projection touch-point（local 與 remote 各一套 copy 機制);別為了 per-project scope 而拆 per-session projection root（破壞 app-global invariant)。
 
 **Related**：`skills#2`（lock marker pattern)、`skills#8`（`.locked` reserved-aux + UI-only stance)、`skills#2` Decision C（`onSkillsChanged` pipeline)、`architecture/skills-projection`（disable 進 fan-out、lock 不進)、`contracts/ipc-channels`（`skills:set-disabled`)、`src/main/{skills-store,skills-projection,ipc/skills}.ts`、`src/renderer/components/SkillsView.tsx`、e2e `skills.spec.ts`。
+
+
+## skills#12 — Command registration stays source-owned and separate from skill instructions · [Decision]
+
+**Decision**：command 基礎層以 per-skill `.shelf-command.json` 保存 alias／description／registration ID，不改寫 SKILL.md。主來源內讀寫、既有 skill mutations 與 Backup／Import 的 live 部分共用序列化邊界；bridge 保留 agent 授權責任，並在實際寫入前於該邊界內重查存在性／lock，避免排隊期間的 UI lock 被舊檢查繞過。直接使用者 update 仍保留既有 upsert 契約。
+
+**Reason**：folder rename／delete 自然攜帶設定，whole-item Backup／Import 可維持完整資料；中央 registry 會多一份跨 rename／delete 對帳。metadata 與 temp 排除 aux／Files／兩條投影路徑及 consumption hash，避免 agent 改使用者入口、把控制設定送給 provider，或因 alias 修改觸發 reload。portable sidecar 需獨立 schema 驗證，不能當成「不備份且保留 destination」的 local marker；Import 在 swap 前驗最終 alias／ID 唯一性，metadata-only Import 只刷新 renderer。
+
+**Boundary**：命令設定已有 schema、source service、pure parser／lookup、資料邊界與 Skills editor／IPC；Agent menu／queue binding 已接線；Codex 與 Claude 有原生 adapter；Copilot 的 Shelf app invocation 仍因 multipart／來源限制不可用。lookup match 不等於已執行，也不取消 native feasibility 的驗證需求。讀取／解析失敗明確回傳 error並記錄 context，不當作未登記。
+
+**Related**：`contracts/skill-commands`、`architecture/skills-projection`、`src/shared/skill-commands.ts`、`src/main/{skill-commands,skills-mutation,skills-store}.ts`。
+
+## skills#13 — User editor Save coordinates content and registration · [Decision]
+
+The user editor validates the full draft before writing, serializes content/rename followed by command metadata, and reads back each step. A rename can succeed before content or metadata fails; return the observed folder name and individual saved flags so the editor retries only unfinished work. An uncertain readback/IPC acknowledgement requires reopening for reconciliation. A multi-file journal was not chosen: the current contract exposes partial persistence and does not promise crash atomicity. Agent upsert remains separate; the user coordinator requires existing files to avoid resurrecting stale deleted editors. Metadata-only Save refreshes the renderer without provider reload.
+
+## skills#14 — Explicit commands bind before queueing and authorize after dequeue · [Decision]
+
+**Decision**: Main resolves every Caller through the same command registry and binds a concrete skill/registration/content identity; the server queue requests authorization from that owner immediately before native dispatch. The control reply is routed outside the queue, by execution and current process epoch. Stop invalidates pending and not-yet-started validation.
+
+**Reason**: Re-resolving aliases after queue delay could execute a different skill. Hash equality alone also misses a managed edit followed by byte restoration or a whole-item replacement, so managed revisions and directory identity participate. Alias/description changes preserve prior bindings; content/mount/identity changes invalidate them. An independent control lane avoids a turn waiting for its own queued validation reply.
+
+**Boundary**: Native control names win collisions, and stale selected entries fail explicitly. Codex verifies enabled canonical native source and target projection before skill-item dispatch. Claude verifies a refreshed live plugin namespace/path and command index before native slash dispatch, retains images, and rejects qualified-name shadows. Copilot app dispatch remains unavailable rather than silently forwarding alias text or expanding instructions. This preserves the requested semantics without claiming unobserved provider support.
+
+**Related**: `contracts/skill-commands`, `contracts/agent-routing`, `src/main/agent/skill-invocations.ts`, `agent-server/skill-invocation-client.ts`.
+
+
+## skills#15 — Native command completion does not prove image skill dispatch · [Gotcha]
+
+Copilot CLI 1.0.103 ACP expands text-only skill slash prompts into native skill context, but multipart text/image prompts can retain the literal slash while passing the image to model input. This occurs in existing and fresh sessions with either block order. An `end_turn` result therefore does not prove the requested skill was invoked; verify current-turn native source expansion and attachment together before enabling Shelf invocation. Same-name project skills also take precedence over personal skills, so alias text alone cannot guarantee the Shelf target. Do not copy skill instructions or discard attachments to bypass these requirements.
+
+Claude CLI 2.1.159 with SDK 0.3.159 can dispatch namespaced plugin skills with images, reload existing content, and dispatch a newly added name after `reloadPlugins()` in a live query. A reload command list alone is still weaker evidence than the exact current-turn source expansion. These are native preprocessing observations using synthetic inference, not real model service or Shelf adapter acceptance.
+
+
+## skills#16 — Claude app commands verify the live namespace before enqueueing SDK input · [Decision]
+
+Claude app invocation reloads the actual streaming query, verifies the sole Shelf plugin namespace resolves to the expected canonical app root, checks the manifest and live command index, and rechecks the target skill digest before pushing SDK input. A project command named with the full plugin namespace takes precedence over the plugin, so that qualified-name collision is rejected before inference. Commands use the native namespace plus bound args, retaining image blocks; skill instructions are never copied into a prompt. Cancellation during reload or attachment preparation invalidates the pending invocation. Ordinary turns retain their existing foreground registration timing so concurrent model selection cannot be overwritten by an older response.

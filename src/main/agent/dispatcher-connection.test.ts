@@ -353,3 +353,26 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(q1).toHaveLength(0);
   });
 });
+
+it('routes skill validation by sid and execution, and stamps the response sid', async () => {
+  const { SKILL_INVOCATION: I } = await import('@shared/skill-invocation');
+  const { f, conn } = make();
+  const first = conn.openSession('first', '/repo', {});
+  const second = conn.openSession('second', '/repo', {});
+  const one = first.registerExecution('execution', () => {});
+  const two = second.registerExecution('execution', () => {});
+  const wrong = vi.fn();
+  first.registerSkillValidation('execution', wrong);
+  second.registerSkillValidation('execution', request => second.sendLine({ type: I.RESULT, requestId: (request as any).requestId, ok: false }));
+  try {
+    f.emit({ type: I.VALIDATE, sid: 'second', executionId: 'execution', requestId: 'request' });
+    expect(wrong).not.toHaveBeenCalled();
+    expect(f.parsedWritten()).toContainEqual({ type: I.RESULT, requestId: 'request', ok: false, sid: 'second' });
+  } finally {
+    f.emit({ type: 'session_down', sid: 'first', reason: 'test close' });
+    f.emit({ type: 'session_down', sid: 'second', reason: 'test close' });
+    for await (const _event of one) { /* cleanup */ }
+    for await (const _event of two) { /* cleanup */ }
+    conn.kill();
+  }
+});

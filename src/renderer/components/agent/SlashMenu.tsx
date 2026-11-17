@@ -1,3 +1,4 @@
+import { SKILL_COMMAND_AVAILABILITY as SCA } from '@shared/skill-invocation';
 import { useEffect, useRef } from 'react';
 import type { SlashCommand } from './slash-commands';
 
@@ -22,14 +23,16 @@ export function SlashMenu({ commands, selection, onSelect, onHover }: Props) {
     <div className="agent-slash-menu">
       {commands.map((cmd, i) => (
         <div
-          key={cmd.name}
+          key={cmd.shelf ? `${cmd.name}:${cmd.shelf.selection.registrationId}` : cmd.name}
           ref={i === selection ? selectedRef : undefined}
           className={`agent-slash-item${i === selection ? ' agent-slash-item-selected' : ''}`}
+          aria-disabled={cmd.shelf ? cmd.shelf.availability !== SCA.READY : undefined}
+          title={cmd.shelf?.reason}
           onMouseDown={(e) => { e.preventDefault(); onSelect(cmd); }}
           onMouseEnter={() => onHover(i)}
         >
           <span className="agent-slash-name">/{cmd.name}</span>
-          <span className="agent-slash-desc">{cmd.description}</span>
+          <span className="agent-slash-desc">{cmd.description}{cmd.shelf?.reason ? ` — ${cmd.shelf.reason}` : ''}</span>
         </div>
       ))}
     </div>

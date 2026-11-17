@@ -1,3 +1,5 @@
+import { SKILL_COMMAND_FILE, SKILL_COMMAND_VERSION } from '@shared/skill-commands';
+import { SKILL_CONTROL_MARKERS } from '@shared/config-backup';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
@@ -398,9 +400,12 @@ describe('config-backup import (read side)', () => {
   it('rolls back earlier Skill swaps when a later canonical write fails', async () => {
     seedSkill('alpha', 'local alpha');
     seedSkill('beta', 'local beta');
+    const previousCommand = registrationJson('local-command', firstCommandId);
+    fs.writeFileSync(liveSkillFile('alpha', SKILL_COMMAND_FILE), previousCommand);
     await pushBranch('backup/src', {
       'skills/alpha/SKILL.md': '---\nname: alpha\ndescription: source alpha\n---\n',
       'skills/beta/SKILL.md': '---\nname: beta\ndescription: source beta\n---\n',
+      [`skills/alpha/${SKILL_COMMAND_FILE}`]: registrationJson('remote-command', firstCommandId),
       'machine.json': JSON.stringify({ appInstanceId: 'src', machineLabel: 'source' }),
     });
     const source = await discoverSource();
@@ -423,6 +428,7 @@ describe('config-backup import (read side)', () => {
       rollback: 'completed',
     });
     expect(readLive('alpha', 'SKILL.md')).toContain('local alpha');
+    expect(readLive('alpha', SKILL_COMMAND_FILE)).toBe(previousCommand);
     expect(readLive('beta', 'SKILL.md')).toContain('local beta');
     expect(stagingDirectories()).toEqual([]);
   }, GIT_HEAVY_TIMEOUT);
@@ -515,3 +521,67 @@ describe('config-backup import (read side)', () => {
     expect(stagingDirectories()).toEqual([]);
   }, GIT_HEAVY_TIMEOUT);
 });
+
+const registrationJson = (alias: string, registrationId: string) => JSON.stringify({ version: SKILL_COMMAND_VERSION, registrationId, alias, description: 'Fixture command' });
+const firstCommandId = 'ad1b0c23-6789-4123-8123-123456789abc';
+const secondCommandId = 'bd1b0c23-6789-4123-8123-123456789abc';
+
+it('rejects Import alias collisions with an unselected live skill before any swap', async () => {
+  seedSkill('alpha', 'local');
+  fs.writeFileSync(liveSkillFile('alpha', SKILL_COMMAND_FILE), registrationJson('flow', firstCommandId));
+  await pushBranch('backup/source', {
+    'skills/beta/SKILL.md': '---\nname: beta\n---\n',
+    [`skills/beta/${SKILL_COMMAND_FILE}`]: registrationJson('flow', secondCommandId),
+  });
+  const source = await discoverSource('backup/source');
+  const notify = vi.fn();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    const result = await applyImport(bareRemote, source.sourceRevision, ['skill:beta'], applyDependencies({ notifySkillsChanged: notify }));
+    expect(result).toMatchObject({ ok: false, phase: 'validation', message: expect.stringMatching(/conflicts/) });
+    expect(fs.existsSync(liveSkillFile('beta', 'SKILL.md'))).toBe(false);
+    expect(readLive('alpha', SKILL_COMMAND_FILE)).toBe(registrationJson('flow', firstCommandId));
+    expect(notify).not.toHaveBeenCalled();
+  } finally { vi.restoreAllMocks(); }
+}, GIT_HEAVY_TIMEOUT);
+
+it('validates the final Import catalog so selected skills can exchange aliases', async () => {
+  seedSkill('alpha', 'local'); seedSkill('beta', 'local');
+  fs.writeFileSync(liveSkillFile('alpha', SKILL_COMMAND_FILE), registrationJson('a', firstCommandId));
+  fs.writeFileSync(liveSkillFile('beta', SKILL_COMMAND_FILE), registrationJson('b', secondCommandId));
+  await pushBranch('backup/source', {
+    'skills/alpha/SKILL.md': '---\nname: alpha\n---\n',
+    [`skills/alpha/${SKILL_COMMAND_FILE}`]: registrationJson('b', firstCommandId),
+    'skills/beta/SKILL.md': '---\nname: beta\n---\n',
+    [`skills/beta/${SKILL_COMMAND_FILE}`]: registrationJson('a', secondCommandId),
+  });
+  const source = await discoverSource('backup/source');
+  expect(await applyImport(bareRemote, source.sourceRevision, ['skill:alpha', 'skill:beta'], applyDependencies())).toMatchObject({ ok: true, skillsWritten: 2 });
+  expect(JSON.parse(readLive('alpha', SKILL_COMMAND_FILE)).alias).toBe('b');
+  expect(JSON.parse(readLive('beta', SKILL_COMMAND_FILE)).alias).toBe('a');
+}, GIT_HEAVY_TIMEOUT);
+
+it('Import of an unregistered whole skill removes old command settings but retains local markers', async () => {
+  seedSkill('alpha', 'local');
+  fs.writeFileSync(liveSkillFile('alpha', SKILL_COMMAND_FILE), registrationJson('flow', firstCommandId));
+  for (const marker of SKILL_CONTROL_MARKERS) fs.writeFileSync(liveSkillFile('alpha', marker), '');
+  await pushBranch('backup/source', { 'skills/alpha/SKILL.md': '---\nname: alpha\n---\nremote' });
+  const source = await discoverSource('backup/source');
+  expect(await applyImport(bareRemote, source.sourceRevision, ['skill:alpha'], applyDependencies())).toMatchObject({ ok: true });
+  expect(fs.existsSync(liveSkillFile('alpha', SKILL_COMMAND_FILE))).toBe(false);
+  for (const marker of SKILL_CONTROL_MARKERS) expect(fs.existsSync(liveSkillFile('alpha', marker))).toBe(true);
+}, GIT_HEAVY_TIMEOUT);
+
+it('metadata-only Import refreshes command settings without reloading provider skills', async () => {
+  seedSkill('alpha', 'local');
+  const body = readLive('alpha', 'SKILL.md');
+  await pushBranch('backup/source', {
+    'skills/alpha/SKILL.md': body,
+    [`skills/alpha/${SKILL_COMMAND_FILE}`]: registrationJson('flow', firstCommandId),
+  });
+  const source = await discoverSource('backup/source');
+  const notifyContent = vi.fn(); const notifyMetadata = vi.fn();
+  expect(await applyImport(bareRemote, source.sourceRevision, ['skill:alpha'], applyDependencies({ notifySkillsChanged: notifyContent, notifyCommandSettingsChanged: notifyMetadata }))).toMatchObject({ ok: true });
+  expect(notifyContent).not.toHaveBeenCalled();
+  expect(notifyMetadata).toHaveBeenCalledOnce();
+}, GIT_HEAVY_TIMEOUT);

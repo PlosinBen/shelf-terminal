@@ -1,3 +1,4 @@
+import { SKILL_INVOCATION, type SkillInvocation, type SkillValidationRequest } from '@shared/skill-invocation';
 import type { AgentDiff } from '@shared/agent-diff';
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_CONTROL, type ConfigControlUpdate } from '@shared/agent-config-control';
@@ -82,6 +83,7 @@ export type CanonicalMsgType =
 export type OutgoingMessage = WireEnvelope & (
   | ({ type: typeof CONFIG_CONTROL.RESPONSE } & ConfigControlUpdate)
   // ── Lifecycle (no executionId) ────────────────────────────────────────────────
+  | ({ type: typeof SKILL_INVOCATION.VALIDATE } & SkillValidationRequest)
   | { type: 'ready' }
   // pong echoes the heartbeat's `seq` so the client can correlate the ack to its
   // send-time and measure RTT on its own clock (see connection-health.ts).
@@ -283,6 +285,7 @@ export type OutgoingMessage = WireEnvelope & (
 export type SendFn = (msg: OutgoingMessage) => void;
 
 export interface QueryInput {
+  invocation?: SkillInvocation;
   /** Shelf-owned message stays intact; prompt is the provider's dispatch input. */
   inputMessage?: import('@shared/agent-input').AgentInputMessage;
   prompt: string;
@@ -366,6 +369,7 @@ export function pickEffortLevels(values: string[]): CycleOption[] {
 }
 
 export interface ProviderCapabilities {
+  appSkillCommands?: import('@shared/skill-invocation').AppSkillCommandCapability;
   /** When present, only this explicit confirmed intent is persisted. Empty means display only. */
   confirmedPrefs?: Partial<import('@shared/types').AgentPrefs>;
   models: { value: string; displayName: string; effortLevels?: CycleOption[]; vision?: boolean }[];

@@ -1,3 +1,5 @@
+import { SKILL_COMMAND_AVAILABILITY as SCA } from '@shared/skill-invocation';
+import { selectSkillCommand, setSkillCommandMenu, reconcileSkillCommandSelection } from './agentTabStore';
 import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
 import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 import { SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
@@ -936,4 +938,16 @@ describe('agentTabStore — decisions / auth / init', () => {
     expect(tab.actualEffort).toBe('high');
     expect(tab.actualPermissionMode).toBe('plan');
   });
+});
+
+
+it('keeps a selected command hint across catalog changes and argument edits, but clears it when the alias is edited', () => {
+  initTab(TAB, { sessionId: SESSION, provider: 'claude' });
+  const entry = { name: 'dev-flow', description: 'Run flow', skillName: 'flow', selection: { registrationId: 'registration', catalogRevision: 'old' }, availability: SCA.READY };
+  selectSkillCommand(TAB, entry);
+  setSkillCommandMenu(TAB, { entries: [] });
+  reconcileSkillCommandSelection(TAB, '/dev-flow changed task');
+  expect(__getTabForTests(TAB)?.selectedSkillCommand).toEqual(entry);
+  reconcileSkillCommandSelection(TAB, '/different task');
+  expect(__getTabForTests(TAB)?.selectedSkillCommand).toBeUndefined();
 });

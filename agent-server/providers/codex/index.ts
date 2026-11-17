@@ -1,3 +1,7 @@
+import * as fs from 'node:fs';
+import { SKILL_COMMAND_ERROR as SCE, SkillCommandFailure } from '@shared/skill-invocation';
+import { resolveInvocationSkillPath } from '../skill-invocation';
+import { resolveSkillsPluginRoot } from '../shared';
 import { CodexNativeControls, CODEX_NATIVE_RPC } from './native-controls';
 import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
@@ -483,7 +487,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   }
 
   function buildCapabilities(confirmedPrefs: import('@shared/types').AgentPrefs = {}): ProviderCapabilities {
-    return { models, permissionModes: [], slashCommands: [...CODEX_SDK_SLASH_COMMANDS],
+    return { appSkillCommands: { available: true }, models, permissionModes: [], slashCommands: [...CODEX_SDK_SLASH_COMMANDS],
       ...nativeControls.capabilities(), confirmedPrefs };
   }
 
@@ -527,7 +531,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           return;
         }
 
-        const slash = parseSlashPrefix(inputPromptForDispatch(input));
+        const slash = input.invocation ? null : parseSlashPrefix(inputPromptForDispatch(input));
         if (slash && (slash.cmd === 'model' || slash.cmd === 'effort' || slash.cmd === 'permission')) {
           if (!slash.args) {
             send({ type: 'status', state: 'streaming' });
@@ -620,17 +624,36 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         const sdkHome = codexHome(input.appId);
         if (sdkHome) baseEnv.HOME = sdkHome;
         const client = await ensureAppServer(input.appId, baseEnv);
+        let selectedSkillPath: string | undefined;
+        if (input.invocation) {
+          selectedSkillPath = resolveInvocationSkillPath(input.invocation, resolveSkillsPluginRoot(input.appId));
+          const listed = asRecord(await client.request('skills/list', { cwds: [input.cwd], forceReload: true }));
+          const matches = asArray(listed?.data).flatMap(group => asArray(asRecord(group)?.skills)).filter(raw => {
+            const skill = asRecord(raw);
+            if (skill?.name !== input.invocation!.skillName || skill.enabled !== true || typeof skill.path !== 'string' || !path.isAbsolute(skill.path)) return false;
+            try { return fs.realpathSync(skill.path) === selectedSkillPath; }
+            catch { return false; } // An unresolvable native path cannot identify the target.
+          });
+          if (matches.length !== 1) throw new SkillCommandFailure(SCE.SOURCE, 'Codex did not advertise the enabled app skill at its exact path');
+        }
         const threadId = await ensureThread(client, input, send, baseEnv);
         await waitForTurnCompletion(async () => {
+          const prompt = input.invocation ? `$${input.invocation.skillName}${input.invocation.args ? ` ${input.invocation.args}` : ''}` : modelInputPrompt(input);
+          const turnInput = toCodexAppServerInput(prompt, input.images, input.attachments);
+          if (input.invocation) {
+            resolveInvocationSkillPath(input.invocation, resolveSkillsPluginRoot(input.appId));
+            turnInput.push({ type: 'skill', name: input.invocation.skillName, path: selectedSkillPath });
+          }
           const started = await client.request('turn/start', {
             threadId,
             clientUserMessageId: `shelf-${randomUUID()}`,
-            input: toCodexAppServerInput(modelInputPrompt(input), input.images, input.attachments),
+            input: turnInput,
             ...turnOverrides(input),
           });
           activeTurnId = stringValue(asRecord(asRecord(started)?.turn)?.id) ?? activeTurnId;
         });
       } catch (err) {
+        if (input.invocation) serverLog('error', 'skill-invocation', `bindingId=${input.invocation.bindingId} skill=${input.invocation.skillName} msgId=${input.inputMessage?.msgId}: ${String(err)}`);
         send({ type: 'error', error: `codex: ${(err as Error)?.message ?? String(err)}` });
       } finally {
         if (activeRun === runId) {

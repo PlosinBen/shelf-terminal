@@ -19,6 +19,11 @@ title: shelf-terminal — Intent → File Index
 | Electron process memory attribution | `app-memory.ts` | 將 app process metrics 映射成 App role rows |
 | Named retained channel logs | `channel-log.ts` | 依 channel/day append log 並執行 retention policy cleanup |
 | App 層 Agent Skills（CRUD + lock + disable） | `skills-store.ts` | `<userData>/skills/` 下 app 層 skill 的檔案 CRUD + frontmatter 驗證 + `.locked`（agent 編輯鎖）+ `.disabled`（mount 開關）marker |
+| Skill command source metadata | `skill-commands.ts` + `skills-mutation.ts` | sidecar 原子保存、catalog 唯一性與 source mutation serialization；editor IPC 保存，provider 尚未接線 |
+| App command menu / submission identity | `agent/skill-command-menu.ts` + `agent/skill-invocations.ts` | Provider-neutral menu、main binding ownership 與 source revalidation |
+| Skill payload correctness digest | `../shared/skill-payload.ts` + `../shared/skill-invocation.ts` | Strict per-skill digest、typed selection／invocation／validation control |
+| Skills editor coordinated Save | `skills-editor.ts` + `../shared/skill-editor.ts` | Serialized user Save、preflight／readback、partial persistence 與 actual-name result |
+| Skill command schema／解析 | `../shared/skill-commands.ts` | metadata validators、保留路徑與 provider-neutral prefix／lookup |
 | Skills 變更後處理（統一 pipeline） | `skills-sync.ts` | `onSkillsChanged()`：任何 skill mutation 後的單一出口（re-project + subscribers + 通知 renderer） |
 | App-tool bridge（main 端 dispatcher） | `agent/app-tool.ts` | `handleAppTool(op,args)` 把 agent-server 的 `app_tool` 請求轉成 client-owned 資源動作的純 dispatcher |
 | Worktree Agent 委派 | `agent/delegation.ts` + `agent/delegation-runtime.ts` | 記憶體關係／角色授權與桌面選擇往返 |
@@ -139,7 +144,7 @@ title: shelf-terminal — Intent → File Index
 | Dispatcher/exec memory reporting | `memory-report.ts` | source-owned process snapshot、role attribution、success/error report 與 10 秒初始排程 |
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
-| Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測 |
+| Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測、app skill live plugin／namespace／digest 檢查與原生 dispatch |
 | Claude 設定套用測試 | `providers/claude/config-apply.test.ts` | live SDK control、effort rebuild／resume、拒絕不回報成功與 init bypass 驗證 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
 | Copilot usage 觀測 | `providers/copilot/usage-observation.ts` | 攔截 usage、驗證並摘要標準欄位、記錄 session/prompt 時序診斷 |
@@ -156,6 +161,8 @@ title: shelf-terminal — Intent → File Index
 | Provider 純 helper（copilot） | `providers/copilot/helpers.ts` | `resolveCopilotBinary` / `resolveCopilotCommand` / `copilotConfigHome`（`$COPILOT_HOME` per-appId）/ `copilotEnv`（token-env 傳遞）— 只被 copilot/ 引用 |
 | Copilot account credit | `providers/copilot/credit.ts` | `fetchCopilotCredit`（SDK `account.getQuota`、config-home auth）+ `normalizeCredit` + `refreshCopilotCredit`（per-host cache-aside、15min TTL、fail-quiet）；turn-end 經 `refreshAccountStatus` hook 觸發，見 `context/agent-providers#26` |
 | Copilot 互動登入（device flow） | `providers/copilot/login.ts` | `parseLoginPrompt`（stdout 抽 URL+code 純函式）+ `startLogin`（spawn `copilot login`、env 剝 token、cancel）+ `prefillLoginUrl`（見 `context/agent-providers` #10）。移入 copilot/ 保持 provider 目錄隔離 |
+| App skill queue validation | `skill-invocation-client.ts` | Correlated control、timeout、stop epoch；不進 message queue |
+| App skill target projection | `providers/skill-invocation.ts` | Target-host canonical path 與 digest 檢查 |
 | Provider 共用 helper | `providers/shared.ts` | `stripCwd` / `resolveSkillsPluginRoot` / `projectAppSkills`（idempotent + atomic symlink-to-temp+rename 的 skill projection）/ `readUploadedImageAttachments`（uploaded image path → base64）— 跨 provider 共用純函式 |
 | MCP config 消費（解析 + ${VAR}） | `providers/mcp-config.ts` | `loadProjectedMcpServers`：讀 projected `mcp-servers.json` → 驗證 → 對 worker env 展開 `${VAR}` → fail-loud（兩 provider 共用） |
 | App-tool bridge（agent-server 端） | `app-tool-client.ts` + `app-tool-tools.ts` | Shelf 工具共用契約（名稱／描述／schema／operation）、參數選取與 main RPC |
@@ -245,6 +252,7 @@ title: shelf-terminal — Intent → File Index
 | Worktree scan feedback | `components/WorktreeScanWarning.tsx`, `App.tsx`, `store-projects.ts` | Main warning/Rescan, missing-child state page, central scan application and runtime status |
 | Sidebar | `components/Sidebar.tsx` | Project 列表、connected-only filter、displayed-label search/navigation、拖曳排序、右鍵選單、worktree branch、連線健康 status-dot |
 | Tab bar | `components/TabBar.tsx` | Tab 列表、拖曳排序、雙擊重命名、unread badge、PM Active badge |
+| Skills command setting draft | `skillCommandDraftStore.ts` | Editor draft、confirmed baseline 與損壞 metadata 的顯式清除 |
 | 快速指令選擇器 | `components/CommandPicker.tsx` + `quick-command-target.ts` | ⌘P overlay，過濾 + Terminal-only target resolution/refusal + 執行 per-project 快速指令 |
 | 開發工具面板 | `components/DevToolsPanel.tsx` | ⌘D 右側 panel，Base64/JSON/URL/UUID/Timestamp/Hash 工具 |
 | 資料夾選擇器 | `components/FolderPicker.tsx` | 兩步驟選資料夾，依 effective target 分流為 reopen-existing 或 add intent |

@@ -1,3 +1,4 @@
+import { SKILL_INVOCATION as SI, SKILL_COMMAND_ERROR as SCE, validSkillValidationRequest } from '@shared/skill-invocation';
 import { AGENT_DIFF_ERROR, readAgentDiff } from '@shared/agent-diff';
 import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_CONTROL as CC, validConfigControl, isConfigControlPending, type ConfigControlUpdate } from '@shared/agent-config-control';
@@ -80,6 +81,7 @@ interface RemoteProcess {
    * so the dispatcher knows where to deliver events that may arrive before
    * the registration completes. Generator ends on first `state:'idle'` event.
    */
+  registerSkillValidation?: (executionId: string, handler: (request: unknown) => void) => () => void;
   registerExecution: (executionId: string, permissionHandler: PermissionHandler) => AsyncGenerator<AgentEvent>;
   /** Wait for agent-server's `{type:'ready'}` signal. Resolves false on timeout. */
   awaitReady: (timeoutMs?: number) => Promise<boolean>;
@@ -268,6 +270,7 @@ export function createRemoteBackend(
           permissionControl: payload.permissionControl ?? SHELF_PERMISSION_CONTROL,
           effortLevels: payload.effortLevels ?? [],
           slashCommands: payload.slashCommands ?? [],
+          appSkillCommands: payload.appSkillCommands?.available === true ? { available: true } : undefined,
           authMethod: payload.authMethod,
           currentModel: payload.currentModel,
           confirmedPrefs: payload.confirmedPrefs,
@@ -308,7 +311,7 @@ export function createRemoteBackend(
       }
     },
 
-    async *query(input: import('@shared/agent-input').AgentInputRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
+    async *query(input: import('./types').AgentBackendRequest, cwd: string, opts?: AgentQueryOptions): AsyncGenerator<AgentEvent> {
       if (controlUncertain) { yield { type: 'error', error: 'Session configuration is uncertain; reconnect before sending more messages' }; return; }
       const epoch = initializationEpoch;
       const proc = await ensureProcReady(cwd);
@@ -371,7 +374,27 @@ export function createRemoteBackend(
       // get-go. Without pre-registration there's a tiny window between
       // sendLine and registerExecution where agent-server's first response
       // could arrive and get dropped as "unknown execution".
+      opts?.onExecution?.(executionId);
+      if (input.invocation && (!proc.registerSkillValidation || !opts?.validateSkillInvocation)) throw new Error('Skill invocation validation channel is unavailable');
       const events = proc.registerExecution(executionId, permissionHandler);
+      const validationEpoch = initializationEpoch;
+      const offValidation = input.invocation ? proc.registerSkillValidation!(executionId, raw => {
+        if (!validSkillValidationRequest(raw)) { log.error('agent-remote', `malformed skill validation executionId=${executionId}`); return; }
+        const request = raw;
+        void (async () => {
+          let result = remoteProc === proc && initializationEpoch === validationEpoch
+            ? await opts!.validateSkillInvocation!(request)
+            : { ok: false as const, code: SCE.CHANGED, error: 'Agent process changed' };
+          if (remoteProc !== proc || initializationEpoch !== validationEpoch) result = { ok: false, code: SCE.CHANGED, error: 'Agent process changed during validation' };
+          if (!result.ok) log.warn('agent-remote', `skill validation rejected bindingId=${request.invocation.bindingId} executionId=${executionId} msgId=${request.msgId}: ${result.error}`);
+          proc.sendLine({ type: SI.RESULT, requestId: request.requestId, executionId, msgId: request.msgId, bindingId: request.invocation.bindingId, ...result });
+        })().catch(error => {
+          log.error('agent-remote', `skill validation failed executionId=${executionId}: ${String(error)}`);
+          try { proc.sendLine({ type: SI.RESULT, requestId: request.requestId, executionId, msgId: request.msgId, bindingId: request.invocation.bindingId, ok: false, code: SCE.CHANGED, error: 'Skill validation failed' }); }
+          catch (writeError) { log.error('agent-remote', `skill validation reply failed: ${String(writeError)}`); }
+        });
+      }) : undefined;
+      try {
 
       // Input never replays configuration; init and explicit edits own it.
       proc.sendLine({
@@ -379,6 +402,7 @@ export function createRemoteBackend(
         executionId,
         provider,
         inputMessage: input.inputMessage,
+        invocation: input.invocation,
         cwd,
         sessionId,
         resume: opts?.resume,
@@ -392,6 +416,7 @@ export function createRemoteBackend(
 
       opts?.onSubmitted?.();
       yield* events;
+      } finally { offValidation?.(); }
     },
 
     async stop() {
@@ -1287,6 +1312,7 @@ export function wrapProcess(
       w?.write(JSON.stringify(msg) + '\n');
     },
     registerExecution: dispatcher.registerExecution,
+    registerSkillValidation: dispatcher.registerSkillValidation,
     awaitReady: dispatcher.awaitReady,
     onResponse: dispatcher.onResponse,
     kill: () => {
@@ -1338,6 +1364,7 @@ export function parseRemoteMessage(msg: any): AgentEvent | null {
         permissionControl: msg.permissionControl ?? SHELF_PERMISSION_CONTROL,
         effortLevels: msg.effortLevels ?? [],
         slashCommands: msg.slashCommands ?? [],
+        appSkillCommands: msg.appSkillCommands?.available === true ? { available: true } : undefined,
         authMethod: msg.authMethod,
         currentModel: msg.currentModel,
         confirmedPrefs: msg.confirmedPrefs,

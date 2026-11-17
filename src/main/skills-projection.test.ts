@@ -1,3 +1,4 @@
+import { SKILL_COMMAND_FILE, SKILL_COMMAND_TEMP_PREFIX } from '@shared/skill-commands';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
@@ -156,4 +157,19 @@ describe('listSkillFilesRel + hashSkillsTree', () => {
     // hash MUST change → `.synced` gate re-syncs the remote
     expect(hashSkillsTree(skillsSourceRoot())).not.toBe(h1);
   });
+});
+
+it('keeps command settings and staging files out of local/remote consumption and hash', () => {
+  seedSourceSkill('a', 'A');
+  const root = skillsSourceRoot();
+  const hash = hashSkillsTree(root);
+  const dir = path.join(root, 'skills', 'a');
+  fs.writeFileSync(path.join(dir, SKILL_COMMAND_FILE), '{metadata}');
+  fs.writeFileSync(path.join(dir, `${SKILL_COMMAND_TEMP_PREFIX}fixture`), 'partial');
+  expect(hashSkillsTree(root)).toBe(hash);
+  expect(listSkillFilesRel(root).some(rel => rel.includes(SKILL_COMMAND_FILE))).toBe(false);
+  projectSkillsLocal('command-test');
+  const projected = path.join(localSkillsTarget('command-test'), 'skills', 'a');
+  expect(fs.existsSync(path.join(projected, SKILL_COMMAND_FILE))).toBe(false);
+  expect(fs.readFileSync(path.join(projected, 'SKILL.md'), 'utf8')).toBe('A');
 });

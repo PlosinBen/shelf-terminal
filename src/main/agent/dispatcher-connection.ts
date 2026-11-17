@@ -52,6 +52,7 @@ export interface SessionSinks {
 /** The `RemoteProcess`-shaped handle a SessionChannel exposes to createRemoteBackend. */
 export interface SessionChannel {
   sendLine(msg: object): void;
+  registerSkillValidation(executionId: string, handler: (request: unknown) => void): () => void;
   registerExecution(executionId: string, permissionHandler: PermissionHandler): AsyncGenerator<AgentEvent>;
   awaitReady(timeoutMs?: number): Promise<boolean>;
   onResponse(requestId: string, expectedType: string, handler: (payload: any) => void): () => void;
@@ -310,6 +311,7 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
     return {
       sendLine: (msg) => writeToProc({ ...msg, sid }),
       registerExecution: dispatcher.registerExecution,
+      registerSkillValidation: dispatcher.registerSkillValidation,
       awaitReady: dispatcher.awaitReady,
       onResponse: dispatcher.onResponse,
       kill: () => {
