@@ -72,7 +72,7 @@ related:
 
 ## worktree#9 — Worktree transaction failures are visible now and logged for later  ·  [Decision]
 
-**Decision:** Create, Finish, and Abandon failures surface the full error text in the dialog and write structured context to the persistent app log through the renderer debug-log bridge. Create migration failure also attempts rollback; if rollback fails, the dialog shows both full errors and can send a recovery prompt to the base project's agent tab. Finish/Abandon keep their existing Send-to-agent behavior to the worktree agent tab.
+**Decision:** Create, Finish, and Abandon failures surface the full error text in the dialog and write structured context to the persistent app log through the renderer debug-log bridge. Create migration failure also attempts rollback; if rollback fails, the dialog shows both full errors and can send a recovery prompt to the base project's agent tab. Finish/Abandon keep their existing Send-to-agent behavior to the worktree agent tab. Their gates keep the header and footer visible within the viewport while the body scrolls; full error text preserves line breaks and wraps long paths.
 
 **Reason:** These flows mutate git state and can stop midway. The user needs the exact failure immediately for recovery, while logs preserve operation, project ids, branches/targets, cwd/worktree paths, failed step, and full error text after the dialog is closed.
 

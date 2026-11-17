@@ -2435,7 +2435,20 @@ button {
 /* Agent-driven create/finish/abandon confirm gates. Matches the dialog language:
    13px body, 16px symmetric padding aligned with the header/footer horizontals,
    and reset <p> margins so vertical rhythm comes from padding + gap alone. */
+.worktree-close-dialog {
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(500px, calc(100dvh - 32px));
+}
+
+.worktree-close-dialog > .settings-header,
+.worktree-close-dialog > .project-edit-footer {
+  flex-shrink: 0;
+}
+
 .worktree-gate-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   padding: 16px;
   font-size: 13px;
   line-height: 1.5;
@@ -2443,6 +2456,10 @@ button {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.worktree-gate-body > * {
+  flex-shrink: 0;
 }
 
 .worktree-gate-body p {

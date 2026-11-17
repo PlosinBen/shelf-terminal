@@ -267,6 +267,30 @@ test.describe('finish worktree gate', () => {
     });
   }
 
+  test('long finish errors scroll without hiding the footer in a short window', async () => {
+    await page.setViewportSize({ width: 800, height: 500 });
+    for (let i = 0; i < 70; i++) {
+      fs.writeFileSync(path.join(feature, `untracked-${String(i).padStart(3, '0')}-${'x'.repeat(120)}.txt`), 'keep');
+    }
+    await openCloseMenu(page, 'Finish');
+    const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+    await popup.getByLabel('Only merge').check();
+    await popup.locator('.project-edit-footer').getByRole('button', { name: 'Finish', exact: true }).click();
+    await expect(popup.locator('.worktree-error')).toContainText('untracked-069', { timeout: 8000 });
+    const body = popup.locator('.worktree-gate-body');
+    const cancel = popup.locator('.project-edit-footer').getByRole('button', { name: 'Cancel', exact: true });
+    const finish = popup.locator('.project-edit-footer').getByRole('button', { name: 'Finish', exact: true });
+    await expect(cancel).toBeInViewport();
+    await expect(finish).toBeInViewport();
+    await expect.poll(() => body.evaluate(el => el.scrollHeight > el.clientHeight && el.scrollWidth <= el.clientWidth)).toBe(true);
+    await body.evaluate(el => { el.scrollTop = el.scrollHeight; });
+    await expect(popup.getByRole('button', { name: 'Send to agent' })).toBeInViewport();
+    await expect(cancel).toBeInViewport();
+    await cancel.click();
+    await expect(popup).toHaveCount(0);
+    expect(fs.existsSync(feature)).toBe(true);
+  });
+
   test('cancel merges nothing and keeps the worktree', async () => {
     const mainBefore = git(base, ['rev-parse', 'main']).trim();
 

@@ -340,7 +340,7 @@ export function WorktreeCloseGate() {
 
   return (
     <div className="settings-overlay" onClick={busy ? undefined : close}>
-      <div className="worktree-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="worktree-dialog worktree-close-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <span>{title}</span>
           <button className="settings-close" onClick={close} disabled={busy}>×</button>
@@ -421,7 +421,7 @@ export function WorktreeCloseGate() {
           )}
           {error && (
             <div className="worktree-error">
-              {error}
+              <pre className="worktree-error-text">{error}</pre>
               <div className="worktree-error-actions">
                 <button
                   className="conn-btn conn-btn-next"
