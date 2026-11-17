@@ -28,7 +28,7 @@ title: Shelf — 驗證能力與執行入口
 | Docker connector | `npm run test:docker` | 真實 Docker fixture；需 Docker daemon、可取得 image，檢查 [docker spec](../e2e/connector/docker.spec.ts) 的具體行為與前提 |
 | SSH connector | `npm run test:ssh` | script 啟動本機 SSH 測試容器；檢查 [SSH spec](../e2e/connector/ssh.spec.ts) 與 [設定](../e2e/connector/ssh-config.ts)，不能推論任意遠端／SSO 已通過 |
 | 遠端 agent 部署、binary／runtime | `npm run test:agent-deploy -- <spec>` | 需 Docker、網路與所選 spec 的前提；[部署 fixture](../e2e/connector/agent-deploy-helpers.ts) 預設 fake，可選真實 backend probe；需讀 spec 區分下載、啟動、未登入偵測與真正已登入操作 |
-| SSH 密碼認證與 agent 部署 | `npm run test:agent-deploy-ssh` | [SSH 部署 spec](../e2e/connector/agent-deploy-ssh.spec.ts) 需 Docker 與 Unix SSH／SCP，Windows skip；測試自建容器並使用動態 port，以 fake provider 驗 dispatcher／direct 兩條部署路徑，不證明真實模型登入或對話 |
+| SSH 密碼認證與 agent 部署 | `npm run test:agent-deploy-ssh` | [SSH 部署 spec](../e2e/connector/agent-deploy-ssh.spec.ts) 需 Docker 與 Unix SSH／SCP，Windows skip；測試自建容器並使用動態 port，以 fake provider 驗 dispatcher／direct 兩條部署路徑、app command 遠端投影與排隊後停用重驗，不證明真實模型登入或對話 |
 | WSL upload／部署 | `npm run test:wsl`、`npm run test:agent-deploy-wsl` | Windows 主機與可用 distro；[WSL spec](../e2e/connector/wsl.spec.ts) 在非 Windows skip，不把 macOS／Linux 執行當作 WSL 通過 |
 
 從受影響模組的既有測試或 `e2e/` 對應 spec 選起，不為每個任務重建完整 inventory。`npm test` 串接 typecheck、unit、一般 E2E、Docker、SSH，未包含所有 WSL／agent-deploy 專案，也不是每次局部變更都要重跑的預設。

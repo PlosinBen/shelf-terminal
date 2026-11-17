@@ -77,6 +77,39 @@ for (const mode of ['dispatcher', 'direct'] as const) {
       await expect(page.locator('.terminal-container')).toHaveCount(0);
       await expect(page.locator('.agent-empty, .agent-conn-reason')).toBeVisible({ timeout: 120_000 });
       await expect(page.locator('.agent-conn-reason')).toHaveCount(0);
+      // Exercise registration, projection and out-of-band validation across
+      // both remote process routes. The provider remains fake; this does not
+      // claim native SDK dispatch on Linux.
+      await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+      await page.locator('.skills-view .notes-new-btn').click();
+      const instructions = '---\nname: remote-flow\ndescription: Remote command fixture\n---\nRemote fixture body';
+      await page.locator('.skills-view .notes-textarea').fill(instructions);
+      await page.getByLabel('Add to slash command menu').check();
+      await page.getByRole('textbox', { name: 'Command', exact: true }).fill('remote-work');
+      await page.getByRole('textbox', { name: 'Command description', exact: true }).fill('Remote workflow');
+      await page.locator('.skills-view .notes-back').click();
+      await expect(page.locator('.skills-list-command')).toHaveText('/remote-work');
+      await page.locator('.skills-view .notes-close').click();
+      await sendAgentPrompt(page, '/remote-work task');
+      await expect(page.locator('.agent-messages:visible')).toContainText('App skill remote-flow: task', { timeout: 20000 });
+      const appId = fs.readFileSync(path.join(dir, 'app-instance-id'), 'utf8').trim();
+      const remoteSkill = `/home/${USER}/.shelf/apps/${appId}/skills/skills/remote-flow`;
+      const projected = await run('docker', ['exec', container, 'cat', `${remoteSkill}/SKILL.md`]);
+      expect(projected.stdout).toBe(instructions);
+      await run('docker', ['exec', container, 'test', '!', '-e', `${remoteSkill}/.shelf-command.json`]);
+      await sendAgentPrompt(page, 'delay:5000|text:remote-blocker');
+      await expect(page.locator('.agent-loading')).toBeVisible();
+      await sendAgentPrompt(page, '/remote-work queued');
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(1);
+      await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+      await page.locator('.skills-enable-toggle').click();
+      await expect(page.locator('.skills-list-item.disabled')).toBeVisible();
+      await page.locator('.skills-view .notes-close').click();
+      await sendAgentPrompt(page, 'text:remote-after-rejection');
+      await expect(page.locator('.agent-messages:visible')).toContainText('target_disabled', { timeout: 15000 });
+      await expect(page.locator('.agent-messages:visible')).toContainText('remote-after-rejection');
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('App skill remote-flow: queued');
+      await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
       await sendAgentPrompt(page, 'picker_single');
       await expect(page.locator('.picker-panel:visible')).toBeVisible({ timeout: 120_000 });
       await expect(page.locator('.picker-option')).toHaveCount(3);
