@@ -375,3 +375,37 @@ test('Import replaces selected whole items, refreshes impact, and preserves fail
   await expect(failure).toContainText('Rollback: Not needed');
   await expect(row('remote-extra').locator('input')).toBeChecked();
 });
+
+test.describe('custom command restore', () => {
+  test.use({ homeProjectDirectories: false });
+
+  test('Import restores skill command identity and editable registration', async ({ shelfApp: { page, userDataDir } }) => {
+    const remote = path.join(userDataDir, 'command-restore.git');
+    await simpleGit().raw(['init', '--bare', remote]);
+    const command = { version: 1, registrationId: 'ad1b0c23-6789-4123-8123-123456789abc', alias: 'restored-work', description: 'Restored workflow' };
+    await pushBackupBranch(remote, path.join(userDataDir, 'seed-command'), 'backup/command-source', {
+      'machine.json': JSON.stringify({ appInstanceId: 'command-source', machineLabel: 'command-source-machine' }),
+      'skills/restored-flow/SKILL.md': '---\nname: restored-flow\ndescription: Restored fixture\n---\nRestored body',
+      'skills/restored-flow/.shelf-command.json': JSON.stringify(command),
+    });
+    await page.locator('.right-tab-btn[title="Backup"]').click();
+    const panel = page.locator('.backup-view');
+    await panel.getByRole('tab', { name: 'Import' }).click();
+    await panel.getByLabel('Remote URL').fill(remote);
+    await panel.getByRole('button', { name: 'Find backups' }).click();
+    await panel.getByLabel('Backup source').selectOption({ label: 'command-source-machine' });
+    await panel.locator('.import-item-selection .backup-check', { hasText: 'restored-flow' }).locator('input').check();
+    await panel.getByRole('button', { name: 'Import 1 item' }).click();
+    await expect(panel.locator('.backup-status-ok')).toHaveText('Imported 1 item; 1 changed.');
+    const source = path.join(userDataDir, 'skills', 'skills', 'restored-flow');
+    expect(JSON.parse(fs.readFileSync(path.join(source, '.shelf-command.json'), 'utf8'))).toEqual(command);
+    await panel.getByRole('button', { name: 'Close Backup' }).click();
+    await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+    await expect(page.locator('.skills-list-command')).toHaveText('/restored-work');
+    await page.locator('.skills-list-item').click();
+    await expect(page.getByLabel('Add to slash command menu')).toBeChecked();
+    await expect(page.getByRole('textbox', { name: 'Command', exact: true })).toHaveValue('restored-work');
+    await expect(page.getByRole('textbox', { name: 'Command description', exact: true })).toHaveValue('Restored workflow');
+    await expect(page.locator('.skills-view .notes-textarea')).toHaveValue(/Restored body/);
+  });
+});
