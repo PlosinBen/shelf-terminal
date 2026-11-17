@@ -885,7 +885,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        client.request('turn/interrupt', { threadId, executionId: turnId }),
+        client.request('turn/interrupt', { threadId, turnId }),
         new Promise<never>((_, reject) => {
           timeout = setTimeout(() => reject(new Error(`no acknowledgement within ${CODEX_INTERRUPT_GRACE_MS}ms`)), CODEX_INTERRUPT_GRACE_MS);
         }),

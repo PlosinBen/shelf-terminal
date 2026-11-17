@@ -5,6 +5,9 @@ import { CODEX_PROVIDER } from '@shared/agent-providers';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import { CODEX_AUTH_DISPLAY_NAME } from '../codex-shared/auth';
 import { createCodexBackend } from './index';
+import { createSendQueue } from '../../send-queue';
+import { createSessionConfigControl } from '../../session-config-control';
+import type { ConfigControlUpdate } from '@shared/agent-config-control';
 import type { LoginRpc } from '../codex-shared/app-server-login';
 import type { OutgoingMessage } from '../types';
 import { setLogSink, type ServerLogMessage } from '../../server-logger';
@@ -117,6 +120,8 @@ class FakeAppServer {
       return { turn: { id: 'compact-turn' } } as T;
     }
     if (method === 'turn/interrupt') {
+      const p = params as Record<string, unknown>;
+      if (typeof p.turnId !== 'string') throw new Error('Invalid request: missing field turnId');
       this.fire('turn/completed', turnCompleted('turn-1', 'interrupted'));
       return {} as T;
     }
@@ -596,7 +601,7 @@ describe('Codex official app-server backend lifecycle', () => {
     release();
     await running;
 
-    expect(app.calls.find((call) => call.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread-1', executionId: 'turn-1' });
+    expect(app.calls.find((call) => call.method === 'turn/interrupt')?.params).toEqual({ threadId: 'thread-1', turnId: 'turn-1' });
     expect(out.filter((m) => m.type === 'status' && m.state === 'idle')).toHaveLength(1);
   });
 
@@ -619,6 +624,59 @@ describe('Codex official app-server backend lifecycle', () => {
     await running;
 
     expect(app.closed).toBe(true);
+  });
+
+  it('rejects deferred settings before Stop tears down Codex, then resumes the next message', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        return { turn: { id: 'turn-1' } };
+      },
+    });
+    const resumed = new FakeAppServer();
+    let starts = 0;
+    const backend = createCodexBackend({ createAppServer: () => starts++ === 0 ? app : resumed });
+    await backend.gatherCapabilities!('/repo');
+    const replies: OutgoingMessage[] = [];
+    const updates: ConfigControlUpdate[] = [];
+    const queue = createSendQueue({
+      handle: async (m: { clientMsgId: string }) => backend.query({ prompt: m.clientMsgId, cwd: '/repo', restoreContext: restoreContext('thread-1') }, m => replies.push(m)),
+      emitSnapshot: () => {}, terminateExecution: () => {}, onHandleError: (_msg, err) => { throw err; },
+    });
+    const control = createSessionConfigControl(queue, update => updates.push(update));
+    try {
+      queue.enqueue({ clientMsgId: 'first' });
+      await vi.waitFor(() => expect(app.calls.some(c => c.method === 'turn/start')).toBe(true));
+      const pending = control({ requestId: 'setting', key: 'effort', value: 'ultra' }, backend);
+      expect(updates.at(-1)?.state).toBe('deferred');
+      await queue.stop(() => backend.stop()); await pending;
+      expect(updates.map(u => u.state)).toEqual(['deferred', 'rejected']);
+      expect(app.closed).toBe(true);
+      expect(app.calls.some(c => c.method === 'thread/settings/update')).toBe(false);
+      queue.enqueue({ clientMsgId: 'second' });
+      await vi.waitFor(() => expect(replies).toContainEqual(expect.objectContaining({ type: 'message', content: 'hello' })));
+      expect(resumed.calls.some(c => c.method === 'thread/resume')).toBe(true);
+    } finally { backend.dispose(); }
+  });
+
+  it('force-closes when interrupt never acknowledges', async () => {
+    vi.useFakeTimers();
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        return { turn: { id: 'turn-1' } };
+      },
+      'turn/interrupt': () => new Promise(() => {}),
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    try {
+      const running = backend.query({ prompt: 'first', cwd: '/repo' }, () => {});
+      await vi.advanceTimersByTimeAsync(0);
+      const stopped = backend.stop();
+      await vi.advanceTimersByTimeAsync(10000);
+      await stopped; await running;
+      expect(app.closed).toBe(true);
+    } finally { backend.dispose(); vi.useRealTimers(); }
   });
 
   it('force-closes idle app-server and reconnects on the next turn', async () => {

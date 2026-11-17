@@ -54,4 +54,47 @@ describe('independent session configuration', () => {
       expect(s.queue.snapshot()).toEqual([{ clientMsgId: 'b', state: 'queued' }]);
     } finally { vi.useRealTimers(); }
   });
+  it('rejects deferred control on stop before its setter runs, and accepts subsequent work', async () => {
+    const s = setup(true);
+    s.queue.enqueue({ clientMsgId: 'a' }); await tick();
+    const pending = s.control({ requestId: 'r', key: 'effort', value: 'high' }, s.backend);
+    const stopping = s.queue.stop(async () => { s.work.resolve(); });
+    await stopping; await pending; await tick();
+    expect(s.configure).not.toHaveBeenCalled();
+    expect(s.updates.map(x => x.state)).toEqual([C.STATE.DEFERRED, C.STATE.REJECTED]);
+    expect(s.updates.at(-1)?.error).toMatch(/stopped.*not applied/i);
+    s.queue.enqueue({ clientMsgId: 'b' }); await tick();
+    expect(s.order).toEqual(['a', 'b']);
+  });
+
+  it('cancels a scheduled control before its microtask invokes the setter', async () => {
+    const s = setup(false);
+    const pending = s.control({ requestId: 'r', key: 'model', value: 'x' }, s.backend);
+    await s.queue.stop(async () => {}); await pending;
+    expect(s.configure).not.toHaveBeenCalled();
+    expect(s.updates.at(-1)?.state).toBe(C.STATE.REJECTED);
+  });
+
+  it('rejects new controls and holds new work until stop completes', async () => {
+    const s = setup(false); const stopped = gate();
+    const stopping = s.queue.stop(() => stopped.promise);
+    await s.control({ requestId: 'r', key: 'model', value: 'x' }, s.backend);
+    s.queue.enqueue({ clientMsgId: 'b' }); await tick();
+    expect(s.configure).not.toHaveBeenCalled();
+    expect(s.updates.at(-1)?.state).toBe(C.STATE.REJECTED);
+    expect(s.order).toEqual([]);
+    stopped.resolve(); await stopping; await tick();
+    expect(s.order).toEqual(['b']);
+  });
+
+  it('preserves uncertain classification for an already invoked setter interrupted by stop', async () => {
+    const s = setup(false); const interrupted = gate();
+    s.configure.mockImplementation(async () => { await interrupted.promise; throw new Error('transport closed'); });
+    const pending = s.control({ requestId: 'r', key: 'model', value: 'x' }, s.backend); await tick();
+    await s.queue.stop(async () => { interrupted.resolve(); }); await pending;
+    expect(s.updates.at(-1)?.state).toBe(C.STATE.UNCERTAIN);
+    s.queue.enqueue({ clientMsgId: 'b' }); await tick();
+    expect(s.order).toEqual([]);
+  });
+
 });

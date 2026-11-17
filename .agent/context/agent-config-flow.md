@@ -320,7 +320,7 @@ metadata 不要求舊資料遷移。訊息本身不承擔執行／交付狀態�
 **Decision：** Status-bar picker 以獨立 requestId 提交 session control，不建立訊息／execution
 ID、queue chip、timeline 或 idle。Slash-origin picker 保留命令名稱，factory 組成正常 slash
 訊息並入 FIFO；共同 UI 不抹除來源。Provider 共用真正的 setter，但直接控制不重用有
-divider／idle side effect 的 query wrapper。同值仍回 confirmed，避免 pending 永不結束。
+divider／idle side effect 的 query wrapper。同值仍回 confirmed，避免 pending 永不結束。Stop 會以 rejected 明確取消未開始套用的 control，包含已排 microtask 但尚未呼叫 setter 的請求；不自動重送。停止期間新 control 明確拒絕，訊息 dispatch 等 provider stop 完成；已開始套用者保留原確認與 uncertain 規則。
 
 **Reason：** 設定變更不是推論工作，不能只為了抵達 setter 就等完所有 queued messages。
 共用層負責一個 View 一筆 pending、correlation、timeout 與 start barrier，provider 封裝
