@@ -46,9 +46,10 @@ export interface SendQueue<T extends QueuedSend> {
   enqueue(msg: T): void;
   /** Drop a specific not-yet-running send by clientMsgId. No-op if running/unknown. */
   cancel(clientMsgId: string): QueueCancelResult;
-  /** Drop every waiting send (ESC / stop). The running execution is interrupted
-   *  separately by the caller (backend.stop). */
+  /** Drop waiting messages only; use stop() to coordinate provider interruption and controls. */
   clear(): void;
+  /** Cancel unstarted controls and waiting messages; hold dispatch during provider stop. */
+  stop(interrupt: () => Promise<void>): Promise<void>;
   /** Test/diagnostic introspection. */
   snapshot(): AgentQueueItem[];
   /** Reserve one independent control slot; never projected as a message. */
@@ -61,8 +62,9 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
   const queue: T[] = [];
   let processing = false;
   let runningClientMsgId: string | undefined;
-  let control: { run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void; started: boolean; defer: boolean } | undefined;
+  let control: { run: () => Promise<void>; resolve: () => void; reject: (error: unknown) => void; started: boolean; scheduled: boolean; defer: boolean } | undefined;
   let blocked = false;
+  let stopping: Promise<void> | undefined;
 
   function snapshot(): AgentQueueItem[] {
     const items: AgentQueueItem[] = [];
@@ -76,12 +78,16 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
   const terminate = (msg: T) => { if (msg.executionId) deps.terminateExecution(msg.executionId); };
 
   function pump(): void {
-    if (blocked) return;
+    if (blocked || stopping) return;
     if (control) {
-      if (!control.started && (!processing || !control.defer)) {
+      if (!control.scheduled && (!processing || !control.defer)) {
         const current = control;
-        current.started = true;
-        Promise.resolve().then(current.run).then(current.resolve, current.reject).finally(() => {
+        current.scheduled = true;
+        Promise.resolve().then(() => {
+          if (control !== current) return; // Stop cancelled this control before invocation.
+          current.started = true;
+          return current.run();
+        }).then(current.resolve, current.reject).finally(() => {
           if (control === current) control = undefined;
           pump();
         });
@@ -111,11 +117,34 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
       });
   }
 
+  function clear(): void {
+    if (queue.length === 0) return;
+    const dropped = queue.splice(0, queue.length);
+    for (const m of dropped) terminate(m);
+    emit();
+  }
+
   return {
+    stop(interrupt) {
+      if (stopping) return stopping;
+      // Establish the barrier before interrupt can settle the active execution.
+      stopping = Promise.resolve().then(interrupt).finally(() => {
+        stopping = undefined;
+        pump();
+      });
+      clear();
+      if (control && !control.started) {
+        const cancelled = control;
+        control = undefined;
+        cancelled.reject(new Error('Session stopped; pending setting was not applied'));
+      }
+      return stopping;
+    },
     runControl(run, defer) {
+      if (stopping) return Promise.reject(new Error('Session is stopping; setting was not applied'));
       if (blocked) return Promise.reject(new Error('Session configuration is uncertain; reconnect before continuing'));
       if (control) return Promise.reject(new Error('A session configuration request is already pending'));
-      return new Promise<void>((resolve, reject) => { control = { run, resolve, reject, started: false, defer }; pump(); });
+      return new Promise<void>((resolve, reject) => { control = { run, resolve, reject, started: false, scheduled: false, defer }; pump(); });
     },
     block() { blocked = true; },
     enqueue(msg: T): void {
@@ -139,12 +168,7 @@ export function createSendQueue<T extends QueuedSend>(deps: SendQueueDeps<T>): S
       emit();
       return { status: C.STATUS.CANCELLED };
     },
-    clear(): void {
-      if (queue.length === 0) return;
-      const dropped = queue.splice(0, queue.length);
-      for (const m of dropped) terminate(m);
-      emit();
-    },
+    clear,
     snapshot,
   };
 }

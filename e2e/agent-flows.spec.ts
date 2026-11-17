@@ -240,6 +240,25 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
     });
 
+    test('stop rejects a deferred setting without blocking the next message', async ({ shelfApp: { page } }) => {
+      await setupProject(page); await openAgentTab(page);
+      await sendAgentPrompt(page, 'delay:10000|text:work before stop');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
+      await page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'effort:' }).click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'high' }).click();
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'deferred');
+      await page.locator('.agent-textarea:visible').focus();
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+      await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'rejected');
+      await expect(page.locator('.agent-config-feedback')).toContainText('not applied');
+      await expect(page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'effort:' })).toHaveText('effort: medium');
+      await sendAgentPrompt(page, 'text:usable after stopping pending configuration');
+      await expect(page.locator('.agent-messages:visible')).toContainText('usable after stopping pending configuration');
+      await expect(page.locator('.agent-messages:visible')).not.toContainText('Session configuration is uncertain');
+    });
+
     test('shows uncertain config outside the timeline and reconnects without resending it', async ({ shelfApp: { page } }) => {
       await setupProject(page); await openAgentTab(page);
       await page.locator('.agent-status-seg.agent-status-interactive:visible', { hasText: 'fake-model' }).click();

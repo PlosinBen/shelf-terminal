@@ -191,6 +191,9 @@ execution IDs, pending chips, timeline entries, or execution status. Same-value 
 Only confirmed capabilities update display and `Project.agentViews[sessionId].prefs` through the normal
 serialized mutation path. `confirmedPrefs` retains its provider-specific explicit-patch semantics.
 Confirmation does not promise that currently running inference adopted the setting.
+Stop rejects controls whose setters have not started, with an explicit not-applied error.
+Controls received during stop are rejected; message dispatch waits for provider stop to settle.
+An already invoked setter still reports its actual confirmed/rejected/uncertain outcome.
 
 Definite pre-mutation rejection leaves the session usable. Unknown mutation outcome retains queued
 inputs and blocks subsequent execution starts until reconnect; it does not imply rollback. The UI

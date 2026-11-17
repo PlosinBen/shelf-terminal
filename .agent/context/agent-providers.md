@@ -504,7 +504,7 @@ Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` �
 
 **Root cause：** Renderer 原本只在 execution busy 時允許 Codex stop；backend 又會吞掉 `turn/interrupt` 錯誤並直接 resolve 本地 completion。UI state 與 provider process 因此脫鉤，沒有任何 control-plane 證據證明背景工作已終止。
 
-**Fix / note：** Codex tab 即使 visually idle 仍保留 double-ESC。若有 active turn，先給 `turn/interrupt` 一個 bounded acknowledgement window；無論 interrupt 成功、失敗或逾時，stop 都關閉 app-server 子程序、取消未決 permission request、清除 in-memory thread/runtime reference，再解鎖本地 turn。下一次 send 建立新 app-server，並用 persisted `lastSdkSessionId` resume 原 thread。若 force-close 本身失敗則 stop fail-loud，不得回報成功。
+**Fix / note：** Codex tab 即使 visually idle 仍保留 double-ESC。若有 active turn，adapter 以原生 `{ threadId, turnId }` 送 `turn/interrupt`，並給一個 bounded acknowledgement window；無論 interrupt 成功、失敗或逾時，stop 都關閉 app-server 子程序、取消未決 permission request、清除 in-memory thread/runtime reference，再解鎖本地 turn。下一次 send 建立新 app-server，並用 persisted `lastSdkSessionId` resume 原 thread。Stop 開始時共用 queue 先拒絕尚未套用的 control 並阻擋 dispatch，避免 deferred setter 在 session teardown 後執行而誤判 uncertain；已開始的設定保留真正的確認／uncertain 邊界。若 force-close 本身失敗則 stop fail-loud，不得回報成功。
 
 **Do not change casually because：** 不要把 `turn/interrupt` 已送出或本地 promise 已 resolve 當成實際停止；也不要在 force-close 時清掉 persisted thread pointer，否則取消會不必要地丟失對話 continuity。visual idle 只代表 Shelf 沒有 active execution，不代表 provider process 無背景工作。
 

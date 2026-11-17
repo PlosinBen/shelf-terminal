@@ -382,8 +382,9 @@ async function handleSend(msg: IncomingMessage) {
 
 async function handleStop() {
   skillValidation.close();
-  if (!activeBackend) throw new Error('stop failed: no active backend');
-  await activeBackend.stop();
+  const backend = activeBackend;
+  if (!backend) throw new Error('stop failed: no active backend');
+  await sendQueue.stop(() => backend.stop());
 }
 
 // ── Idle-shutdown watchdog (ssh only) ────────────────────────────────────────
@@ -480,9 +481,8 @@ rl.on('line', (line) => {
       }
       break;
     case 'stop':
-      // ESC: clear the waiting queue (server is the queue authority now) +
-      // interrupt the running execution. clear() emits the updated snapshot.
-      sendQueue.clear();
+      // Stop cancels waiting messages and unstarted controls, then holds
+      // dispatch until provider interruption/teardown completes.
       if (typeof msg.requestId === 'string') {
         void handleStop().then(
           () => send({ type: 'stop_result', requestId: msg.requestId!, ok: true }),

@@ -54,6 +54,9 @@ content or settles execution. A mutation with an unknown outcome holds the execu
 until session recovery. Pending intent stays separate from confirmed runtime values and durable
 selections; restarting a session does not replay an uncertain request. Slash-origin selections remain
 ordinary queued messages, even when they share picker presentation with direct controls.
+Stop cancels waiting messages and unstarted controls before provider teardown. The queue holds
+dispatch and rejects new controls while stop is pending; already invoked setters retain their
+confirmation and uncertainty rules. This prevents a deferred setting from running on a destroyed session.
 
 ```text
 durable selections for the View's stable session
