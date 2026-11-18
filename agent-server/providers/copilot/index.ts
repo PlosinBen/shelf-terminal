@@ -66,6 +66,7 @@ const ACP_RESOURCE_NOT_FOUND_ERROR_CODE = RequestError.resourceNotFound().code;
 export const COPILOT_AUTOPILOT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#autopilot';
 const COPILOT_AUTOPILOT_COMPLETION_TIMEOUT_MS = 30 * 60_000;
 const COPILOT_MODE_CONFIRMATION_TIMEOUT_MS = 5_000;
+export const COPILOT_PLAN_LOG_TAG = 'copilot-plan';
 
 type AutopilotCompletionOutcome = 'task_complete' | 'terminated' | 'connection_closed' | 'timeout';
 
@@ -608,6 +609,16 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       name: 'shelf-copilot',
       onRequestPermission,
       onSessionUpdate(notification) {
+        // Observe before any provider/driver filtering, including session hydration.
+        // Exclude high-volume text chunks; never copy content or tool payloads.
+        const update = notification.update;
+        if (update.sessionUpdate !== 'agent_message_chunk' && update.sessionUpdate !== 'agent_thought_chunk') {
+          serverLog('debug', COPILOT_PLAN_LOG_TAG, 'ACP notification', {
+            sessionId: notification.sessionId,
+            updateType: update.sessionUpdate,
+            ...('entries' in update && Array.isArray(update.entries) ? { entryCount: update.entries.length } : {}),
+          });
+        }
         // Validate at the provider boundary; usage must never change execution state. agent-providers#53
         if (usageObserver.observe(notification, !!(sessionSend || activeExecutionSend))) {
           if (conn !== thisConn) {
@@ -897,12 +908,20 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         const isAdvertisedSlashCommand = !!input.invocation || promptSlash !== null
           && driver.getAvailableCommands(s.sessionId)?.some((command) => command.name === promptSlash.cmd) === true;
         const settleUsagePrompt = usageObserver.beginPrompt(s.sessionId);
+        serverLog('debug', COPILOT_PLAN_LOG_TAG, 'prompt begin', { sessionId: s.sessionId });
         let usageStopReason: StopReason | undefined;
         const promptCompletion = driver.drivePromptTurn(
           conn!.agent,
           s,
           modelInputPrompt(input, prompt),
-          send,
+          message => {
+            if (message.type === 'plan') {
+              serverLog('debug', COPILOT_PLAN_LOG_TAG, 'plan output', {
+                sessionId: s.sessionId, contentLength: message.content.length,
+              });
+            }
+            send(message);
+          },
           input.images,
           input.attachments,
         );
@@ -914,6 +933,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             usageStopReason = stopReason;
           } finally {
             settleUsagePrompt(usageStopReason ?? 'failed');
+            // Settlement is not a content barrier: late session updates still log.
+            serverLog('debug', COPILOT_PLAN_LOG_TAG, 'prompt settled', {
+              sessionId: s.sessionId, stopReason: usageStopReason ?? 'failed',
+            });
             if (activePromptCompletion === promptCompletion) activePromptCompletion = null;
           }
           if (

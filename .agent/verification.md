@@ -53,6 +53,12 @@ title: Shelf — 驗證能力與執行入口
 
 `test:docker`／`test:ssh` scripts 在測試後以分號接 `docker rm -f`，最後清理成功可能掩蓋前段失敗 exit code。檢查完整 Playwright 結果與前置錯誤，不單憑 wrapper 回傳 0 宣告通過；本檔記錄限制，未修正 scripts。
 
+### Copilot 待辦／plan 通知診斷
+
+使用包含目前 agent-server bundle 的 runtime，將 Settings → Terminal 的 Log level 設為 Debug；`copilot-plan` tag 經既有 main logger 寫入該次 userData log。`ACP notification` 在 provider/driver 篩選前記錄 sessionId、事件類型與 entries 陣列長度，略過高頻文字／思考 chunk；不記錄對話、工具輸入輸出或待辦文字。`plan output` 記錄送往 Shelf 的 plan 內容長度（0 表示清空）。`prompt begin`／`prompt settled` 標示觀察區間；settled 不代表 session 後續內容已結束，晚到通知仍可出現。
+
+以新的 Copilot 對話要求建立兩項原生待辦、完成其中一項，並保留另一項未完成；對照同一 session 的通知與輸出。收到 plan 卻沒有 plan output 時，檢查 hydration／output sink 路由；有 plan output 但沒有 UI 時，再追 main IPC／renderer。只有 tool_call 不能證明待辦已變更，須用該 session 的原生紀錄確認。沒有 plan 通知僅能支持已捕捉區間的觀察，不能推論所有 Copilot 版本均不支援。診斷完成後可恢復原 log level。
+
 ## 清理與證據保留
 
 - 一般 fixture 在測試結束關閉自己啟動的 Electron、清理固定測試目錄並刪除該次 userData。需要 log 或持久化檔案時，必須在 teardown 前保留到該次 artifact 位置；不能等結束才假設暫存資料仍在。

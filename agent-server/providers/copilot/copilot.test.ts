@@ -11,7 +11,7 @@ import type {
   SessionModeState,
 } from '@agentclientprotocol/sdk';
 import { createMockAcpAgent } from '../acp/mock-agent';
-import { COPILOT_AUTOPILOT_MODE_ID, createCopilotBackend } from './index';
+import { COPILOT_AUTOPILOT_MODE_ID, COPILOT_PLAN_LOG_TAG, createCopilotBackend } from './index';
 import { COPILOT_ACP_CANCELLATION_NOTICE } from './helpers';
 import type { OutgoingMessage } from '../types';
 import * as mcpConfig from '../mcp-config';
@@ -19,6 +19,46 @@ import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-l
 import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
 
 const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
+
+it('traces incoming ACP plan metadata and outgoing snapshots without logging contents', async () => {
+  const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+  const mock = createMockAcpAgent({ updatesOnPrompt: [
+    { sessionUpdate: 'plan', entries: [{ content: 'private-plan-content', status: 'in_progress', priority: 'medium' }] },
+    { sessionUpdate: 'plan', entries: [] },
+  ] });
+  const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+  const out: OutgoingMessage[] = [];
+  try {
+    await backend.query({ prompt: 'private-prompt', cwd: '/repo' }, m => out.push(m));
+    const trace = log.mock.calls.filter(call => call[1] === COPILOT_PLAN_LOG_TAG);
+    expect(trace).toContainEqual(['debug', COPILOT_PLAN_LOG_TAG, 'ACP notification', {
+      sessionId: 'mock-session', updateType: 'plan', entryCount: 1,
+    }]);
+    expect(trace).toContainEqual(['debug', COPILOT_PLAN_LOG_TAG, 'plan output', {
+      sessionId: 'mock-session', contentLength: 0,
+    }]);
+    expect(trace.filter(call => call[2] === 'plan output')).toHaveLength(2);
+    expect(JSON.stringify(trace)).not.toContain('private-');
+    expect(out).toContainEqual({ type: 'plan', content: '- [~] private-plan-content' });
+    expect(out).toContainEqual({ type: 'plan', content: '' });
+  } finally { backend.dispose(); log.mockRestore(); }
+});
+
+it('marks a no-plan prompt interval and traces tool metadata without tool payloads', async () => {
+  const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+  const mock = createMockAcpAgent({ updatesOnPrompt: [
+    { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'private-sql-title', kind: 'other', status: 'completed', rawInput: { query: 'private-sql-query' } },
+  ] });
+  const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+  try {
+    await backend.query({ prompt: 'private-prompt', cwd: '/repo' }, () => {});
+    const trace = log.mock.calls.filter(call => call[1] === COPILOT_PLAN_LOG_TAG);
+    expect(trace.map(call => call[2])).toEqual(['prompt begin', 'ACP notification', 'prompt settled']);
+    expect(trace[1][3]).toEqual({ sessionId: 'mock-session', updateType: 'tool_call' });
+    expect(trace[2][3]).toEqual({ sessionId: 'mock-session', stopReason: 'end_turn' });
+    expect(JSON.stringify(trace)).not.toContain('private-');
+  } finally { backend.dispose(); log.mockRestore(); }
+});
 
 it('applies common reply requirements to ACP prompts and leaves native slashes intact', async () => {
   const prompts: any[] = [];
