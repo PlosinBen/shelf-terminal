@@ -704,6 +704,53 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('fold (tool_use)', () => {
+    test('message spacing settings save decimals without a maximum and cancel drafts', async ({ shelfApp: { page, userDataDir } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'subagent:spacing settings');
+      const list = page.locator('.agent-messages:visible');
+      const outer = list.locator(':scope > .agent-msg-fold').first();
+      await expect(outer).toBeVisible();
+      await outer.locator('.fold-header').first().click();
+      const nested = list.locator('.agent-subagent-nested');
+      await expect(nested).toBeVisible();
+      await expect(list).toHaveCSS('row-gap', '2px');
+      const openSettings = async () => {
+        await page.keyboard.press(`${modifier}+,`);
+        await page.getByRole('button', { name: 'Agent', exact: true }).click();
+      };
+      const input = page.getByLabel('Message spacing (px)');
+      const save = page.getByRole('button', { name: 'Save', exact: true });
+      await openSettings();
+      await expect(input).toHaveValue('2');
+      await input.fill('3.5');
+      await expect(list).toHaveCSS('row-gap', '2px');
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await openSettings();
+      await expect(input).toHaveValue('2');
+      await input.fill('-1');
+      await expect(save).toBeDisabled();
+      await input.fill('');
+      await expect(save).toBeDisabled();
+      await input.fill('32.5');
+      await expect(save).toBeEnabled();
+      await save.click();
+      await expect(list).toHaveCSS('row-gap', '32.5px');
+      await expect(nested).toHaveCSS('row-gap', '32.5px');
+      const persistedGap = () => JSON.parse(fs.readFileSync(path.join(userDataDir, 'settings.json'), 'utf8')).agentMessageGap;
+      await expect.poll(persistedGap).toBe(32.5);
+      await openSettings();
+      await expect(input).toHaveValue('32.5');
+      await input.fill('0');
+      await save.click();
+      await expect.poll(persistedGap).toBe(0);
+      await expect(page.locator('.agent-messages:visible')).toHaveCSS('row-gap', '0px');
+      await page.reload();
+      await expect(page.locator('.app')).toBeVisible();
+      await openSettings();
+      await expect(input).toHaveValue('0');
+    });
+
     test('message spacing comes only from the list gap with compact clickable headers', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);

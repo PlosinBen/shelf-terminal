@@ -391,6 +391,8 @@ export interface AppSettings {
    *  auto-set false when the listener stops on a fatal/conflict error. */
   pmActive?: boolean;
   agentDisplay?: Partial<Record<AgentDisplayKey, AgentDisplayMode>>;
+  /** Space between agent messages in CSS pixels, including nested messages. */
+  agentMessageGap?: number;
   /** Max UI messages kept in memory per agent tab. Controls render perf
    *  (and indirectly React reconciliation cost). IDB no longer has a
    *  separate cap — history is unbounded on disk and we load only the

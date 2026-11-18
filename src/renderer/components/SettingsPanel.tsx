@@ -106,7 +106,11 @@ export function SettingsPanel() {
     return () => clearTimeout(handle);
   }, [settingsVisible, pmDynamic, pmBaseURL, refreshModelList]);
 
+  const validMessageGap = draft.agentMessageGap === undefined
+    || (Number.isFinite(draft.agentMessageGap) && draft.agentMessageGap >= 0);
+
   const handleSave = async () => {
+    if (!validMessageGap) return;
     if (draft.defaultLocalPath) {
       const result = await window.shelfApi.connector.listDir({ type: 'local' }, draft.defaultLocalPath);
       if (result.error) {
@@ -201,7 +205,7 @@ export function SettingsPanel() {
         </div>
         <div className="project-edit-footer">
           <button className="conn-btn conn-btn-cancel" onClick={handleCancel}>Cancel</button>
-          <button className="conn-btn conn-btn-next" onClick={handleSave}>Save</button>
+          <button className="conn-btn conn-btn-next" onClick={handleSave} disabled={!validMessageGap}>Save</button>
         </div>
       </div>
     </div>

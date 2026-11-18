@@ -269,4 +269,6 @@ Telegram 顯示 Telegram，Agent 顯示 From 加發送時 displayName；一般 A
 
 ## agent-ui#14 — 訊息外距由列表 gap 統一控制 · [Decision]
 
-主對話與巢狀子代理列表共用 `--agent-message-gap`；訊息本身不設 margin，避免卡片外距與列表 gap 疊加。一般訊息保留少量上下 padding，Command 標題保留點擊內距；使用者泡泡、Markdown 與展開內容保留各自內容排版。Gap 表示訊息邊界間距，不代表文字行之間的總距離。目前為固定樣式，尚未提供使用者設定。
+主對話與巢狀子代理列表共用 `--agent-message-gap`；訊息本身不設 margin，避免卡片外距與列表 gap 疊加。一般訊息保留少量上下 padding，Command 標題保留點擊內距；使用者泡泡、Markdown 與展開內容保留各自內容排版。Gap 表示訊息邊界間距，不代表文字行之間的總距離。
+
+Settings → Agent → Display 的 Message spacing (px) 保存為全域 `agentMessageGap`，預設 2px；接受非負有限數值，允許小數且不設上限。沿用 Save／Cancel 草稿流程，Save 後套用到所有 Agent 列表，不涉及 provider 設定。改間距時只在原本跟隨底部的列表補捲到底，避免將閱讀歷史的使用者拉回最新訊息。

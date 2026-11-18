@@ -6,6 +6,7 @@ import { buildMessageTimeline, useAgentTab } from '../../agentTabStore';
 import { emitAgent } from '../../events';
 import { useStore } from '../../store';
 import { nextForceFollow } from './scroll-follow';
+import { DEFAULT_AGENT_MESSAGE_GAP } from '@shared/defaults';
 
 interface Props {
   tabId: string;
@@ -33,6 +34,7 @@ export function MessageList({ tabId, visible }: Props) {
   const pendingSends = tab?.pendingSends ?? [];
   const initStatus = tab?.initStatus ?? 'starting';
   const agentDisplay = settings.agentDisplay ?? {};
+  const messageGap = settings.agentMessageGap ?? DEFAULT_AGENT_MESSAGE_GAP;
 
   const timeline = useMemo(() => buildMessageTimeline(messages), [messages]);
 
@@ -108,15 +110,14 @@ export function MessageList({ tabId, visible }: Props) {
     // pendingSends (queued chip below the timeline).
   }, [messages, isExecutionActive, pendingSends, scrollToBottom]);
 
-  // When tab becomes visible again, catch up because the hidden list had no
-  // usable scroll geometry while auto-follow effects were running.
+  // Catch up when becoming visible or changing spacing, honoring reading intent.
   useEffect(() => {
     if (!visible) return;
     if (!followBottomRef.current) return;
     requestAnimationFrame(() => {
       scrollToBottom('auto');
     });
-  }, [visible, scrollToBottom]);
+  }, [visible, messageGap, scrollToBottom]);
 
   const hasVisibleStreaming = messages.some((m) => {
     if (m.type === 'reply' && m.streaming) return true;
@@ -131,7 +132,8 @@ export function MessageList({ tabId, visible }: Props) {
 
   return (
     <AgentDisplayContext.Provider value={agentDisplay}>
-      <div className="agent-messages" ref={listRef}>
+      <div className="agent-messages" ref={listRef}
+        style={{ '--agent-message-gap': `${messageGap}px` } as React.CSSProperties}>
         {/* 'starting' has no in-list pane — ConnectionOverlay covers the whole
             pane with a spinner + phase text (see ConnectionOverlay). */}
         {initStatus === 'ready' && messages.length === 0 && !isExecutionActive && (

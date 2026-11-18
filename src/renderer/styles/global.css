@@ -3105,7 +3105,6 @@ button {
 /* ── Agent Messages ── */
 
 .agent-messages {
-  --agent-message-gap: 2px;
   flex: 1;
   overflow-y: auto;
   padding: 8px 8px 8px 16px;

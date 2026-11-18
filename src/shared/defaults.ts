@@ -20,7 +20,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingConfig = {
   quickNote: 'mod+n',
 };
 
+export const DEFAULT_AGENT_MESSAGE_GAP = 2;
+
 export const DEFAULT_SETTINGS: AppSettings = {
+  agentMessageGap: DEFAULT_AGENT_MESSAGE_GAP,
   fontSize: 14,
   fontFamily: 'Menlo, Monaco, "Courier New", monospace',
   themeName: 'catppuccin-mocha',

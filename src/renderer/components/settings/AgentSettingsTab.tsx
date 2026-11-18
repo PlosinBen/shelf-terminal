@@ -1,4 +1,5 @@
 import React from 'react';
+import { DEFAULT_AGENT_MESSAGE_GAP } from '@shared/defaults';
 import type { AppSettings, AgentDisplayMode } from '@shared/types';
 import { AGENT_DISPLAY_KEYS, DEFAULT_AGENT_DISPLAY } from '@shared/types';
 
@@ -57,6 +58,19 @@ export function AgentSettingsTab({ draft, updateDraft }: Props) {
 
       <div className="settings-divider" />
       <div className="settings-section-title">Display</div>
+      <div className="settings-group">
+        <label className="settings-label" htmlFor="agent-message-gap">Message spacing (px)</label>
+        <input
+          id="agent-message-gap"
+          className="settings-input"
+          type="number"
+          min={0}
+          step="any"
+          value={Number.isNaN(draft.agentMessageGap) ? '' : draft.agentMessageGap ?? DEFAULT_AGENT_MESSAGE_GAP}
+          onChange={(e) => updateDraft({ agentMessageGap: e.target.valueAsNumber })}
+        />
+      </div>
+      <div className="settings-sub-hint">Space between messages, including nested messages. Enter a finite number of 0 or more.</div>
       {AGENT_DISPLAY_KEYS.map(({ key, label, hint }) => (
         <React.Fragment key={key}>
           <div className="settings-group">
