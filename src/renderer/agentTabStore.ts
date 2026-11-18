@@ -951,8 +951,17 @@ export function setStatus(tabId: string, partial: StatusPartial) {
   // the IPC binder in PR 3 will call both based on status.state.
 }
 
+export const AGENT_PLAN_LOG_TAG = 'agent-plan';
+
 export function setPlan(tabId: string, content: string) {
+  const details = `tab=${formatTabLogId(tabId)} contentLength=${content.length}`;
+  debugLog(AGENT_PLAN_LOG_TAG, `received ${details}`);
+  if (!tabs.has(tabId)) {
+    debugLog(AGENT_PLAN_LOG_TAG, `dropped: uninitialized ${details}`);
+    return;
+  }
   update(tabId, (prev) => ({ ...prev, currentPlan: content }));
+  debugLog(AGENT_PLAN_LOG_TAG, `applied ${details}`);
 }
 
 /**

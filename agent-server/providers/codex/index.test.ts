@@ -8,7 +8,7 @@ import { CODEX_PROVIDER } from '@shared/agent-providers';
 import { CODEX_PLAN_UPDATED } from './app-server-translate';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import { CODEX_AUTH_DISPLAY_NAME } from '../codex-shared/auth';
-import { createCodexBackend } from './index';
+import { CODEX_PLAN_LOG_TAG, createCodexBackend } from './index';
 import { createSendQueue } from '../../send-queue';
 import { createSessionConfigControl } from '../../session-config-control';
 import type { ConfigControlUpdate } from '@shared/agent-config-control';
@@ -273,6 +273,30 @@ describe('Codex official app-server backend lifecycle', () => {
         { type: 'plan', content: '- [x] Inspect\n- [~] Verify' },
         { type: 'plan', content: '' },
       ]);
+    } finally { backend.dispose(); }
+  });
+
+  it('traces plan receipt, output, rejection and no-sink drops without task content', async () => {
+    const payload = { threadId: 'thread-1', turnId: 'turn-1', plan: [{ step: 'private-task', status: 'pending' }] };
+    const app = new FakeAppServer({ 'turn/start': () => {
+      app.fire(CODEX_PLAN_UPDATED, payload);
+      app.fire(CODEX_PLAN_UPDATED, { ...payload, plan: [] });
+      app.fire(CODEX_PLAN_UPDATED, { ...payload, plan: null });
+      app.fire('turn/completed', turnCompleted('turn-1'));
+      return { turn: { id: 'turn-1' } };
+    } });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    try {
+      await backend.query({ prompt: 'test', cwd: '/repo' }, () => {});
+      app.fire(CODEX_PLAN_UPDATED, payload);
+      const logs = serverLogs.filter(log => log.tag === CODEX_PLAN_LOG_TAG);
+      expect(logs.filter(log => log.msg.startsWith('received '))).toHaveLength(4);
+      expect(logs.filter(log => log.msg.startsWith('output '))).toHaveLength(2);
+      expect(logs.some(log => log.msg.includes('"contentLength":0'))).toBe(true);
+      expect(logs.some(log => log.msg.startsWith('rejected '))).toBe(true);
+      expect(logs.some(log => log.msg.startsWith('dropped: no output sink '))).toBe(true);
+      expect(logs.every(log => log.msg.includes('"threadId":"thread-1"') && log.msg.includes('"turnId":"turn-1"'))).toBe(true);
+      expect(JSON.stringify(logs)).not.toContain('private-task');
     } finally { backend.dispose(); }
   });
 

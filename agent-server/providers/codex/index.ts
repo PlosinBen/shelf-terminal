@@ -66,6 +66,7 @@ const CODEX_INTERRUPT_GRACE_MS = 1_000;
 const CODEX_TURN_COMPLETION_LOG_LIMIT = 2_000;
 const CODEX_RATE_LIMIT_LOG_LIMIT = 2_000;
 const CODEX_RATE_LIMIT_BUCKET_LIMIT = 20;
+export const CODEX_PLAN_LOG_TAG = 'codex-plan';
 const HTTP_TOO_MANY_REQUESTS = 429;
 const CODEX_TURN_STATUS = {
   completed: 'completed',
@@ -170,6 +171,13 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     });
     const forward = (method: string) => {
       client.onNotification(method, (params) => {
+        const planPayload = method === CODEX_PLAN_UPDATED ? asRecord(params) : null;
+        const planTrace = method === CODEX_PLAN_UPDATED ? {
+          threadId: stringValue(planPayload?.threadId),
+          turnId: stringValue(planPayload?.turnId),
+          entryCount: Array.isArray(planPayload?.plan) ? planPayload.plan.length : null,
+        } : null;
+        if (planTrace) serverLog('debug', CODEX_PLAN_LOG_TAG, 'received', planTrace);
         if (method === 'turn/started') {
           activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
           commandMetadataByItemId.clear();
@@ -181,7 +189,10 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           return;
         }
         if (method === 'thread/tokenUsage/updated') logTokenUsageUpdate(params);
-        if (!activeSend) return;
+        if (!activeSend) {
+          if (planTrace) serverLog('debug', CODEX_PLAN_LOG_TAG, 'dropped: no output sink', planTrace);
+          return;
+        }
         if (method === 'item/commandExecution/outputDelta') {
           const message = translateCommandOutputDelta(params);
           if (message) activeSend(message);
@@ -197,10 +208,16 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
           ? carryAppServerItemState(params)
           : params;
         const messages = translateCodexAppServerNotification(method, translatedParams);
+        if (planTrace && messages.length === 0) serverLog('debug', CODEX_PLAN_LOG_TAG, 'rejected', planTrace);
         if (method === 'item/started' || method === 'item/updated' || method === 'item/completed') {
           logReasoningNotification(method, translatedParams, messages);
         }
-        for (const message of messages) activeSend(message);
+        for (const message of messages) {
+          activeSend(message);
+          if (planTrace && message.type === 'plan') {
+            serverLog('debug', CODEX_PLAN_LOG_TAG, 'output', { ...planTrace, contentLength: message.content.length });
+          }
+        }
       });
     };
     for (const method of [

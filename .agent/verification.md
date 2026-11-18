@@ -59,6 +59,12 @@ title: Shelf — 驗證能力與執行入口
 
 以新的 Copilot 對話要求建立兩項原生待辦、完成其中一項，並保留另一項未完成；對照同一 session 的通知與輸出。收到 plan 卻沒有 plan output 時，檢查 hydration／output sink 路由；有 plan output 但沒有 UI 時，再追 main IPC／renderer。只有 tool_call 不能證明待辦已變更，須用該 session 的原生紀錄確認。沒有 plan 通知僅能支持已捕捉區間的觀察，不能推論所有 Copilot 版本均不支援。診斷完成後可恢復原 log level。
 
+### Codex 與共用 renderer plan 診斷
+
+Debug level 的 `codex-plan` tag 記錄 `turn/plan/updated` 的 `received`、`output`、`rejected` 或 `dropped: no output sink`，帶 threadId、turnId、entryCount；成功輸出另帶 contentLength。Malformed snapshot 另有 `codex-app-server` warning。內容長度 0 表示清空；這些紀錄不包含待辦文字。`output` 表示已呼叫 provider 輸出接收端，不代表 UI 已顯示。
+
+Renderer 共用 `setPlan` 透過 `debugLog` 記錄 `agent-plan` tag（main 以 Info level 落檔）：`received`、`applied` 或 `dropped: uninitialized`，帶完整 tab ID 與 contentLength，適用所有 provider。`applied` 證明 store 已套用，不證明 DOM 可見。以 main 的 session/tab 對應與既有 `wire-rx type=plan` 紀錄串起前後兩端；不同 turn 可能有相同項目數／長度，不可只靠長度認定同一事件。
+
 ## 清理與證據保留
 
 - 一般 fixture 在測試結束關閉自己啟動的 Electron、清理固定測試目錄並刪除該次 userData。需要 log 或持久化檔案時，必須在 teardown 前保留到該次 artifact 位置；不能等結束才假設暫存資料仍在。

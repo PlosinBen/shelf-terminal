@@ -5,6 +5,9 @@ import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input
 import { SHELF_MCP_STATE, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AgentMsg } from './components/AgentMessage';
+import * as diagnostics from './debugLog';
+import { bindAgentStoreSubscriptions } from './agentTabSubscriptions';
+import { emitAgent } from './events';
 
 // Mock the IDB storage module — we don't want real IndexedDB calls,
 // and we need to control load/save timing for race tests.
@@ -30,6 +33,7 @@ import {
   setExecutionActive,
   setStatus,
   setPlan,
+  AGENT_PLAN_LOG_TAG,
   applyTaskEvent,
   removeBackgroundTask,
   setCapabilities,
@@ -925,6 +929,24 @@ describe('agentTabStore — decisions / auth / init', () => {
     finishLogin(TAB, { provider: 'copilot', ok: false, error: 'copilot login exited with code 1' });
     expect(__getTabForTests(TAB)!.authRequired?.provider).toBe('copilot');
     expect(__getTabForTests(TAB)!.authError).toBe('copilot login exited with code 1');
+  });
+
+  it('traces plan receipt and application or missing-tab drops without content', () => {
+    const log = vi.spyOn(diagnostics, 'debugLog').mockImplementation(() => {});
+    const unbind = bindAgentStoreSubscriptions();
+    try {
+      emitAgent('agent:onPlan', { tabId: TAB, content: 'private-task' });
+      expect(__getTabForTests(TAB)!.currentPlan).toBe('private-task');
+      emitAgent('agent:onPlan', { tabId: TAB, content: '' });
+      expect(__getTabForTests(TAB)!.currentPlan).toBe('');
+      emitAgent('agent:onPlan', { tabId: 'missing-tab', content: 'private-task' });
+      const trace = log.mock.calls.filter(call => call[0] === AGENT_PLAN_LOG_TAG);
+      expect(trace.filter(call => call[1].startsWith('received '))).toHaveLength(3);
+      expect(trace.filter(call => call[1].startsWith('applied '))).toHaveLength(2);
+      expect(trace.some(call => call[1].includes('contentLength=0'))).toBe(true);
+      expect(trace.some(call => call[1].includes('dropped: uninitialized tab=missing-tab'))).toBe(true);
+      expect(JSON.stringify(trace)).not.toContain('private-task');
+    } finally { unbind(); log.mockRestore(); }
   });
 
   it('setPlan / setActual*', () => {
