@@ -87,7 +87,7 @@ Type-specific connector helpers are surfaced as their own namespaces:
 | `reconcile(projectId)` | invoke `worktree:reconcile` → `WorktreeScanResult` from `src/shared/worktree.ts`: `applied` with canonical projects, `skipped` for confirmed non-Git/no children, or `stale`; scan/persistence failures reject and preserve the last committed collection |
 | `lifecycle(projectId, active)` | invoke `worktree:lifecycle`; brackets a main/child lifecycle transaction, invalidates concurrent scans, rejects overlapping lifecycle starts |
 | `source(projectId)` | invoke `worktree:source` → `{ commit, branch: string \| null, identity }`; rejects unavailable/non-child projects and checkout identity mismatches |
-| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[], agent?: AgentProvider }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
+| `onProposeCreate(cb(payload))` | recv `worktree:propose-create` → `{ projectId, branch?, notePaths?: string[], agent?: AgentProvider, sourceAgentSessionId?: string }`; renderer focuses `projectId`, then opens the New Worktree dialog only |
 | `onProposeFinish(cb(payload))` | recv `worktree:propose-finish` → `{ projectId }`; renderer focuses `projectId`, then opens the Finish gate only |
 
 Renderer-local `worktree-rescan` carries a project id to the central coordinator; it shares the Connect scan path.

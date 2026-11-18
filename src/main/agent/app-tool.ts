@@ -353,7 +353,12 @@ const REGISTRY: Record<string, AppToolDef> = {
       if (!win || win.isDestroyed()) throw new Error('cannot open New Worktree dialog: no application window');
       const branch = typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined;
       const notePaths = await resolveProposedNotePaths(projectId, normalizeProposedNotePaths(args));
-      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths, ...(agent ? { agent } : {}) });
+      const sourceAgentSessionId = ctx.agentViewId;
+      if (sourceAgentSessionId && !project.agentViews?.[sourceAgentSessionId]) {
+        throw new Error(`Worktree proposal source Agent View not found: ${sourceAgentSessionId}`);
+      }
+      win.webContents.send(IPC.WORKTREE_PROPOSE_CREATE, { projectId, ...(branch ? { branch } : {}), notePaths, ...(agent ? { agent } : {}),
+        ...(sourceAgentSessionId ? { sourceAgentSessionId } : {}) });
       return {
         opened: true,
         ...(branch ? { branch } : {}),

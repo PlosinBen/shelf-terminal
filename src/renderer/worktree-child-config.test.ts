@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildWorktreeChildConfig } from './worktree-child-config';
+import { resolveWorktreeAgentSource } from '@shared/worktree-child-config';
 import { CLAUDE_PROVIDER, CODEX_PROVIDER } from '@shared/agent-providers';
 import type { Project } from '@shared/projects';
 
@@ -31,6 +32,23 @@ const parent: Project = {
  * lifecycle context, and shelf-worktree-handoff skill together.
  */
 describe('buildWorktreeChildConfig', () => {
+  it('selects a matching caller/active View, otherwise only an unambiguous matching source', () => {
+    const withViews = { ...parent, agentViews: {
+      a: { provider: CODEX_PROVIDER, prefs: { nativePermission: ':workspace' } },
+      b: { provider: CODEX_PROVIDER, prefs: { nativePermission: ':full-access' } },
+      c: { provider: CLAUDE_PROVIDER, prefs: { model: 'opus' } },
+    } };
+    expect(resolveWorktreeAgentSource(withViews, CODEX_PROVIDER, 'b')).toBe('b');
+    expect(resolveWorktreeAgentSource(withViews, CODEX_PROVIDER)).toBeUndefined();
+    expect(resolveWorktreeAgentSource(withViews, CLAUDE_PROVIDER, 'b')).toBe('c');
+    expect(resolveWorktreeAgentSource(parent, CODEX_PROVIDER)).toBeUndefined();
+    const child = buildWorktreeChildConfig(withViews, { cwd: '/child', worktreeBranch: 'child',
+      startupAgentProvider: CODEX_PROVIDER, sourceAgentSessionId: 'b' });
+    expect(child.worktreeAgentSourceSessionId).toBe('b');
+    expect(child).not.toHaveProperty('agentViews');
+    expect(() => buildWorktreeChildConfig(withViews, { cwd: '/child', worktreeBranch: 'child',
+      startupAgentProvider: CLAUDE_PROVIDER, sourceAgentSessionId: 'b' })).toThrow(/source/i);
+  });
   const child = buildWorktreeChildConfig(parent, {
     cwd: '/repo-feature', worktreeBranch: 'feature', baseBranch: 'main',
   });

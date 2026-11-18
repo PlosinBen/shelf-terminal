@@ -71,7 +71,7 @@ export const PROPOSE_WORKTREE_CREATE_DESC =
   + 'and agent provider key. This tool creates nothing. The user reviews and may override the branch, selected notes, Agent view '
   + 'and Terminal view before pressing Create. Agent defaults to none and Terminal defaults to enabled; at least one initial view '
   + 'is required. On confirmation Shelf creates the Git worktree and child project, migrates selected notes, and connects the child. '
-  + 'Startup views follow the final selections; Agent identity and preferences are fresh. Other project setup is inherited. '
+  + 'Startup views follow the final selections with fresh Agent identity. Same-provider Agent preferences are copied from the selected parent View; without a matching provider, defaults apply. Other project setup is inherited. '
   + 'Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note '
   + 'filename/path), notes (optional feature-note filenames/paths), agent (optional registered provider key, not a model or session; '
   + 'invalid or unavailable keys are rejected).';

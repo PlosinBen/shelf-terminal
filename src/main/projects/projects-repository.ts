@@ -1,4 +1,4 @@
-import { buildWorktreeChildConfig } from '@shared/worktree-child-config';
+import { buildWorktreeChildConfig, WORKTREE_AGENT_SOURCE_INVALID } from '@shared/worktree-child-config';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
 import { sameProjectTarget } from '@shared/project-target';
@@ -109,7 +109,7 @@ function readyCollection(input: readonly Project[], operation: 'load' | 'add' | 
   return deepFreeze(groupedOrder(projects));
 }
 
-function createProject(id: ProjectId, input: ProjectCreateInput): Project {
+function createProject(id: ProjectId, input: ProjectCreateInput, parent?: Project): Project {
   if (!id) throw new ProjectRepositoryError('add', 'generated project id must not be empty');
   if (typeof input.name !== 'string' || typeof input.cwd !== 'string') {
     throw new ProjectRepositoryError('add', 'project name and cwd must be strings');
@@ -125,6 +125,18 @@ function createProject(id: ProjectId, input: ProjectCreateInput): Project {
     throw new ProjectRepositoryError('add', 'project defaultTabs must not be empty');
   }
 
+  const agents = materializeAgentDefaults(defaultTabs, {});
+  if (input.worktreeAgentSourceSessionId !== undefined) {
+    const sourceId = input.worktreeAgentSourceSessionId;
+    const source = typeof sourceId === 'string' && parent && parent.id === input.parentProjectId
+      ? parent.agentViews[sourceId] : undefined;
+    const targets = Object.entries(agents.agentViews);
+    if (!source || targets.length !== 1 || targets[0][1].provider !== source.provider) {
+      throw new ProjectRepositoryError('add', WORKTREE_AGENT_SOURCE_INVALID);
+    }
+    agents.agentViews[targets[0][0]] = { provider: source.provider, prefs: { ...source.prefs } };
+  }
+
   return detachedProject({
     id,
     name: input.name,
@@ -133,7 +145,7 @@ function createProject(id: ProjectId, input: ProjectCreateInput): Project {
     maxTabs: input.maxTabs,
     initScript: input.initScript ?? null,
     envPlain: input.envPlain ?? {},
-    ...materializeAgentDefaults(defaultTabs, {}),
+    ...agents,
     quickCommands: input.quickCommands ?? [],
     featureNoteDir: input.featureNoteDir ?? null,
     parentProjectId: input.parentProjectId ?? null,
@@ -264,7 +276,8 @@ export function createMainProjectsRepository(
     },
 
     async add(input) {
-      const project = createProject(createProjectId(), input);
+      const parent = projects.find(project => project.id === input.parentProjectId);
+      const project = createProject(createProjectId(), input, parent);
       if (projects.some(({ id }) => id === project.id) || pendingCleanup.has(project.id)) {
         throw new ProjectRepositoryError('add', `generated duplicate project id ${project.id}`);
       }

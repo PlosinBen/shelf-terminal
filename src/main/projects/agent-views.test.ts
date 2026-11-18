@@ -4,6 +4,38 @@ import { PROJECT_MUTATION as M } from '@shared/project-mutations';
 import { formatProjectsDocument, loadProjectsDocument } from './project-config-codec';
 import { applyProjectMutation } from './project-mutation';
 
+it('creates a fresh worktree Agent with a same-provider preference snapshot', async () => {
+  let id = 0;
+  const result = createMainProjectsRepository({ load: () => ({ ok: true, value: [] }), save: async () => ({ ok: true }) }, () => `p${++id}`, { cleanup: async () => {} });
+  if (!result.ok) throw new Error('fixture');
+  const repo = result.repository;
+  const parent = await repo.add({ name: 'parent', cwd: '/parent', maxTabs: 5, connection: { type: 'local' },
+    defaultTabs: [{ kind: 'agent', provider: 'codex', name: 'Codex' }] });
+  const source = Object.keys(parent.agentViews)[0];
+  const prefs = { model: 'custom-model', effort: 'high', nativePermission: ':full-access', nativeApproval: 'never', nativeMode: 'default' };
+  await repo.mutate(parent.id, { kind: M.AGENT_REPORT, sessionId: source, report: { confirmedPrefs: prefs } });
+  const child = await repo.add({ name: 'child', cwd: '/child', maxTabs: 5, connection: { type: 'local' },
+    parentProjectId: parent.id, worktreeAgentSourceSessionId: source,
+    defaultTabs: [{ kind: 'agent', provider: 'codex', name: 'Codex' }] });
+  const target = Object.keys(child.agentViews)[0];
+  expect(target).not.toBe(source);
+  expect(child.agentViews[target]).toEqual({ provider: 'codex', prefs });
+  expect(child).not.toHaveProperty('worktreeAgentSourceSessionId');
+  await repo.mutate(parent.id, { kind: M.AGENT_REPORT, sessionId: source, report: { confirmedPrefs: { effort: 'low' } } });
+  expect(repo.get(child.id)!.agentViews[target].prefs).toEqual(prefs);
+  await repo.mutate(child.id, { kind: M.AGENT_REPORT, sessionId: target, report: { confirmedPrefs: { model: 'child-model' } } });
+  expect(repo.get(parent.id)!.agentViews[source].prefs.model).toBe('custom-model');
+  for (const input of [
+    { parentProjectId: parent.id, worktreeAgentSourceSessionId: 'missing', provider: 'codex' },
+    { parentProjectId: parent.id, worktreeAgentSourceSessionId: source, provider: 'claude' },
+    { parentProjectId: undefined, worktreeAgentSourceSessionId: source, provider: 'codex' },
+  ]) {
+    await expect(repo.add({ name: 'invalid', cwd: '/invalid', maxTabs: 5, connection: { type: 'local' },
+      parentProjectId: input.parentProjectId, worktreeAgentSourceSessionId: input.worktreeAgentSourceSessionId,
+      defaultTabs: [{ kind: 'agent', provider: input.provider, name: 'Agent' }] })).rejects.toThrow(/source/i);
+  }
+});
+
 it('forgets unused metadata idempotently but refuses to forget a Default session', async () => {
   const result = createMainProjectsRepository({ load: () => ({ ok: true, value: [] }), save: async () => ({ ok: true }) }, () => 'p', { cleanup: async () => {} });
   if (!result.ok) throw new Error('fixture');

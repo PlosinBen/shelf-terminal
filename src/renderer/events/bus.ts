@@ -38,7 +38,7 @@ export const Events = {
   UPDATE_PROJECT: 'update-project', // (projectId, ProjectMutation, onSettled?)
   REORDER_PROJECTS: 'reorder-projects', // (sourceId, targetId)
   TOGGLE_SPLIT: 'toggle-split',     // (projectId)
-  CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: WorktreeCreatePrefill { branch?, notePaths?, agent? })
+  CREATE_WORKTREE: 'create-worktree', // (projectId, prefill?: WorktreeCreatePrefill { branch?, notePaths?, agent?, sourceAgentSessionId? })
   WORKTREE_RESCAN: 'worktree-rescan',
   WORKTREE_CLOSE: 'worktree-close',   // (projectId, kind: 'finish' | 'abandon')
   WORKTREE_FINISH_COMPLETED: 'worktree-finish-completed', // ({ subProjectId, parentProjectId, sourceLabel, targetBranch, worktreeRemoved })

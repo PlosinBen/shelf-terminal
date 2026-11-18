@@ -38,6 +38,8 @@ export interface Project {
 }
 
 export interface ProjectCreateInput {
+  /** Create-only source in parentProjectId; main copies prefs into a fresh Agent View. */
+  readonly worktreeAgentSourceSessionId?: string;
   readonly name: string;
   readonly cwd: string;
   readonly connection: ReadonlyDeep<Connection>;

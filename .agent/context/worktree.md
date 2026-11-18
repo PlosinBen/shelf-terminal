@@ -26,13 +26,13 @@ related:
 
 **Do not change casually because:** Moving this check only into the renderer makes an invalid agent call look successful and hides the error from the actor that can correct it.
 
-## worktree#3 — A child starts fresh tabs and Agent preferences  ·  [Decision]
+## worktree#3 — New child sessions copy same-provider preferences  ·  [Decision]
 
-**Decision:** New Worktree offers an independent Agent provider selector (default none) and Terminal checkbox (default enabled). The final selection creates Terminal only, a fresh Agent only, or a fresh Agent followed by Terminal; an empty selection is rejected. It never copies parent startup/runtime tabs, Agent records or preferences. Environment, init script, Quick Commands and feature-note binding still inherit. Existing child settings are not reset.
+**Decision:** New Worktree independently selects an Agent provider (default none) and Terminal (default enabled). Child tabs follow that selection, with fresh Agent identity. A same-provider parent View supplies a creation-time prefs snapshot, including model, effort and permission/approval settings. MCP proposals prefer the trusted caller View; manual creation prefers the parent's active Agent View. If neither matches, a sole matching saved View is selected; multiple matches require an explicit source selection. Without a matching provider, use provider defaults. Main validates the source against the parent and copies only prefs into the new View before persistence and connection. Conversations, restore context and temporary grants are never copied. Parent and child settings evolve independently.
 
-**Reason:** No current requirement justifies copying the parent layout. Fresh tabs avoid ambiguous preference inheritance when several parent Views use the same provider, without introducing a source-View selector.
+**Reason:** A worktree continues the same work in an isolated checkout, so resetting chosen settings creates unexpected behavior and permission failures. Fresh session identity does not require empty preferences. Source selection resolves multiple same-provider Views without guessing or applying one provider's settings to another.
 
-**Do not change casually because:** Provider choices and labels come from the central registry; do not hardcode a separate worktree list, mutate the parent, inherit session ids, or silently rewrite Quick Commands whose named targets become stale.
+**Do not change casually because:** Source identity comes from trusted transport or user selection, never model arguments. Keep provider compatibility validation and fresh identities; do not copy whole Agent records, create live preference links, or make ordinary new-Agent creation inherit settings. Environment, init script, Quick Commands and note binding retain their independent inheritance rules.
 
 ## worktree#4 — Finish is fast-forward-only and recovery rebases the feature  ·  [Decision]
 

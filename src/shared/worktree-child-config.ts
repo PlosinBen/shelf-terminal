@@ -8,6 +8,8 @@ export interface WorktreeStartupOptions {
 }
 
 export interface WorktreeCreatePrefill {
+  /** Trusted MCP caller View; never populated from model arguments. */
+  sourceAgentSessionId?: string;
   branch?: string;
   notePaths?: string[];
   agent?: AgentProvider;
@@ -17,6 +19,14 @@ export interface WorktreeCreateProposal extends WorktreeCreatePrefill {
 }
 
 export const WORKTREE_STARTUP_REQUIRED = 'Select at least one initial view: Agent or Terminal.';
+export const WORKTREE_AGENT_SOURCE_REQUIRED = 'Select the Agent view whose settings should be copied.';
+export const WORKTREE_AGENT_SOURCE_INVALID = 'Invalid worktree Agent preference source';
+
+export function resolveWorktreeAgentSource(parent: Project, provider: AgentProvider, preferredSessionId?: string): string | undefined {
+  const matches = Object.entries(parent.agentViews).filter(([, view]) => view.provider === provider);
+  if (preferredSessionId && matches.some(([id]) => id === preferredSessionId)) return preferredSessionId;
+  return matches.length === 1 ? matches[0][0] : undefined;
+}
 
 export function validateWorktreeAgent(value: unknown, includeInternal: boolean): AgentProvider | undefined {
   if (value === undefined) return undefined;
@@ -43,7 +53,7 @@ export function normalizeWorktreeStartup(value: unknown, includeInternal: boolea
  * Build a worktree sub-project's config by cloning the parent project's SETUP
  * while giving it a FRESH identity. A worktree is the same project on a different
  * branch, so it should develop in the same environment: inherit env, init script,
- * quick commands. Tabs and agent preferences are deliberately fresh.
+ * quick commands. Agent identity is fresh; a selected same-provider View supplies prefs.
  *
  * Deliberately NOT inherited:
  *  - id / cwd / parentProjectId / worktreeBranch / baseBranch — worktree-specific
@@ -58,10 +68,16 @@ export function buildWorktreeChildConfig(
     cwd: string;
     worktreeBranch: string | null;
     baseBranch?: string;
+    sourceAgentSessionId?: string;
   } & WorktreeStartupOptions,
 ): ProjectCreateInput {
   const startup = normalizeWorktreeStartup(opts, true);
+  if (opts.sourceAgentSessionId && (!startup.startupAgentProvider
+    || parent.agentViews[opts.sourceAgentSessionId]?.provider !== startup.startupAgentProvider)) {
+    throw new Error(WORKTREE_AGENT_SOURCE_INVALID);
+  }
   return {
+    ...(opts.sourceAgentSessionId ? { worktreeAgentSourceSessionId: opts.sourceAgentSessionId } : {}),
     // ── inherited setup ──
     name: parent.name,
     connection: parent.connection,
@@ -81,6 +97,6 @@ export function buildWorktreeChildConfig(
     parentProjectId: parent.id,
     worktreeBranch: opts.worktreeBranch,
     baseBranch: opts.baseBranch ?? null,
-    // No parent Agent records or prefs → fresh sessions and provider defaults.
+    // Main materializes a fresh View, then copies only the selected source's prefs.
   };
 }

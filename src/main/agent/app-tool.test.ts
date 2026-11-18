@@ -221,6 +221,17 @@ describe('app-tool dispatcher (worktree proposals)', () => {
     });
   });
 
+  it('passes the trusted caller View to Create instead of a model-supplied source', async () => {
+    getProjects.mockReturnValue([{ id: 'base', name: 'Base', cwd: '/repo', connection: { type: 'local' },
+      agentViews: { caller: { provider: CODEX_PROVIDER, prefs: { nativeApproval: 'never' } } } }]);
+    const result = await handleAppTool('worktree.propose_create', { agent: CODEX_PROVIDER, sourceAgentSessionId: 'spoofed' },
+      { projectId: 'base', agentViewId: 'caller' });
+    expect(result.ok).toBe(true);
+    expect(send).toHaveBeenCalledWith('worktree:propose-create', {
+      projectId: 'base', notePaths: [], agent: CODEX_PROVIDER, sourceAgentSessionId: 'caller',
+    });
+  });
+
   it.each(['unknown', '', null, 42, FAKE_PROVIDER])('rejects invalid or hidden agent %j without opening UI', async (agent) => {
     vi.stubEnv('DEV', false);
     try {

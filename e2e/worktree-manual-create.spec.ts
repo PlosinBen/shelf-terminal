@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { openAgentTab } from './helpers';
+import { FAKE_TEST_ENV } from '../agent-server/providers/fake/test-env';
 
 /**
  * User-initiated worktree create (the #entry pivot) — sidebar "New Worktree" →
@@ -136,6 +137,7 @@ test.describe('user-initiated worktree create', () => {
         ...process.env,
         SHELF_TEST_MODE: '1',
         NODE_ENV: 'test',
+        ...(title.includes('preference inheritance') ? { [FAKE_TEST_ENV.NATIVE_PERMISSIONS]: '1', [FAKE_TEST_ENV.NATIVE_APPROVAL]: '1', LOG_LEVEL: 'info' } : {}),
         ...(forceCreateFailure
           ? {
               SHELF_TEST_GIT_MIGRATE_NOTE_ERROR: 'FULL MIGRATION ERROR\ncopy failed: demo.md',
@@ -316,13 +318,76 @@ test.describe('user-initiated worktree create', () => {
         ...(choice.agent ? [{ name: 'Claude', kind: 'agent', provider: CLAUDE_PROVIDER, sessionId: expect.any(String) }] : []),
         ...(choice.terminal ? [{ name: 'Terminal' }] : []),
       ]);
-      expect(Object.values(child.agentViews)).toEqual(choice.agent ? [{ provider: CLAUDE_PROVIDER, prefs: {} }] : []);
+      expect(Object.values(child.agentViews)).toEqual(choice.agent ? [{ provider: CLAUDE_PROVIDER, prefs: { model: 'parent-model' } }] : []);
       expect(Object.keys(child.agentViews)).not.toContain('parent-startup-session');
       const parent = document.projects.find((project: { id: string }) => project.id === PROJECT_ID);
       expect(parent.defaultTabs).toContainEqual({ name: 'Parent shell', cmd: 'echo parent' });
       expect(parent.agentViews['parent-startup-session'].prefs.model).toBe('parent-model');
     });
   }
+
+  test('preference inheritance requires a source when multiple same-provider Views have no active Agent', async () => {
+    await openAgentTab(page);
+    await openAgentTab(page);
+    await page.locator('[data-config-key="nativePermission"]:visible').click();
+    await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
+    await page.locator('[data-config-key="nativeApproval"]:visible').click();
+    await page.locator('.agent-perm-option:visible', { hasText: 'never' }).click();
+    await expect(page.locator('[data-config-key="nativeApproval"]:visible')).toHaveText('Approval: never');
+    const parent = (await page.evaluate(() => window.shelfApi.project.getAll())).find(p => p.id === PROJECT_ID)!;
+    const source = Object.entries(parent.agentViews).find(([, view]) => view.prefs.nativePermission === 'on')![0];
+    // Active View is preferred even with two candidates.
+    const activeDialog = await openNewWorktreeDialog(page);
+    await activeDialog.locator('.worktree-startup-tabs-override').selectOption(CLAUDE_PROVIDER);
+    await expect(activeDialog.getByLabel('Copy Agent settings from')).toHaveValue(source);
+    await activeDialog.locator('.settings-close').click();
+    // A new terminal has no preference source, so the same candidates are ambiguous.
+    await page.locator('.tab-add').click();
+    await page.locator('.context-menu-item', { hasText: /^Terminal$/ }).click();
+    await expect(page.locator('.tab-bar .tab')).toHaveCount(3);
+    const dialog = await openNewWorktreeDialog(page);
+    await dialog.locator('.worktree-startup-tabs-override').selectOption(CLAUDE_PROVIDER);
+    await dialog.locator('.worktree-input').fill('feature/inherited-prefs');
+    const sourceSelect = dialog.getByLabel('Copy Agent settings from');
+    await expect(sourceSelect).toHaveValue('');
+    await expect(dialog.locator('.conn-btn-next')).toBeDisabled();
+    await sourceSelect.selectOption(source);
+    await dialog.locator('.worktree-startup-terminal').uncheck();
+    await dialog.locator('.conn-btn-next').click();
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-config-key="nativePermission"]:visible')).toHaveText('Allow all: On');
+    await expect(page.locator('[data-config-key="nativeApproval"]:visible')).toHaveText('Approval: never');
+    const projects = await page.evaluate(() => window.shelfApi.project.getAll());
+    const child = projects.find(p => p.parentProjectId === PROJECT_ID)!;
+    expect(Object.keys(child.agentViews)).not.toContain(source);
+    expect(Object.values(child.agentViews)[0].prefs).toEqual(parent.agentViews[source].prefs);
+  });
+
+  test('preference inheritance uses the MCP caller even after switching to another same-provider View', async () => {
+    await openAgentTab(page);
+    await page.locator('[data-config-key="nativePermission"]:visible').click();
+    await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
+    await page.locator('[data-config-key="nativeApproval"]:visible').click();
+    await page.locator('.agent-perm-option:visible', { hasText: 'never' }).click();
+    await expect(page.locator('[data-config-key="nativeApproval"]:visible')).toHaveText('Approval: never');
+    const parent = (await page.evaluate(() => window.shelfApi.project.getAll())).find(p => p.id === PROJECT_ID)!;
+    const caller = Object.entries(parent.agentViews).find(([, view]) => view.prefs.nativePermission === 'on')![0];
+    await openAgentTab(page);
+    // Return to the configured caller, send its proposal, then activate the other Agent.
+    await page.locator('.tab-bar .tab').nth(0).click();
+    const textarea = page.locator('.agent-textarea:visible');
+    await textarea.fill(`delay:1200|worktree_create:feature/caller-prefs demo.md ${CLAUDE_PROVIDER}`);
+    await textarea.press('Enter');
+    await page.locator('.tab-bar .tab').nth(1).click();
+    const dialog = page.locator('.worktree-dialog');
+    await expect(dialog).toBeVisible({ timeout: 8_000 });
+    await expect(dialog.getByLabel('Copy Agent settings from')).toHaveValue(caller);
+    await dialog.locator('.worktree-startup-terminal').uncheck();
+    await dialog.locator('.conn-btn-next').click();
+    await expect(dialog).not.toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-config-key="nativePermission"]:visible')).toHaveText('Allow all: On');
+    await expect(page.locator('[data-config-key="nativeApproval"]:visible')).toHaveText('Approval: never');
+  });
 
   test('empty startup selection blocks Create and Enter, recovers, and resets on reopen', async () => {
     let dialog = await openNewWorktreeDialog(page);

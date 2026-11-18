@@ -5,7 +5,7 @@ import { on, emit, emitAgent, Events } from '../events';
 import { enqueuePendingSend } from '../agentTabStore';
 import { debugLog } from '../debugLog';
 import { buildWorktreeChildConfig } from '../worktree-child-config';
-import { normalizeWorktreeStartup, WORKTREE_STARTUP_REQUIRED, type WorktreeCreatePrefill } from '@shared/worktree-child-config';
+import { normalizeWorktreeStartup, resolveWorktreeAgentSource, WORKTREE_AGENT_SOURCE_REQUIRED, WORKTREE_STARTUP_REQUIRED, type WorktreeCreatePrefill } from '@shared/worktree-child-config';
 import { normalizeWorktreePrefillNotePaths } from '../worktree-prefill';
 import type { AgentProvider, FeatureNoteInfo } from '@shared/types';
 import type { Project } from '@shared/projects';
@@ -70,6 +70,13 @@ export function WorktreeDialog() {
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [startupAgentProvider, setStartupAgentProvider] = useState<AgentProvider | ''>('');
   const [startupTerminal, setStartupTerminal] = useState(true);
+  const [preferredSourceSessionId, setPreferredSourceSessionId] = useState<string>();
+  const [sourceAgentSessionId, setSourceAgentSessionId] = useState<string>();
+  const project = projectId === null ? undefined : projects.find((p) => p.id === projectId);
+  const sources = Object.entries(project?.agentViews ?? {}).filter(([, view]) => view.provider === startupAgentProvider);
+  const sourceError = startupAgentProvider && (sourceAgentSessionId
+    ? !sources.some(([id]) => id === sourceAgentSessionId) : sources.length > 0)
+    ? WORKTREE_AGENT_SOURCE_REQUIRED : null;
   const startupSelectionError = !startupAgentProvider && !startupTerminal ? WORKTREE_STARTUP_REQUIRED : null;
   const inputRef = useRef<HTMLInputElement>(null);
   const requestGenerationRef = useRef(0);
@@ -96,6 +103,10 @@ export function WorktreeDialog() {
       // there's exactly one (the common case: one feature under discussion);
       // otherwise default to none so the user chooses deliberately.
       const proj = projects.find((p) => p.id === targetProjectId);
+      const activeTab = proj?.tabs[proj.activeTabIndex];
+      const preferred = prefill?.sourceAgentSessionId ?? (activeTab?.type === 'agent' ? activeTab.sessionId : undefined);
+      setPreferredSourceSessionId(preferred);
+      setSourceAgentSessionId(proj && prefill?.agent ? resolveWorktreeAgentSource(proj, prefill.agent, preferred) : undefined);
       if (proj) {
         const configuredDir = proj.featureNoteDir;
         setFeatureNoteDir(configuredDir ?? null);
@@ -142,7 +153,7 @@ export function WorktreeDialog() {
 
   const handleCreate = useCallback(async () => {
     const branch = input.trim();
-    if (!branch || projectId === null || creating) return;
+    if (!branch || projectId === null || creating || sourceError) return;
 
     const proj = projects.find((p) => p.id === projectId);
     if (!proj) return;
@@ -235,6 +246,7 @@ export function WorktreeDialog() {
         worktreeBranch: branch,
         baseBranch: result.baseBranch,
         ...startup,
+        sourceAgentSessionId,
       });
       const childProject = await new Promise<Project>((resolve, reject) => {
         emit(Events.ADD_PROJECT, childInput, (settled: { ok: true; project: Project } | { ok: false; error: unknown }) => {
@@ -277,7 +289,7 @@ export function WorktreeDialog() {
       }
     }
 
-  }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider, startupTerminal]);
+  }, [input, projectId, projects, creating, selectedNotes, startupAgentProvider, startupTerminal, sourceAgentSessionId, sourceError]);
 
   const toggleSelectedNote = useCallback((path: string) => {
     setSelectedNotes((current) => {
@@ -299,7 +311,6 @@ export function WorktreeDialog() {
 
   if (!open) return null;
 
-  const project = projectId === null ? undefined : projects.find((p) => p.id === projectId);
   const agentTabId = project?.tabs.find((t) => t.type === 'agent')?.id;
 
   const sendFailureToAgent = () => {
@@ -376,7 +387,12 @@ export function WorktreeDialog() {
             <select
               className="worktree-select worktree-startup-tabs-override"
               value={startupAgentProvider}
-              onChange={(e) => { setStartupAgentProvider(e.target.value as AgentProvider | ''); setError((current) => current === WORKTREE_STARTUP_REQUIRED ? null : current); }}
+              onChange={(e) => {
+                const provider = e.target.value as AgentProvider | '';
+                setStartupAgentProvider(provider);
+                setSourceAgentSessionId(project && provider ? resolveWorktreeAgentSource(project, provider, preferredSourceSessionId) : undefined);
+                setError((current) => current === WORKTREE_STARTUP_REQUIRED ? null : current);
+              }}
               disabled={creating}
             >
               <option value="">None</option>
@@ -385,6 +401,23 @@ export function WorktreeDialog() {
               ))}
             </select>
           </label>
+          {startupAgentProvider && (sources.length > 0 ? (
+            <label className="worktree-note-picker">
+              <span className="worktree-note-picker-label">Copy Agent settings from</span>
+              <select className="worktree-select" aria-label="Copy Agent settings from"
+                value={sourceAgentSessionId ?? ''} disabled={creating}
+                onChange={(e) => setSourceAgentSessionId(e.target.value || undefined)}>
+                <option value="" disabled>Select an Agent view</option>
+                {sources.map(([id, view], index) => {
+                  const label = project?.tabs.find(tab => tab.sessionId === id)?.label
+                    ?? project?.defaultTabs.find(tab => tab.kind === 'agent' && tab.sessionId === id)?.name
+                    ?? startupAgentProvider;
+                  return <option key={id} value={id}>{label}{sources.length > 1 ? ` (${index + 1})` : ''} — {Object.values(view.prefs).join(', ') || 'Provider defaults'}</option>;
+                })}
+              </select>
+            </label>
+          ) : <span className="worktree-note-empty">No matching parent Agent view. Uses provider defaults.</span>)}
+          {sourceError && <pre className="worktree-error-text" role="alert">{sourceError}</pre>}
           <label className="worktree-startup-terminal-row">
             <input
               className="worktree-startup-terminal"
@@ -418,7 +451,7 @@ export function WorktreeDialog() {
           <button className="conn-btn conn-btn-cancel" onClick={() => setOpen(false)}>Cancel</button>
           <button
             className="conn-btn conn-btn-next"
-            disabled={!input.trim() || creating || !!startupSelectionError}
+            disabled={!input.trim() || creating || !!startupSelectionError || !!sourceError}
             onClick={handleCreate}
           >
             {creating ? 'Creating...' : 'Create'}
