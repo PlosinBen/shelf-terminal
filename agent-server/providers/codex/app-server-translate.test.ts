@@ -1,7 +1,33 @@
-import { describe, expect, it } from 'vitest';
-import { summarizeTokenUsageForLog, tokenUsageToContextSegment, translateCodexAppServerNotification } from './app-server-translate';
+import { describe, expect, it, vi } from 'vitest';
+import * as serverLogger from '../../server-logger';
+import { CODEX_PLAN_UPDATED, summarizeTokenUsageForLog, tokenUsageToContextSegment, translateCodexAppServerNotification } from './app-server-translate';
 
 describe('translateCodexAppServerNotification', () => {
+  it('redacts plan steps and treats an empty snapshot as a clear even with explanation', () => {
+    expect(translateCodexAppServerNotification(CODEX_PLAN_UPDATED, {
+      plan: [{ step: 'inspect secret', status: 'pending' }], explanation: 'Updated tasks',
+    }, { redactValues: ['secret'] })).toEqual([{ type: 'plan', content: '- [ ] inspect [REDACTED]' }]);
+    expect(translateCodexAppServerNotification(CODEX_PLAN_UPDATED, {
+      plan: [], explanation: 'Finished',
+    })).toEqual([{ type: 'plan', content: '' }]);
+  });
+
+  it.each([undefined, null, {}, [null], [{ step: 'private-task', status: 'unknown' }], [
+    { step: 'valid', status: 'completed' }, { status: 'pending' },
+  ]])('rejects malformed plan snapshots without emitting partial or empty state: %j', plan => {
+    const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+    try {
+      expect(translateCodexAppServerNotification(CODEX_PLAN_UPDATED, { threadId: 'thread', turnId: 'turn', plan })).toEqual([]);
+      expect(log).toHaveBeenCalledWith('warn', 'codex-app-server', 'Invalid turn plan snapshot', expect.objectContaining({ threadId: 'thread', turnId: 'turn' }));
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-task');
+    } finally { log.mockRestore(); }
+  });
+
+  it('keeps plan-mode text items supported separately from task updates', () => {
+    expect(translateCodexAppServerNotification('item/completed', {
+      item: { id: 'plan-mode-1', type: 'plan', text: 'Proposed approach' },
+    })).toEqual([{ type: 'plan', content: 'Proposed approach' }]);
+  });
   // File Diff settings must govern the whole file, including separated edits.
   // Keep this representative case across provider, wire and UI coverage.
   it('splits multiple files into file diff cards without joining separated hunks', () => {

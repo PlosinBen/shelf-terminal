@@ -2,6 +2,9 @@ import type { OutgoingMessage, StatusSegment } from '../types';
 import { serverLog } from '../../server-logger';
 import { fileChangesToMessages } from './file-changes';
 
+export const CODEX_PLAN_UPDATED = 'turn/plan/updated';
+const PLAN_STATUS_MARKERS = { pending: '[ ]', inProgress: '[~]', completed: '[x]' } as const;
+
 export interface CodexAppServerTranslateOptions {
   redactValues?: string[];
 }
@@ -12,6 +15,8 @@ export function translateCodexAppServerNotification(
   opts: CodexAppServerTranslateOptions = {},
 ): OutgoingMessage[] {
   switch (method) {
+    case CODEX_PLAN_UPDATED:
+      return translatePlanUpdate(params, opts);
     case 'thread/status/changed':
       return translateThreadStatus(params);
     case 'item/agentMessage/delta':
@@ -31,6 +36,29 @@ export function translateCodexAppServerNotification(
     default:
       return [];
   }
+}
+
+function translatePlanUpdate(params: unknown, opts: CodexAppServerTranslateOptions): OutgoingMessage[] {
+  const payload = asRecord(params);
+  const plan = payload?.plan;
+  const lines: string[] = [];
+  if (Array.isArray(plan)) {
+    for (const raw of plan) {
+      const entry = asRecord(raw);
+      const status = entry?.status;
+      if (typeof entry?.step !== 'string' || typeof status !== 'string' || !Object.hasOwn(PLAN_STATUS_MARKERS, status)) break;
+      lines.push(`- ${PLAN_STATUS_MARKERS[status as keyof typeof PLAN_STATUS_MARKERS]} ${entry.step}`);
+    }
+    if (lines.length === plan.length) {
+      return [{ type: 'plan', content: redactText(lines.join('\n'), opts.redactValues) }];
+    }
+  }
+  // Reject the entire malformed snapshot; never silently clear/partially replace a valid plan.
+  serverLog('warn', 'codex-app-server', 'Invalid turn plan snapshot', {
+    threadId: stringValue(payload?.threadId), turnId: stringValue(payload?.turnId),
+    entryCount: Array.isArray(plan) ? plan.length : null,
+  });
+  return [];
 }
 
 export function tokenUsageToContextSegment(raw: unknown): StatusSegment | null {

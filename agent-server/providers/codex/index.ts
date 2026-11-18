@@ -20,7 +20,7 @@ import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/c
 import { buildCodexRuntimeConfig } from './config';
 import { normalizeCodexAccountStatus, redactCodexAccountText, refreshCodexAccountStatus } from './account-status';
 import { spawnCodexAppServerClient, type CodexAppServerNotificationHandler } from './app-server-client';
-import { summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
+import { CODEX_PLAN_UPDATED, summarizeTokenUsageForLog, translateCodexAppServerNotification } from './app-server-translate';
 import { loadProjectedMcpServers, withoutBuiltinShelfMcp, type ParsedMcpConfig } from '../mcp-config';
 import { getSharedShelfMcp } from '../../shelf-mcp';
 import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
@@ -207,6 +207,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       'thread/status/changed',
       'turn/started',
       'turn/completed',
+      CODEX_PLAN_UPDATED,
       'item/started',
       'item/updated',
       'item/completed',

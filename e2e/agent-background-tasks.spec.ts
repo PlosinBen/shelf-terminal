@@ -185,6 +185,21 @@ test.describe('background tasks panel via fake provider', () => {
 });
 
 test.describe('plan/todo vs background tasks — distinct surfaces', () => {
+  test.use({ homeProjectDirectories: false });
+
+  test('plan snapshots replace progress and an empty snapshot hides the panel', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    const panel = page.locator('.agent-plan-panel');
+    await sendAgentPrompt(page, 'plan:- [~] Inspect\n- [ ] Verify');
+    await expect(panel.locator('.agent-plan-body')).toHaveText('- [~] Inspect\n- [ ] Verify');
+    await sendAgentPrompt(page, 'plan:- [x] Inspect\n- [~] Verify');
+    await expect(panel.locator('.agent-plan-body')).toHaveText('- [x] Inspect\n- [~] Verify');
+    await expect(panel).toHaveCount(1);
+    await sendAgentPrompt(page, 'plan:');
+    await expect(panel).toHaveCount(0);
+  });
+
   test('plan-panel renders the todo list independently of the timeline', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await openAgentTab(page);

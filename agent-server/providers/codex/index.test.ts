@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { CODEX_PROVIDER } from '@shared/agent-providers';
+import { CODEX_PLAN_UPDATED } from './app-server-translate';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import { CODEX_AUTH_DISPLAY_NAME } from '../codex-shared/auth';
 import { createCodexBackend } from './index';
@@ -247,6 +248,32 @@ describe('Codex official app-server backend lifecycle', () => {
       tag: 'codex-app-server',
       msg: expect.stringContaining('turn/completed thread=thread-1 turn=turn-1 status=completed durationMs=12'),
     }));
+  });
+
+  it('forwards turn plan notifications as replacement checklists including an empty snapshot', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        app.fire('turn/started', { threadId: 'thread-1', turn: { id: 'turn-1' } });
+        const snapshots = [
+          [{ step: 'Inspect', status: 'inProgress' }, { step: 'Verify', status: 'pending' }],
+          [{ step: 'Inspect', status: 'completed' }, { step: 'Verify', status: 'inProgress' }],
+          [],
+        ];
+        for (const plan of snapshots) app.fire(CODEX_PLAN_UPDATED, { threadId: 'thread-1', turnId: 'turn-1', plan });
+        app.fire('turn/completed', turnCompleted('turn-1'));
+        return { turn: { id: 'turn-1' } };
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: 'work', cwd: '/repo' }, m => out.push(m));
+      expect(out.filter(m => m.type === 'plan')).toEqual([
+        { type: 'plan', content: '- [~] Inspect\n- [ ] Verify' },
+        { type: 'plan', content: '- [x] Inspect\n- [~] Verify' },
+        { type: 'plan', content: '' },
+      ]);
+    } finally { backend.dispose(); }
   });
 
   it('records interrupted turn completion without surfacing it as an execution error', async () => {

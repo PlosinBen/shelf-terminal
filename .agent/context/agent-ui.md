@@ -20,7 +20,7 @@ related:
 
 **各 provider 接法不同**：
 - **Copilot（ACP）**：ACP `plan` / `plan_update` SessionUpdate → 共用 toolkit `translate.ts` 的 `renderPlan(entries)` 組 markdown checklist → `{type:'plan'}` 渲染原語
-- **Codex（app-server）**：app-server plan/turn item notifications 轉成同一個 `{type:'plan'}` snapshot；renderer 不感知 transport
+- **Codex（app-server）**：`turn/plan/updated` 的 `plan: [{step,status}]` 轉成 checklist snapshot（pending／inProgress／completed → `[ ]`／`[~]`／`[x]`）；空陣列清空 panel，explanation 不作為待辦。Plan mode 的 `plan` item 文字仍走同一個 `{type:'plan'}` snapshot，但不能取代獨立的待辦更新通知。Malformed snapshot 留診斷並拒絕整份更新，避免部分套用或誤清空；renderer 不感知 transport。
 - **Claude**（SDK 0.2.x）：攔截 `TodoWrite` tool_use，把 `todos` 陣列轉 markdown checkbox
 - **Claude**（SDK 0.3.142+ 起）：`TodoWrite` 被 `TaskCreate / TaskUpdate / TaskGet / TaskList` 取代，是 delta-by-id 不是 snapshot。Provider 內維護 `tasks: Map<taskId, TaskRecord>` 鏡射 SDK task store，每次 Task* 事件處理完都呼叫 `renderPlan()` 整份重發 `{type:'plan', content:md}` — 對 renderer 維持 snapshot 介面不變
 - **Claude**：`ExitPlanMode` 直接用 `input.plan` 字串（兩個 SDK 版本都一樣）
