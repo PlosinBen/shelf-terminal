@@ -90,3 +90,5 @@ Claude／Copilot 真實模型服務端到端與 Windows／WSL native acceptance 
 ### Worktree direct merge 驗證界線
 
 `e2e/worktree-direct-merge.spec.ts` 使用獨立暫存 Git repo 與 fake provider，涵蓋 bridge 結果、實際 target HEAD、錯誤與 child/session/note 保留；不使用共用 home project fixture。HTTP MCP／Claude SDK 的結果格式由 `agent-server/shelf-tool-contract.test.ts` 驗證。這些證據不等於真實 provider approval 或遠端 SSH／WSL／Docker merge 已驗證。
+
+Claude 的 Shelf 工具註冊另由 `agent-server/shelf-tool-sdk-smoke.test.ts` 使用產品 factory 與真實 in-memory MCP transport，驗證所有 tools/list schema、非法參數拒絕與合法呼叫映射；只 mock main RPC，不呼叫模型。跨 adapter 契約測試的 Claude snapshot 取實際 tools/list 的 draft-7 input schema，HTTP snapshot 獨立保留。

@@ -1,8 +1,9 @@
 import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
+import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { CODEX_PROVIDER } from '../src/shared/agent-providers';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startShelfMcpServer, type ShelfMcpHandle } from './shelf-mcp';
 import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
@@ -11,18 +12,8 @@ const { callMainMock, sdkQueryMock } = vi.hoisted(() => ({ callMainMock: vi.fn()
 vi.mock('./app-tool-client', () => ({ callMain: callMainMock }));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: sdkQueryMock,
-  tool: (name: string, description: string, schema: z.ZodRawShape, handler: ClaudeTool['handler']) =>
-    ({ name, description, schema, handler }),
-  createSdkMcpServer: (config: unknown) => config,
 }));
 import { createClaudeBackend } from './providers/claude';
-
-interface ClaudeTool {
-  name: string;
-  description: string;
-  schema: z.ZodRawShape;
-  handler(args: Record<string, unknown>): Promise<unknown>;
-}
 
 // Independent expectations: changing a shared definition must not silently change
 // both adapters and make parity alone pass.
@@ -50,7 +41,8 @@ const cases = [
 describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
   let host: ShelfMcpHandle;
   let client: Client;
-  let claudeTools: ClaudeTool[];
+  let claudeClient: Client;
+  let claudeServer: McpSdkServerConfigWithInstance;
 
   beforeAll(async () => {
     sdkQueryMock.mockImplementation(() => {
@@ -59,22 +51,32 @@ describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
     });
     const backend = createClaudeBackend();
     await backend.query({ prompt: '/mcp', cwd: '/tmp' }, () => {});
-    claudeTools = sdkQueryMock.mock.calls[0][0].options.mcpServers.shelf.tools;
+    claudeServer = sdkQueryMock.mock.calls[0][0].options.mcpServers.shelf;
+    claudeClient = new Client({ name: 'claude-contract-test', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await claudeServer.instance.connect(serverTransport);
+    await claudeClient.connect(clientTransport);
     const authority = createShelfMcpAuthority();
     callMainMock.mockImplementation(async (_op, args) => ({ ok: true, data: authority.authorize('p', 'agent', args.endpointId) }));
     host = await startShelfMcpServer();
     client = new Client({ name: 'contract-test', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(host.url), { requestInit: { headers: host.headers } }));
   });
-  afterAll(async () => { await client?.close(); host?.close(); });
+  afterAll(async () => {
+    await claudeClient?.close();
+    await claudeServer?.instance.close();
+    await client?.close();
+    host?.close();
+  });
   beforeEach(() => { callMainMock.mockReset(); });
 
   it('preserves each adapter’s advertised names, descriptions and schemas', async () => {
     const httpTools = (await client.listTools()).tools;
+    const claudeTools = (await claudeClient.listTools()).tools;
     expect(claudeTools.map(tool => tool.name)).toEqual(cases.map(tool => tool.name));
     expect(httpTools.map(tool => tool.name)).toEqual(cases.map(tool => tool.name));
-    expect(claudeTools.map(({ name, description, schema }) => ({
-      name, description, inputSchema: z.toJSONSchema(z.object(schema)),
+    expect(claudeTools.map(({ name, description, inputSchema }) => ({
+      name, description, inputSchema,
     }))).toMatchSnapshot('Claude SDK surface');
     expect(httpTools).toMatchSnapshot('HTTP MCP surface');
   });
@@ -82,7 +84,7 @@ describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
   for (const adapter of ['Claude', 'HTTP'] as const) {
     const invoke = (name: string, args: Record<string, unknown>) => adapter === 'HTTP'
       ? client.callTool({ name, arguments: args })
-      : claudeTools.find(tool => tool.name === name)!.handler(args);
+      : claudeClient.callTool({ name, arguments: args });
 
     describe(adapter, () => {
       it.each(cases)('$name forwards only declared arguments to $op', async ({ name, op, args }) => {
@@ -126,8 +128,9 @@ describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
     expect(callMainMock).not.toHaveBeenCalled();
   });
 
-  it('keeps Claude’s schema available to its SDK for validation', () => {
-    const tool = claudeTools.find(tool => tool.name === 'get_app_skill')!;
-    expect(z.object(tool.schema).safeParse({ name: 42 }).success).toBe(false);
+  it('rejects invalid arguments before Claude dispatch to main', async () => {
+    expect(await claudeClient.callTool({ name: 'get_app_skill', arguments: { name: 42 } }))
+      .toMatchObject({ isError: true });
+    expect(callMainMock).not.toHaveBeenCalled();
   });
 });

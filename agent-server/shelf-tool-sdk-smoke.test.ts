@@ -1,25 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import { describe, expect, it, vi } from 'vitest';
+import { createShelfSdkServer } from './providers/claude/shelf-tools';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { SHELF_BRIDGE_TOOLS } from './app-tool-tools';
 
-// Contract parity tests mock Claude's SDK builders. Keep these real so an
-// SDK/Zod incompatibility cannot pass merely because both adapters share a schema.
-// This checks construction and tools/list, not model calls or main RPC handlers.
-describe('Shelf tools with the real Claude SDK', () => {
+const { callMainMock } = vi.hoisted(() => ({ callMainMock: vi.fn() }));
+vi.mock('./app-tool-client', () => ({ callMain: callMainMock }));
+
+// Exercise the production factory and real MCP transport, without model calls
+// or executing main RPC operations.
+describe('Shelf in-process tools for Claude', () => {
   it('constructs and advertises every shared tool with its current schema', async () => {
-    const server = createSdkMcpServer({
-      name: 'shelf',
-      version: '1.0.0',
-      tools: SHELF_BRIDGE_TOOLS.map(definition => tool(
-        definition.name,
-        definition.description,
-        definition.inputSchema,
-        async () => { throw new Error('Construction smoke must not execute tools'); },
-      )),
-    });
+    const server = createShelfSdkServer();
     const client = new Client({ name: 'shelf-sdk-smoke', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     try {
@@ -35,6 +29,15 @@ describe('Shelf tools with the real Claude SDK', () => {
           inputSchema: z.toJSONSchema(z.object(definition.inputSchema), { target: 'draft-7', io: 'input' }),
         });
       }
+      expect(callMainMock).not.toHaveBeenCalled();
+      for (const args of [{}, { targetBranch: '' }, { targetBranch: 42 }]) {
+        expect(await client.callTool({ name: M.TOOL, arguments: args })).toMatchObject({ isError: true });
+      }
+      expect(callMainMock).not.toHaveBeenCalled();
+      callMainMock.mockResolvedValue({ ok: true, data: 'merged' });
+      expect(await client.callTool({ name: M.TOOL, arguments: { targetBranch: 'main' } }))
+        .toEqual({ content: [{ type: 'text', text: 'merged' }] });
+      expect(callMainMock).toHaveBeenCalledExactlyOnceWith(M.OP, { targetBranch: 'main' });
     } finally {
       await client.close();
       await server.instance.close();

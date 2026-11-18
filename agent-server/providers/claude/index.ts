@@ -2,10 +2,10 @@ import { SKILL_PLUGIN } from '@shared/skill-commands';
 import { EXECUTION_STATE as ES } from '@shared/agent-execution';
 import { resolveInvocationSkillPath } from '../skill-invocation';
 import { SKILL_INVOCATION, SkillCommandFailure, SKILL_COMMAND_ERROR as SCE } from '@shared/skill-invocation';
-import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
-import { runBridgeTool, SHELF_BRIDGE_TOOLS, bridgeToolArgs } from '../../app-tool-tools';
+import { createShelfSdkServer } from './shelf-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
 import { serverLog } from '../../server-logger';
 import { createRouterState, notePush, routeMessage } from './turn-router';
@@ -228,20 +228,10 @@ const CLAUDE_QUERY_DEFAULTS = {
 // In-process MCP server exposing the app-level capability bridge tools (read
 // ops). Built once (handlers are stateless → callMain). Merged into a session's
 // `options.mcpServers`. The model sees `mcp__shelf__list_app_skills` etc.
-let shelfMcpServer: ReturnType<typeof createSdkMcpServer> | null = null;
+let shelfMcpServer: ReturnType<typeof createShelfSdkServer> | null = null;
 function getShelfMcpServer() {
   if (!shelfMcpServer) {
-    shelfMcpServer = createSdkMcpServer({
-      name: 'shelf',
-      version: '1.0.0',
-      tools: SHELF_BRIDGE_TOOLS.map(definition => tool(
-        definition.name, definition.description, definition.inputSchema,
-        async (args) => {
-          const { text, isError } = await runBridgeTool(definition.operation, bridgeToolArgs(definition, args));
-          return { content: [{ type: 'text' as const, text }], ...(isError ? { isError: true } : {}) };
-        },
-      )),
-    });
+    shelfMcpServer = createShelfSdkServer();
   }
   return shelfMcpServer;
 }

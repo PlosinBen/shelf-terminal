@@ -645,3 +645,11 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Reason**：多檔 Markdown 會佔據大量畫面，且不受 File Diff 收合設定控制。每 hunk 一卡不能一次收合同檔；串接不連續 hunk 則會假造相鄰內容與錯誤行號。通用多 hunk body 同時滿足每檔收合與資料正確性，無需 renderer 感知 provider。
 
 **Related**：`contracts/agent-wire-protocol`、`agent-server/providers/codex/file-changes.ts`、`src/shared/agent-diff.ts`、`context/testing`。
+
+## agent-providers#55 — Claude Shelf 工具使用專案 MCP SDK 的 schema 轉換  ·  [Decision]
+
+**Decision**：Shelf 工具由專案的 `McpServer.registerTool` 建立，透過 Claude 公開的 `{ type: 'sdk', name, instance }` 介面接入。共用工具定義、main RPC、回傳格式與 provider 內的 server 快取保持原有責任。
+
+**Reason**：Claude Agent SDK 0.3.159 內建的 JSON Schema 轉換器與外部 Zod 4.6.7 的內部表示不相容，tools/list 會遺失字串 minLength/maxLength；同一 schema 經專案 MCP SDK 可完整保留。實際輸入驗證仍會拒絕非法值，但模型看到的規格也必須正確。使用已安裝的 MCP SDK 將修正限於 Claude 工具註冊邊界，避免全專案降級 Zod 或修改套件內部欄位。
+
+**Verification**：smoke 使用產品 factory 與真實 in-memory MCP transport，比對所有工具的 input schema，驗證缺省／空字串／錯誤型別不會送往 main，以及合法輸入的操作映射。跨 adapter 契約測試只 mock Claude query 與 main RPC，Claude／HTTP 工具均透過實際 transport 驗證。這些測試不包含真實模型或 CLI 啟動。

@@ -5,8 +5,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Ask the user to select an already-open worktree Agent View in Shelf. Waits for the user selection; returns the stable target identity or cancellation. Does not start work.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {},
       "type": "object",
     },
@@ -15,8 +14,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Start a delegation to the target the user selected with shelf_select_agent. Send the first text task. Returns delegationId and queue receipt, NOT the experiment result. Keep doing other work; results are manually collected by the user.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "agentViewId": {
           "type": "string",
@@ -40,8 +38,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Send the next text task within your existing delegation. User intervention temporarily rejects sends; query status and wait for the user, never automatically retry an uncertain delivery.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "content": {
           "type": "string",
@@ -61,8 +58,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Query status of your delegation(s): intervention, availability, delivery and whether a result awaits collection. Never returns result text. Omit delegationId to list only delegations you participate in.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "delegationId": {
           "type": "string",
@@ -75,8 +71,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "As the delegated worker, update the latest short progress text for this delegation. UI only: does not notify the main conversation or mark a result complete.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "content": {
           "type": "string",
@@ -96,8 +91,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "As the delegated worker, explicitly submit the final plain-text result of the current phase. Only one uncollected result is allowed. Returns immediately after storing; the user collects it later. The delegation stays active for subsequent tasks.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "content": {
           "type": "string",
@@ -117,8 +111,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "List the app-level Agent Skills available in this app (each skill's name and description). Use this before creating a skill to avoid duplicate names, or to find one to read/update.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {},
       "type": "object",
     },
@@ -127,8 +120,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Read one app-level skill by its folder name (as returned by list_app_skills). Returns the full SKILL.md content AND \`files\` — the skill's bundled aux files (scripts, reference docs) as folder-relative paths. Use read_app_skill_file to read one of those files.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "name": {
           "description": "skill folder name from list_app_skills",
@@ -145,8 +137,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Create a new app-level Agent Skill. \`content\` is the full SKILL.md, including YAML frontmatter with \`name\` (lowercase kebab-case — this is the skill's identity) and \`description\`, followed by the markdown body. Fails if a skill with that name already exists (read list_app_skills first, or use update_app_skill). Takes effect for the agent on the next session.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "content": {
           "description": "full SKILL.md (frontmatter name+description + body)",
@@ -163,8 +154,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Overwrite an existing app-level skill. \`name\` is its current folder name; \`content\` is the full new SKILL.md (its frontmatter \`name\` may rename the skill). Fails if the skill is locked (the user has reserved it — do not retry; list_app_skills reports \`locked\`). Takes effect on the next session.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "content": {
           "description": "full new SKILL.md",
@@ -186,8 +176,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Read one bundled aux file of an app-level skill (a script or reference doc, NOT SKILL.md itself). \`name\` is the skill folder name; \`path\` is a folder-relative path as listed in get_app_skill's \`files\`.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "name": {
           "description": "skill folder name",
@@ -209,8 +198,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Create or overwrite one bundled aux file inside an app-level skill's folder (e.g. \`scripts/build.sh\`, \`reference.md\`). \`name\` is the skill folder name (the skill must already exist — use create_app_skill first); \`path\` is a folder-relative path (no leading slash, no \`..\`); \`content\` is the file text. Cannot write SKILL.md (use update_app_skill) and fails if the skill is locked. Takes effect on the next session.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "content": {
           "description": "file content",
@@ -237,8 +225,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Delete one bundled aux file from an app-level skill's folder. \`name\` is the skill folder name; \`path\` is a folder-relative path. Cannot delete SKILL.md (deleting a whole skill is UI-only) and fails if the skill is locked. Takes effect on the next session.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "name": {
           "description": "skill folder name",
@@ -260,8 +247,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "HTTP request to an internal/SSO-protected web service using the USER's logged-in browser session (their cookies, from this machine — NOT this shell's network). Use this for company web apps the user has signed into in a Web tab (e.g. Kibana, ArgoCD): prefer their JSON APIs (Kibana \`_search\`, ArgoCD \`/api/v1/applications\`) over scraping HTML. For ordinary shell/network access use bash/curl instead — that runs from this environment without the user's identity. The user is prompted to authorize each origin. Returns the raw { status, headers, body }. If the response looks like a login page or an auth error (e.g. a 401/400, or a 3xx redirect to a login/SSO URL in the Location header), the session is likely not logged in — tell the user to log in to that service in a Web tab, then retry. Args: url (required), method (default GET), headers (object), body (string, e.g. a JSON query).",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "body": {
           "description": "request body, e.g. a JSON query string",
@@ -296,8 +282,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Open a URL in a visible Web tab so the USER can interact with it — primarily to LOG IN to an internal/SSO service so a later browser_fetch can use their authenticated session. Use this when browser_fetch returns a login page or an auth error (401/400, or a 3xx redirect to a login/SSO URL): call browser_open with the login or service URL. The user is prompted to approve each open (a visible tab appears — nothing opens in the background), then signs in. After they confirm they are logged in, retry browser_fetch. This tool only OPENS the tab — it returns no page content and does not wait for login to finish. Args: url (required, absolute http(s) URL); reason (optional, a short human-readable explanation of WHY you need this page opened — shown in the approval popup, since the popup hides your chat message while the user decides).",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "reason": {
           "description": "short explanation of why this page must be opened (shown in the approval popup)",
@@ -318,8 +303,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Open the New Worktree dialog for the current parent project, optionally prefilled with a suggested branch, feature-note file(s), and agent provider key. This tool creates nothing. The user reviews and may override the branch, selected notes, Agent view and Terminal view before pressing Create. Agent defaults to none and Terminal defaults to enabled; at least one initial view is required. On confirmation Shelf creates the Git worktree and child project, migrates selected notes, and connects the child. Startup views follow the final selections with fresh Agent identity. Same-provider Agent preferences are copied from the selected parent View; without a matching provider, defaults apply. Other project setup is inherited. Calls from a worktree child are rejected. Args: branch (optional suggested branch), note (optional legacy single feature-note filename/path), notes (optional feature-note filenames/paths), agent (optional registered provider key, not a model or session; invalid or unavailable keys are rejected).",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "agent": {
           "description": "registered provider key to preselect for Agent view; not a model or existing session",
@@ -348,8 +332,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Fast-forward an explicit existing target branch from the current worktree without opening a Finish dialog. Waits for the actual Git result; preserves the checkout, branch, project, sessions and notes. Requires a clean source and, for a checked-out target, a clean parent checkout. Never forces, rebases, cleans up or pushes to an external remote. Returns outcome, targetBranch and sourceCommit when known; failures are MCP errors with Git diagnostics. If the response is lost, inspect Git state before retrying; lack of a response does not mean no merge occurred. Provider tool approval still applies.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
         "targetBranch": {
           "description": "existing local target branch; required, never inferred",
@@ -367,8 +350,7 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
   {
     "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. Full Finish requires resolved feature notes and a clean child worktree, fast-forwards the selected target, and removes the child checkout, project and source branch. Only merge retains the entire environment. Calls outside a worktree child are rejected.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {},
       "type": "object",
     },

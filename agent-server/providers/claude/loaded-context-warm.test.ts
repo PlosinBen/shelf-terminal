@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 /**
  * Regression: a `/mcp` or `/skills` slash run in the COLD-START window — tab
@@ -17,8 +19,6 @@ vi.mock('../../app-tool-client', () => ({
 }));
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (...args: unknown[]) => sdkQueryMock(...args),
-  tool: (name: string, _description: string, _schema: unknown, handler: unknown) => ({ name, handler }),
-  createSdkMcpServer: (cfg: any) => cfg,
 }));
 
 import { createClaudeBackend } from './index';
@@ -59,12 +59,18 @@ describe('claude /mcp /skills cold-start warm', () => {
     const backend = createClaudeBackend();
     await backend.query({ prompt: '/mcp', cwd: '/tmp' }, () => {});
     const server = sdkQueryMock.mock.calls[0][0].options.mcpServers.shelf;
-    const tool = server.tools.find((entry: { name: string }) => entry.name === 'list_app_skills');
-    expect(tool).toBeDefined();
-    callMainMock.mockResolvedValue(result);
-
-    await expect(tool.handler()).resolves.toEqual(expected);
-    expect(callMainMock).toHaveBeenCalledExactlyOnceWith('app_skill.list', {});
+    const client = new Client({ name: 'warm-context-test', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.instance.connect(serverTransport);
+      await client.connect(clientTransport);
+      callMainMock.mockResolvedValue(result);
+      await expect(client.callTool({ name: 'list_app_skills', arguments: {} })).resolves.toEqual(expected);
+      expect(callMainMock).toHaveBeenCalledExactlyOnceWith('app_skill.list', {});
+    } finally {
+      await client.close();
+      await server.instance.close();
+    }
   });
 
   it('cold /mcp warms the cache via a throwaway probe (no "send a message first")', async () => {
