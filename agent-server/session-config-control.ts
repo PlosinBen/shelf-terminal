@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { CONFIG_EDIT_KEYS, formatConfigAck } from '@shared/config-ack';
 import { CONFIG_CONTROL as C, ConfigControlRejectedError, validConfigControl, type ConfigControlUpdate } from '@shared/agent-config-control';
 import type { SendQueue, QueuedSend } from './send-queue';
 import type { ServerBackend, SendFn } from './providers/types';
@@ -34,6 +36,10 @@ export function createSessionConfigControl<T extends QueuedSend>(queue: SendQueu
             new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Session configuration confirmation timed out')), C.APPLY_TIMEOUT_MS); }),
           ]);
           emit(C.STATE.CONFIRMED);
+          // agent-config-flow#16: record confirmed model selection without an execution.
+          if (key === CONFIG_EDIT_KEYS.MODEL) {
+            send({ type: 'message', msgId: `m-${randomUUID()}`, msgType: 'system', content: formatConfigAck(key, value) });
+          }
         } catch (error) {
           if (error instanceof ConfigControlRejectedError) { emit(C.STATE.REJECTED, error.message); return; }
           // Setter failures can follow an upstream mutation. Never claim rollback.

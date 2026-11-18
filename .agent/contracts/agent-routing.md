@@ -186,8 +186,11 @@ deferred waiting has no execution-duration timeout. Neither layer automatically 
 
 One unresolved direct control is allowed per View, across all keys. A provider chooses live application
 or an idle boundary. Both reserve a control slot outside message snapshots and prevent the next queued
-execution from starting until settled; message FIFO is unchanged. Direct controls create no message or
-execution IDs, pending chips, timeline entries, or execution status. Same-value no-ops still settle.
+execution from starting until settled; message FIFO is unchanged. Direct controls create no input-message or
+execution IDs, pending chips, or execution status. Confirmed model controls emit one ordinary
+`message` with a fresh `msgId`, `msgType: 'system'`, and `formatConfigAck` text through the session
+content/history path. Same-value no-ops still settle and record their confirmation; failed or
+uncertain controls and late results after timeout emit no success message.
 Only confirmed capabilities update display and `Project.agentViews[sessionId].prefs` through the normal
 serialized mutation path. `confirmedPrefs` retains its provider-specific explicit-patch semantics.
 Confirmation does not promise that currently running inference adopted the setting.

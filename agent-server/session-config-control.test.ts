@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createSendQueue } from './send-queue';
 import { createSessionConfigControl } from './session-config-control';
-import { CONFIG_CONTROL as C, type ConfigControlUpdate } from '@shared/agent-config-control';
+import { CONFIG_CONTROL as C, ConfigControlRejectedError, type ConfigControlUpdate } from '@shared/agent-config-control';
 import type { ServerBackend } from './providers/types';
 
 function gate() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
@@ -11,10 +11,32 @@ function setup(defer: boolean) {
   const queue = createSendQueue({ handle: async (m: { clientMsgId: string }) => { order.push(m.clientMsgId); if (m.clientMsgId === 'a') await work.promise; }, emitSnapshot: vi.fn(), terminateExecution: vi.fn(), onHandleError: vi.fn() });
   const configure = vi.fn(async () => { order.push('configure'); await setting.promise; });
   const backend = { configRequiresIdle: () => defer, configure } as unknown as ServerBackend;
-  const control = createSessionConfigControl(queue, update => updates.push(update));
-  return { work, setting, order, updates, queue, control, backend, configure };
+  const send = vi.fn();
+  const control = createSessionConfigControl(queue, update => updates.push(update), send);
+  return { work, setting, order, updates, queue, control, backend, configure, send };
 }
 describe('independent session configuration', () => {
+  it.each([false, true])('records a model confirmation only after live/deferred=%s apply succeeds', async defer => {
+    const s = setup(defer);
+    s.queue.enqueue({ clientMsgId: 'a' }); await tick();
+    const pending = s.control({ requestId: 'r', key: 'model', value: 'x' }, s.backend); await tick();
+    expect(s.send).not.toHaveBeenCalled();
+    s.work.resolve(); await tick();
+    expect(s.send).not.toHaveBeenCalled();
+    s.setting.resolve(); await pending;
+    expect(s.send).toHaveBeenCalledExactlyOnceWith({
+      type: 'message', msgId: expect.any(String), msgType: 'system',
+      content: 'Model set to x (applies on next query)',
+    });
+  });
+  it.each([new ConfigControlRejectedError('invalid model'), new Error('transport lost')])('does not record failed model settings: %s', async error => {
+    const s = setup(false);
+    s.configure.mockRejectedValueOnce(error);
+    await s.control({ requestId: 'r', key: 'model', value: 'x' }, s.backend);
+    expect(s.send).not.toHaveBeenCalled();
+    expect(s.updates.at(-1)?.state).not.toBe(C.STATE.CONFIRMED);
+  });
+
   it('does not copy inbound wire envelopes into control results', async () => {
     const s = setup(false); s.setting.resolve();
     await s.control({ type: C.REQUEST, executionId: 'must-not-leak', requestId: 'r', key: 'model', value: 'x' }, s.backend);
@@ -43,7 +65,7 @@ describe('independent session configuration', () => {
     vi.useFakeTimers();
     try {
       const s = setup(true); s.queue.enqueue({ clientMsgId: 'a' }); await tick();
-      const pending = s.control({ requestId: 'r', key: 'effort', value: 'high' }, s.backend);
+      const pending = s.control({ requestId: 'r', key: 'model', value: 'x' }, s.backend);
       await vi.advanceTimersByTimeAsync(C.APPLY_TIMEOUT_MS * 2);
       expect(s.updates.at(-1)?.state).toBe(C.STATE.DEFERRED);
       s.queue.enqueue({ clientMsgId: 'b' }); s.work.resolve(); await tick();
@@ -51,6 +73,7 @@ describe('independent session configuration', () => {
       expect(s.updates.at(-1)?.state).toBe(C.STATE.UNCERTAIN);
       s.setting.resolve(); await tick();
       expect(s.order).toEqual(['a', 'configure']);
+      expect(s.send).not.toHaveBeenCalled();
       expect(s.queue.snapshot()).toEqual([{ clientMsgId: 'b', state: 'queued' }]);
     } finally { vi.useRealTimers(); }
   });

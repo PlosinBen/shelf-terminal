@@ -17,9 +17,8 @@ export type ConfigEditKey = typeof CONFIG_EDIT_KEYS[keyof typeof CONFIG_EDIT_KEY
 
 /**
  * Single source of truth for the config-change acknowledgement text rendered
- * as a `system` divider. Used by BOTH the provider (typed /model slash) and —
- * indirectly via the config-edit turn — the renderer's picker / status-bar
- * paths, so the wording can't drift between entry points.
+ * as a `system` divider. Used by provider slash/config-edit paths and the
+ * independent session control's model confirmation, keeping wording consistent.
  */
 export function formatConfigAck(key: ConfigEditKey, value: string): string {
   switch (key) {

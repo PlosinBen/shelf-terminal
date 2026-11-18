@@ -317,8 +317,10 @@ metadata 不要求舊資料遷移。訊息本身不承擔執行／交付狀態�
 
 ## agent-config-flow#16 — Session control 與訊息生命週期分離  ·  [Decision]
 
-**Decision：** Status-bar picker 以獨立 requestId 提交 session control，不建立訊息／execution
-ID、queue chip、timeline 或 idle。Slash-origin picker 保留命令名稱，factory 組成正常 slash
+**Decision：** Status-bar picker 以獨立 requestId 提交 session control，不建立輸入訊息／execution
+ID、queue chip 或 idle。Model 確認成功後由共用 control 層送一筆 system timeline 紀錄，沿用
+formatConfigAck 與一般 content/history 路徑；同值 confirmed 也記錄一次確認，等待／拒絕／不確定
+與逾時後晚到結果不產生成功訊息。紀錄確認的是 session 選擇，不宣稱當前推論已切換。Slash-origin picker 保留命令名稱，factory 組成正常 slash
 訊息並入 FIFO；共同 UI 不抹除來源。Provider 共用真正的 setter，但直接控制不重用有
 divider／idle side effect 的 query wrapper。同值仍回 confirmed，避免 pending 永不結束。Stop 會以 rejected 明確取消未開始套用的 control，包含已排 microtask 但尚未呼叫 setter 的請求；不自動重送。停止期間新 control 明確拒絕，訊息 dispatch 等 provider stop 完成；已開始套用者保留原確認與 uncertain 規則。
 

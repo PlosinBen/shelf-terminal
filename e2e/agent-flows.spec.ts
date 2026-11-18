@@ -191,7 +191,7 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('provider-native permission controls', () => {
-    test.use({ nativePermissions: true });
+    test.use({ nativePermissions: true, homeProjectDirectories: false });
     test.afterEach(async ({ shelfApp: { userDataDir } }, info) => {
       const root = path.join(userDataDir, 'logs');
       if (info.status !== info.expectedStatus && fs.existsSync(root)) {
@@ -200,7 +200,7 @@ test.describe('agent flows via fake provider', () => {
       }
     });
 
-    test('changes a live session setting without waiting for work or adding history', async ({ shelfApp: { page } }) => {
+    test('records a live model setting in the timeline without interrupting work', async ({ shelfApp: { page } }) => {
       await setupProject(page); await openAgentTab(page);
       await page.evaluate(async () => { const settings = await window.shelfApi.settings.load(); await window.shelfApi.settings.save({ ...settings, logLevel: 'debug' }); });
       await sendAgentPrompt(page, 'delay:4000|text:original work completed');
@@ -213,13 +213,15 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-config-feedback')).toHaveCount(0);
       await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
       await expect(users).toHaveCount(1);
-      await expect(page.locator('.agent-messages:visible')).not.toContainText('Model set to');
+      await expect(page.locator('.agent-messages:visible .agent-msg-system').filter({ hasText: 'Model set to fake-model-pro' })).toHaveCount(1);
       await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
       await expect.poll(async () => {
         const project = (await page.evaluate(() => window.shelfApi.project.getAll()))[0];
         return Object.values(project.agentViews).some(view => view.prefs.model === 'fake-model-pro');
       }).toBe(true);
       await expect(page.locator('.agent-messages:visible')).toContainText('original work completed');
+      await expect.poll(async () => (await storedAgentMessages(page)).filter(row =>
+        row.type === 'system' && row.content === 'Model set to fake-model-pro (applies on next query)').length).toBe(1);
     });
 
     test('defers effort ahead of queued messages while slash picker remains ordinary input', async ({ shelfApp: { page } }) => {
@@ -266,6 +268,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-config-feedback')).toHaveAttribute('data-state', 'uncertain');
       await expect(page.locator('.agent-config-feedback')).toContainText('Fake configuration was not confirmed');
       await expect(page.locator('.agent-messages:visible')).not.toContainText('Fake configuration was not confirmed');
+      await expect(page.locator('.agent-msg-system').filter({ hasText: 'Model set to' })).toHaveCount(0);
       // Session restart is the existing user-owned recovery surface. A new View
       // must read confirmed prefs, never the failed requested value.
       await page.locator('.agent-config-feedback button', { hasText: 'Reconnect' }).click();
