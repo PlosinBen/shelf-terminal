@@ -266,3 +266,7 @@ Telegram 顯示 Telegram，Agent 顯示 From 加發送時 displayName；一般 A
 **Do not change casually because:** source label 不證明權限，不增加回覆工具或自動
 回覆引導；入口來源驗證與穩定身分仍由原有邊界管理。不要為呈現標籤遷移 history、
 查目前名稱或把 provider 細節帶入 renderer。舊資料缺 metadata 時不補猜測值。
+
+## agent-ui#14 — 訊息外距由列表 gap 統一控制 · [Decision]
+
+主對話與巢狀子代理列表共用 `--agent-message-gap`；訊息本身不設 margin，避免卡片外距與列表 gap 疊加。一般訊息保留少量上下 padding，Command 標題保留點擊內距；使用者泡泡、Markdown 與展開內容保留各自內容排版。Gap 表示訊息邊界間距，不代表文字行之間的總距離。目前為固定樣式，尚未提供使用者設定。

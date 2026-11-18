@@ -704,6 +704,34 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('fold (tool_use)', () => {
+    test('message spacing comes only from the list gap with compact clickable headers', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'tool:Read|tool:Bash|text:spacing reply');
+      const list = page.locator('.agent-messages:visible');
+      const cards = list.locator(':scope > .agent-msg-fold');
+      await expect(cards).toHaveCount(2);
+      await expect(list).toContainText('spacing reply');
+      const measure = () => list.evaluate((el) => {
+        const rows = [...el.querySelectorAll(':scope > .agent-msg')];
+        return rows.slice(1).map((row, index) => (
+          row.getBoundingClientRect().top - rows[index].getBoundingClientRect().bottom
+        ));
+      });
+      for (const gap of await measure()) expect(gap).toBeCloseTo(2, 1);
+      // Changing just the container gap must fully control inter-message space.
+      await list.evaluate((el) => { el.style.gap = '7px'; });
+      for (const gap of await measure()) expect(gap).toBeCloseTo(7, 1);
+      const header = cards.first().locator('.fold-header');
+      const bounds = await header.boundingBox();
+      expect(bounds!.height).toBeGreaterThanOrEqual(20);
+      expect(bounds!.height).toBeLessThanOrEqual(24);
+      await header.click();
+      await expect(cards.first().locator('.fold-body')).toBeVisible();
+      await header.click();
+      await expect(cards.first().locator('.fold-body')).toHaveCount(0);
+    });
+
     test('tool: renders a fold card with the tool name and ok result', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);

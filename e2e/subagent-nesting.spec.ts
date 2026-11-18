@@ -63,6 +63,11 @@ test.describe('subagent nesting via fake provider', () => {
     // The subagent's inner tool_use + prose live INSIDE the nested container.
     await expect(nested.locator('.fold-label', { hasText: 'Read' })).toBeVisible();
     await expect(nested).toContainText('subagent step: deploy dashboard');
+    const spacing = await nested.evaluate((el) => {
+      const [first, second] = el.children;
+      return second.getBoundingClientRect().top - first.getBoundingClientRect().bottom;
+    });
+    expect(spacing).toBeCloseTo(2, 1);
   });
 
   test('collapsing the Agent card hides the nested subagent steps', async ({ shelfApp: { page } }) => {
