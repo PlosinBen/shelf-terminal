@@ -65,3 +65,10 @@ title: Shelf — 驗證能力與執行入口
 - 平台專屬行為需要相應主機，外部登入／服務需要實際可用前提。先完成能獨立執行的檢查，再列出未驗證項目，不降低需求或把缺環境判成通過。
 - [release workflow](../.github/workflows/build.yml) 的 test job 執行 typecheck 與 unit，E2E 另依本機規範驗證；release CI 綠燈不代表所有產品行為與平台都驗過。
 - 變更 scripts、harness、auth／平台前提、log／artifact 或清理機制時，同批更新本檔及必要入口。具體設定與 spec 保持 source of truth，本檔不維護歷次通過紀錄。
+
+
+### App skill command 驗證界線
+
+App skill command 的共用提交、queue、設定與 history 行為由 unit／fake-provider E2E 覆蓋；SSH dispatcher／direct 測試驗證遠端投影與控制路由，不代表遠端真實模型服務。Codex 有正式 adapter 的真實服務證據；Claude／Copilot 的正式 adapter native dispatch 以真實 CLI 搭配本機模擬推論驗證，probe 的 main receipt approval 為模擬，不能宣稱完整真實服務端到端通過。
+
+Claude／Copilot 真實模型服務端到端與 Windows／WSL native acceptance 尚未建立，作為已知驗證限制，不列為本次 app skill command 交付的阻擋條件。後續涉及這些服務或平台的驗證仍需實際環境，不能將本次處置視為已驗證通過。
