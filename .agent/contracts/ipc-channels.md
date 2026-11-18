@@ -338,3 +338,5 @@ Main → renderer (push; all return an unsubscribe fn):
 ### App skill commands
 
 `window.shelfApi.agent.skillCommands(tabId)` invokes `agent:skill-commands` for the session's provider-neutral menu snapshot. Skills changes and capabilities/init updates refresh the snapshot through the central renderer IPC binder. `agent.send` accepts an optional `commandSelection` sibling of `inputMessage`; it never accepts a renderer-owned invocation. Shapes, stale selection and execution control are specified in [skill commands](skill-commands.md).
+
+The Finish merge-back IPC and direct worktree MCP mutation share the main merge service and repo lock. Both validate that the target ref is legal and already exists before advancing it. Direct MCP merge does not invoke renderer Finish or cleanup.

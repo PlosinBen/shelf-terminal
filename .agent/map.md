@@ -107,6 +107,7 @@ title: shelf-terminal — Intent → File Index
 | Reconciliation coordination | `worktree/reconcile.ts` | Deduplicated scans, topology/lifecycle guards, batch repository publication and live Finish source inspection |
 | Target worktree probes | `connector/worktree-probe.ts` | Target-side Git/path probes, POSIX/PowerShell quoting and missing versus inaccessible classification |
 | Shared worktree state and inheritance | `../shared/worktree.ts`, `../shared/worktree-child-config.ts` | Availability/identity contracts, detached labels and fresh child setup |
+| Direct merge / UI merge coordination | `worktree/merge-service.ts`, `../shared/worktree-merge.ts` | Trusted project merge, lifecycle guard, shared repo lock, target validation and typed MCP receipt |
 | Finish merge-back | `worktree/merge-back.ts` | ff-only target advancement, feature/base dirty guards, non-ff rebase guidance |
 | Feature note migration utilities | `worktree/note-migration.ts` | create-time base→child batch note move and explicit child→base restore utility |
 | Feature note listing | `worktree/feature-notes.ts` | 依 project-configured directory 列 direct markdown notes、驗證 repo boundary 並解析 picker frontmatter |

@@ -1,6 +1,8 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import type { AgentEvent } from './types';
 
 const AUDITED_WORKTREE_APP_TOOLS: Record<string, string> = {
+  [M.OP]: M.TOOL,
   'worktree.propose_create': 'propose_worktree_create',
   'worktree.propose_finish': 'propose_worktree_finish',
 };

@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { describe, expect, it } from 'vitest';
 import { buildWorktreeAppToolAuditEvent, worktreeAppToolDisplayName } from './app-tool-audit';
 
@@ -5,6 +6,7 @@ describe('worktree app-tool audit events', () => {
   it('maps only worktree app-tool ops to Shelf MCP tool names', () => {
     expect(worktreeAppToolDisplayName('worktree.propose_create')).toBe('propose_worktree_create');
     expect(worktreeAppToolDisplayName('worktree.propose_finish')).toBe('propose_worktree_finish');
+    expect(worktreeAppToolDisplayName(M.OP)).toBe(M.TOOL);
     expect(worktreeAppToolDisplayName('web.fetch')).toBeNull();
   });
 

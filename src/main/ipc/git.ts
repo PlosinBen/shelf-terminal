@@ -5,8 +5,7 @@ import { createConnector } from '../connector';
 import { migrateFeatureNotes, restoreFeatureNotes } from '../worktree/note-migration';
 import { listFeatureNotes } from '../worktree/feature-notes';
 import { checkBranchMerged } from '../worktree/branch-merged';
-import { mergeBackFastForward } from '../worktree/merge-back';
-import { repoLockKey, tryAcquireRepoLock } from '../worktree/repo-lock';
+import { mergeBackWithLock } from '../worktree/merge-service';
 import { shellSingleQuote } from '../connector/file-utils';
 import type {
   Connection, GitBranchInfo, MigrateNoteResult, WorktreeAddResult, WorktreeRemoveResult,
@@ -212,26 +211,7 @@ export function registerGitHandlers(): void {
       _event,
       payload: { connection: Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string; sourceCommit?: string },
     ): Promise<FinishMergeBackResult> => {
-      // The repo lock wraps ONLY the "check main → ff" step: once the ff lands,
-      // baseBranch has advanced and the subsequent teardown/branch-delete (this
-      // feature's own cleanup) don't touch baseBranch, so another feature may
-      // proceed. Losing the race → immediate busy (non-blocking).
-      const key = repoLockKey(payload.connection, payload.baseCwd);
-      const release = tryAcquireRepoLock(key);
-      if (!release) return { outcome: 'busy' };
-      try {
-        const connector = createConnector(payload.connection);
-        return await mergeBackFastForward({
-          connector,
-          featureCwd: payload.featureCwd,
-          baseCwd: payload.baseCwd,
-          baseBranch: payload.baseBranch,
-          featureBranch: payload.featureBranch,
-          sourceCommit: payload.sourceCommit,
-        });
-      } finally {
-        release();
-      }
+      return mergeBackWithLock(payload);
     },
   );
 }

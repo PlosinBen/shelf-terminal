@@ -1,3 +1,5 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
+import { runBridgeTool } from '../../app-tool-tools';
 import { assertCopilotSkillInput } from '../copilot/skill-invocation';
 import { AgentInitializationError, AgentInitRecoveryKind, savedPrefRecovery } from '@shared/agent-init-recovery';
 import { randomUUID } from 'node:crypto';
@@ -545,6 +547,12 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       const [branch, note, agent] = step.slice('worktree_create:'.length).trim().split(/\s+/, 3);
       const res = await callMain('worktree.propose_create', { branch, note, ...(agent ? { agent } : {}) });
       send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `worktree_create ${JSON.stringify(res)}` });
+      return;
+    }
+
+    if (step.startsWith('worktree_merge:')) {
+      const res = await runBridgeTool(M.OP, { targetBranch: step.slice('worktree_merge:'.length) });
+      send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: 'worktree_merge\n\n```json\n' + JSON.stringify(res) + '\n```' });
       return;
     }
 

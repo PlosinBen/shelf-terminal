@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { createDispatcherConnection, type DispatcherProc } from './dispatcher-connection';
 import { MEMORY_PROCESS_ROLE, MEMORY_REPORT_STATUS, MEMORY_WIRE_TYPE } from '@shared/process-memory';
@@ -176,6 +177,19 @@ describe('dispatcher-connection (per-host demux by sid)', () => {
     expect(q1).toHaveLength(0);
   });
 
+  it('rejects merge requests after connection shutdown and exposes live channel state', async () => {
+    const { f, conn, handleAppTool } = make();
+    conn.openSession('s1', '/repo', { projectId: 'child' });
+    const request = { type: 'app_tool', sid: 's1', requestId: 'merge', op: M.OP, args: { targetBranch: 'main' } };
+    f.emit(request); await Promise.resolve();
+    const context = (handleAppTool.mock.calls as unknown as any[][])[0][2];
+    expect(context.projectId).toBe('child');
+    expect(context.isActive()).toBe(true);
+    conn.kill();
+    expect(context.isActive()).toBe(false);
+    handleAppTool.mockClear(); f.emit(request); await Promise.resolve();
+    expect(handleAppTool).not.toHaveBeenCalled();
+  });
   it('handles app_tool with the sid session projectId and replies with sid', async () => {
     const { f, conn, handleAppTool } = make();
     conn.openSession('s1', undefined, { projectId: 'proj-1' });

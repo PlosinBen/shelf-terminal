@@ -8,7 +8,7 @@ related:
 
 # Worktree Lifecycle
 
-Worktree lifecycle operations are user-committed UI transactions around Git state. Agents may propose lifecycle actions, but the renderer gate owns the actual create, finish, abandon, cleanup, parent focus, and visible completion flow.
+Create and full Finish/Abandon are user-committed UI transactions around Git state. Agents may propose those actions. A separate direct merge operation executes in main and preserves the child environment; it returns the actual Git result rather than opening a renderer gate.
 
 ## Flow
 
@@ -29,6 +29,19 @@ Proposal or user menu
       main allocates a fresh Agent identity and snapshots selected parent View prefs
   → auto-connect child
 ```
+
+Direct merge:
+
+```text
+MCP request with explicit target branch
+  → trusted caller project and parent resolution
+  → lifecycle guard and live source identity/commit inspection
+  → shared repo lock + target validation + ff-only merge
+  → return success receipt or MCP error with Git diagnostics
+  → retain child project, checkout, branch, sessions, focus and notes
+```
+
+UI merge and direct merge share the same main-side repo lock and target checks. The direct path emits the normal worktree audit card but does not use renderer cleanup or completion-focus logic. Response loss leaves the caller uncertain about the Git outcome; it does not imply rollback.
 
 Finish:
 

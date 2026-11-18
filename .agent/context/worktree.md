@@ -12,11 +12,11 @@ related:
 
 ## worktree#1 — Lifecycle proposals are side-effect free; user clicks commit  ·  [Decision]
 
-**Decision:** Agents may propose creating or finishing a worktree through `propose_worktree_create` and `propose_worktree_finish`. The tools only open the prefilled dialog or Finish gate; the user performs the actual Create or Finish click. Abandon remains UI-only.
+**Decision:** Agents may propose creating or finishing a worktree through `propose_worktree_create` and `propose_worktree_finish`. The tools only open the prefilled dialog or Finish gate; the user performs the actual Create or Finish click. Abandon remains UI-only. Direct merge without cleanup uses the separate mutation tool in worktree#23.
 
 **Reason:** Creating a worktree and merging or removing one changes git state. Splitting proposal from commit lets an agent remove hand-off friction without creating orphaned worktrees or merging unexpectedly.
 
-**Do not change casually because:** A tool that executes lifecycle operations would bypass the human review boundary. Keep any future lifecycle proposal equally non-mutating.
+**Do not change casually because:** Proposal tools promise no Git mutation. Keep them non-mutating; direct merge has its own explicitly mutating contract and does not authorize teardown.
 
 ## worktree#2 — Finish proposals are valid only for a child project  ·  [Decision]
 
@@ -88,7 +88,7 @@ related:
 
 ## worktree#11 — Worktree proposal tool calls are visible in Agent View  ·  [Decision]
 
-**Decision:** For `propose_worktree_create` and `propose_worktree_finish`, main emits a session-level Agent View `fold_code` audit card when the Shelf app-tool bridge receives the request. The card shows the model-facing tool name and raw args, then upserts with the app-tool result. Create result includes normalized `notePaths`.
+**Decision:** For `propose_worktree_create`, `propose_worktree_finish` and `merge_worktree`, main emits a session-level Agent View `fold_code` audit card when the Shelf app-tool bridge receives the request. The card shows the model-facing tool name and raw args, then upserts with the app-tool result. Create result includes normalized `notePaths`.
 
 **Reason:** Proposal dialogs are user-committed UI gates, and failures or incorrect prefills depend on what the agent actually sent versus what main normalized. Showing this in the timeline makes debugging possible without log spelunking, while scoping to worktree proposal tools avoids exposing noisy or sensitive app-tool args.
 
@@ -126,9 +126,9 @@ At child creation, the main project's current value is copied into the child's s
 
 ## worktree#15 — One integration skill owns the cross-session development handoff  ·  [Decision]
 
-**Decision:** Repository policy may route isolated development through the app-level `shelf-worktree-handoff` skill. That skill composes `development-flow` with the two Shelf proposal tools across parent preparation, user-confirmed Create, fresh child-session resume, and user-confirmed Finish. `development-flow` retains the portable development and feature-note lifecycle; Shelf retains runtime effects and human gates; repository instructions retain only the routing rule. A selected feature note carries required working context because the child never inherits the parent agent session.
+**Decision:** Repository policy may route isolated development through the app-level `shelf-worktree-handoff` skill. That skill composes `development-flow` with Shelf tools across parent preparation, user-confirmed Create, fresh child-session resume, authorized direct merge, and user-confirmed Finish. Direct merge requires an established integration instruction and explicit target; implementation alone does not authorize it. `development-flow` retains the portable development and feature-note lifecycle; Shelf retains runtime effects and human gates; repository instructions retain only the routing rule. A selected feature note carries required working context because the child never inherits the parent agent session.
 
-Every invocation requires `development-flow`, `propose_worktree_create`, and `propose_worktree_finish`. If a dependency is absent before entry or disappears mid-handoff, the integration stops loudly; it never falls back to raw Git lifecycle commands or absorbs the missing responsibility.
+Every invocation requires `development-flow`, `propose_worktree_create`, and `propose_worktree_finish`; the direct merge path additionally requires `merge_worktree`. An unavailable direct merge tool blocks that operation, not an independently requested proposal path. If a baseline dependency is absent before entry or disappears mid-handoff, the integration stops loudly; it never falls back to raw Git lifecycle commands or absorbs the missing responsibility.
 
 **Reason:** Capability descriptions and portable development rules cannot each contain half of a Shelf-specific cross-session sequence without either coupling themselves to one environment or leaving control-transfer gaps. A dedicated integration owner keeps the three layers independently useful while making their cooperation executable.
 
@@ -189,3 +189,13 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 **Reason:** Abandon authorizes discarding a child environment, not writing files into the parent or reintroducing abandoned work there. Explicit discard consent protects ignored notes without making parent filename collisions a prerequisite for abandoning. A failed removal leaves notes in the child instead of partially moving them elsewhere.
 
 **Do not change casually because:** Confirmation covers listed paths, not a content snapshot or an external-writer lock. Notes created after the final scan and ignored files outside the configured direct-markdown scope are not separately protected. Do not add force removal or automatic parent writes to bypass Git errors.
+
+## worktree#23 — Direct merge returns the Git result and preserves the child environment  ·  [Decision]
+
+**Decision:** `merge_worktree({ targetBranch })` directly fast-forwards an explicit existing local target from the trusted caller's child project. It does not open the Finish gate, inspect notes, remove a branch/checkout/project, disconnect sessions, or change focus. Full Finish remains user-confirmed. Provider-native tool approval still applies; direct merge is a mutation, not a read-only safe operation.
+
+Main resolves project/parent and live source identity, takes the lifecycle guard, then uses the same repo-lock/merge service as the UI. The service validates target ref syntax/existence under the lock, rejects inactive callers before starting the merge helper, and keeps existing clean-state, pinned source-commit and ff-only checks. The lock serializes Shelf operations, not external Git processes. Detached sources merge their inspected commit. When target and source already point to the same commit, merge returns success without cleanup.
+
+**Reason:** Agents need the actual merge outcome to continue work without a dialog/send-to-agent round trip. The bridge awaits completion and returns a receipt with target and source commit when known. Non-ff, dirty, busy and other failures carry concrete diagnostics with MCP `isError: true`; returning an outcome object as ordinary success would conceal failure. The normal worktree audit card records arguments and result.
+
+**Do not change casually because:** Source scope comes from transport context, never model-supplied paths/project ids. A lost connection or missing response does not establish that Git did not merge; inspect current state before retrying, do not claim rollback or automatically resend. Releasing lifecycle or rendering audit information must not convert a completed merge into a claim that no merge occurred. No auto-rebase, force, stash, cleanup, or external-remote push is part of this operation.

@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
 import { SHELF_MCP, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
@@ -118,6 +119,7 @@ describe('shelf MCP bridge server', () => {
       'delete_app_skill_file',
       'get_app_skill',
       'list_app_skills',
+      M.TOOL,
       'propose_worktree_create',
       'propose_worktree_finish',
       'read_app_skill_file',

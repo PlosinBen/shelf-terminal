@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { CODEX_PROVIDER } from '../src/shared/agent-providers';
@@ -42,6 +43,7 @@ const cases = [
   { name: 'browser_fetch', op: 'web.fetch', args: { url: 'https://example.com', method: 'POST', headers: { test: 'value' }, body: 'query' } },
   { name: 'browser_open', op: 'web.open', args: { url: 'https://example.com', reason: 'login' } },
   { name: 'propose_worktree_create', op: 'worktree.propose_create', args: { branch: 'feature', note: 'one.md', notes: ['two.md'], agent: CODEX_PROVIDER } },
+  { name: M.TOOL, op: M.OP, args: { targetBranch: 'main' } },
   { name: 'propose_worktree_finish', op: 'worktree.propose_finish', args: {} },
 ] as const;
 
@@ -89,6 +91,14 @@ describe('Shelf tool contracts across Claude SDK and HTTP MCP', () => {
           content: [{ type: 'text', text: '{"result":"ok"}' }],
         });
         expect(callMainMock).toHaveBeenCalledExactlyOnceWith(op, args);
+      });
+
+      it('preserves a structured merge failure and marks it as an MCP error', async () => {
+        const data = { outcome: 'non-ff', targetBranch: 'main', error: 'Git rejected non-fast-forward' };
+        callMainMock.mockResolvedValue({ ok: false, error: data.error, data });
+        await expect(invoke('merge_worktree', { targetBranch: 'main' })).resolves.toEqual({
+          content: [{ type: 'text', text: JSON.stringify(data) }], isError: true,
+        });
       });
 
       it.each(cases)('$name preserves bridge failures', async ({ name, args }) => {

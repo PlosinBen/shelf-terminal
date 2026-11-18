@@ -72,3 +72,7 @@ title: Shelf — 驗證能力與執行入口
 App skill command 的共用提交、queue、設定與 history 行為由 unit／fake-provider E2E 覆蓋；SSH dispatcher／direct 測試驗證遠端投影與控制路由，不代表遠端真實模型服務。Codex 有正式 adapter 的真實服務證據；Claude／Copilot 的正式 adapter native dispatch 以真實 CLI 搭配本機模擬推論驗證，probe 的 main receipt approval 為模擬，不能宣稱完整真實服務端到端通過。
 
 Claude／Copilot 真實模型服務端到端與 Windows／WSL native acceptance 尚未建立，作為已知驗證限制，不列為本次 app skill command 交付的阻擋條件。後續涉及這些服務或平台的驗證仍需實際環境，不能將本次處置視為已驗證通過。
+
+### Worktree direct merge 驗證界線
+
+`e2e/worktree-direct-merge.spec.ts` 使用獨立暫存 Git repo 與 fake provider，涵蓋 bridge 結果、實際 target HEAD、錯誤與 child/session/note 保留；不使用共用 home project fixture。HTTP MCP／Claude SDK 的結果格式由 `agent-server/shelf-tool-contract.test.ts` 驗證。這些證據不等於真實 provider approval 或遠端 SSH／WSL／Docker merge 已驗證。

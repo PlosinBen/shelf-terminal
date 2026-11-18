@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 /**
  * Shelf-owned tool contracts and bridge execution, independent of provider SDKs.
  * Adapters own registration and protocol-specific result envelopes.
@@ -78,8 +79,8 @@ export const PROPOSE_WORKTREE_CREATE_DESC =
 
 export const PROPOSE_WORKTREE_FINISH_DESC =
   'Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target '
-  + 'and confirms Finish. If confirmed, Shelf requires a clean child worktree, fast-forwards the selected target, restores remaining '
-  + 'configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a '
+  + 'and confirms Finish. Full Finish requires resolved feature notes and a clean child worktree, fast-forwards the selected target, '
+  + 'and removes the child checkout, project and source branch. Only merge retains the entire environment. Calls outside a '
   + 'worktree child are rejected.';
 
 // mcp#12: SDK/HTTP registration belongs in adapters, never in this contract.
@@ -164,6 +165,13 @@ export const SHELF_BRIDGE_TOOLS: BridgeToolSpec[] = [
       agent: z.string().optional().describe('registered provider key to preselect for Agent view; not a model or existing session'),
     },
   },
+  { name: M.TOOL, operation: M.OP,
+    description: 'Fast-forward an explicit existing target branch from the current worktree without opening a Finish dialog. '
+      + 'Waits for the actual Git result; preserves the checkout, branch, project, sessions and notes. '
+      + 'Requires a clean source and, for a checked-out target, a clean parent checkout. Never forces, rebases, cleans up or pushes to an external remote. '
+      + 'Returns outcome, targetBranch and sourceCommit when known; failures are MCP errors with Git diagnostics. '
+      + 'If the response is lost, inspect Git state before retrying; lack of a response does not mean no merge occurred. Provider tool approval still applies.',
+    inputSchema: { targetBranch: z.string().min(1).describe('existing local target branch; required, never inferred') } },
   { name: 'propose_worktree_finish', description: PROPOSE_WORKTREE_FINISH_DESC, inputSchema: {}, operation: 'worktree.propose_finish' },
 ];
 
@@ -185,5 +193,5 @@ export async function runBridgeTool(op: string, args: Record<string, unknown>): 
   if (r.ok) {
     return { text: typeof r.data === 'string' ? r.data : JSON.stringify(r.data ?? null), isError: false };
   }
-  return { text: `Error: ${r.error ?? 'app tool failed'}`, isError: true };
+  return { text: r.data !== undefined ? JSON.stringify(r.data) : `Error: ${r.error ?? 'app tool failed'}`, isError: true };
 }

@@ -1,3 +1,5 @@
+import { WORKTREE_MERGE as M, type WorktreeMergeResult } from '@shared/worktree-merge';
+import { mergeWorktreeProject } from '../worktree/merge-service';
 import { validateWorktreeAgent } from '@shared/worktree-child-config';
 import { isWorktreeUnavailable } from '@shared/worktree';
 /**
@@ -39,6 +41,8 @@ import { log } from '@shared/logger';
 export interface AppToolContext {
   /** Owning project — the web.fetch grant key is (projectId, origin). */
   projectId?: string;
+  /** Transport liveness rechecked before a direct Git mutation. */
+  isActive?: () => boolean;
   /** Trusted transport session, never supplied by model tool arguments. */
   agentSessionId?: string;
   /** Main-bound logical View and runtime tab; never read from tool args. */
@@ -48,7 +52,7 @@ export interface AppToolContext {
 
 export interface AppToolResult {
   ok: boolean;
-  /** Present when ok — JSON-serializable payload for the tool result. */
+  /** JSON-serializable result, including structured failure receipts when available. */
   data?: unknown;
   /** Present when !ok — human-readable reason surfaced to the model. */
   error?: string;
@@ -56,6 +60,10 @@ export interface AppToolResult {
 
 export const NESTED_WORKTREE_CREATE_ERROR =
   'Cannot create a worktree project from a worktree project. Continue in the current child project and use propose_worktree_finish when the work is ready.';
+
+class WorktreeMergeFailure extends Error {
+  constructor(readonly result: Extract<WorktreeMergeResult, { error: string }>) { super(result.error); }
+}
 
 interface AppToolDef {
   /** Safe (read-only) ops need no user confirmation; mutations do. */
@@ -368,6 +376,14 @@ const REGISTRY: Record<string, AppToolDef> = {
       };
     },
   },
+  [M.OP]: {
+    safe: false,
+    run: async (args, ctx) => {
+      const result = await mergeWorktreeProject(ctx.projectId, typeof args.targetBranch === 'string' ? args.targetBranch : '', ctx.isActive);
+      if (result.outcome !== M.OUTCOME.MERGED) throw new WorktreeMergeFailure(result);
+      return result;
+    },
+  },
   'worktree.propose_finish': {
     safe: false,
     run: async (_args, ctx) => {
@@ -431,6 +447,7 @@ export async function handleAppTool(op: string, args: Record<string, unknown> = 
   try {
     return { ok: true, data: await def.run(args, ctx) };
   } catch (err: any) {
+    if (err instanceof WorktreeMergeFailure) return { ok: false, error: err.message, data: err.result };
     if ((Object.values(D.OP) as string[]).includes(op)) {
       log.warn('agent-delegation', `op=${op} projectId=${ctx.projectId} viewId=${ctx.agentViewId} delegationId=${args.delegationId ?? '-'}: ${err?.message ?? String(err)}`);
     }

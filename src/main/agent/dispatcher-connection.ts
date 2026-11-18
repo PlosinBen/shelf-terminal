@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 // Main-side owner of ONE per-host dispatcher process (dispatch-layering, group
 // D3). Today main spawns a per-tab agent-server and wraps it (see remote.ts
 // `wrapProcess`); with the dispatcher, main spawns ONE dispatcher per host and
@@ -229,10 +230,11 @@ export function createDispatcherConnection(deps: DispatcherConnectionDeps): Disp
         ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
         : null;
       if (auditStarted) ch.sinks.onSessionEvent?.(auditStarted);
-      const resultPromise = !active && isDelegationOperation(op)
+      const resultPromise = !active && (isDelegationOperation(op) || op === M.OP)
         ? Promise.resolve({ ok: false, error: 'Inactive Agent channel' })
         : deps.handleAppTool(op, args, { projectId: ch.sinks.projectId, agentSessionId: sid,
-          agentViewId: ch.sinks.agentViewId, agentTabId: ch.sinks.agentTabId });
+          agentViewId: ch.sinks.agentViewId, agentTabId: ch.sinks.agentTabId,
+          ...(op === M.OP ? { isActive: () => active && channels.has(sid) } : {}) });
       void resultPromise.then((result) => {
         if (typeof requestId === 'string') {
           const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });

@@ -346,7 +346,26 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
     "name": "propose_worktree_create",
   },
   {
-    "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. If confirmed, Shelf requires a clean child worktree, fast-forwards the selected target, restores remaining configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a worktree child are rejected.",
+    "description": "Fast-forward an explicit existing target branch from the current worktree without opening a Finish dialog. Waits for the actual Git result; preserves the checkout, branch, project, sessions and notes. Requires a clean source and, for a checked-out target, a clean parent checkout. Never forces, rebases, cleans up or pushes to an external remote. Returns outcome, targetBranch and sourceCommit when known; failures are MCP errors with Git diagnostics. If the response is lost, inspect Git state before retrying; lack of a response does not mean no merge occurred. Provider tool approval still applies.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "targetBranch": {
+          "description": "existing local target branch; required, never inferred",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "targetBranch",
+      ],
+      "type": "object",
+    },
+    "name": "merge_worktree",
+  },
+  {
+    "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. Full Finish requires resolved feature notes and a clean child worktree, fast-forwards the selected target, and removes the child checkout, project and source branch. Only merge retains the entire environment. Calls outside a worktree child are rejected.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -734,7 +753,28 @@ exports[`Shelf tool contracts across Claude SDK and HTTP MCP > preserves each ad
     "name": "propose_worktree_create",
   },
   {
-    "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. If confirmed, Shelf requires a clean child worktree, fast-forwards the selected target, restores remaining configured feature-note files, and removes the child checkout and project only after every step succeeds. Calls outside a worktree child are rejected.",
+    "description": "Fast-forward an explicit existing target branch from the current worktree without opening a Finish dialog. Waits for the actual Git result; preserves the checkout, branch, project, sessions and notes. Requires a clean source and, for a checked-out target, a clean parent checkout. Never forces, rebases, cleans up or pushes to an external remote. Returns outcome, targetBranch and sourceCommit when known; failures are MCP errors with Git diagnostics. If the response is lost, inspect Git state before retrying; lack of a response does not mean no merge occurred. Provider tool approval still applies.",
+    "execution": {
+      "taskSupport": "forbidden",
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "targetBranch": {
+          "description": "existing local target branch; required, never inferred",
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "targetBranch",
+      ],
+      "type": "object",
+    },
+    "name": "merge_worktree",
+  },
+  {
+    "description": "Open the Finish Worktree gate for the current worktree child. This tool merges or removes nothing. The user reviews the target and confirms Finish. Full Finish requires resolved feature notes and a clean child worktree, fast-forwards the selected target, and removes the child checkout, project and source branch. Only merge retains the entire environment. Calls outside a worktree child are rejected.",
     "execution": {
       "taskSupport": "forbidden",
     },

@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AGENT_INPUT_SOURCE, createAgentInputMessage } from '@shared/agent-input';
 
@@ -583,6 +584,25 @@ describe('direct exec internal authorization routing', () => {
 });
 
 describe('direct exec memory routing', () => {
+  it('rejects merge requests from an inactive direct transport', async () => {
+    const { child } = capabilitiesChild({});
+    const { wrapProcess } = await import('./remote');
+    handleAppToolMock.mockResolvedValue({ ok: true, data: {} });
+    const remote = wrapProcess(child, undefined, undefined, undefined, undefined, undefined, undefined, 'child');
+    const emit = () => child.stdout.emit('data', Buffer.from(JSON.stringify({
+      type: 'app_tool', requestId: 'merge', op: M.OP, args: { targetBranch: 'main' },
+    }) + '\n'));
+    try {
+      emit(); await Promise.resolve();
+      const context = handleAppToolMock.mock.calls.at(-1)![2];
+      expect(context.isActive()).toBe(true);
+      remote.kill();
+      expect(context.isActive()).toBe(false);
+      handleAppToolMock.mockClear(); emit(); await Promise.resolve();
+      expect(handleAppToolMock).not.toHaveBeenCalled();
+    } finally { remote.kill(); }
+  });
+
   it('binds delegation calls to the logical View rather than the transport nonce and rejects inactive calls', async () => {
     const { child } = capabilitiesChild({});
     const { wrapProcess } = await import('./remote');

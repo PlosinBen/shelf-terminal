@@ -41,7 +41,7 @@ Two single-line JSON frames, correlated by `requestId` (modelled on the permissi
 - `ok: true` → `data` carries the op's JSON-serializable return. `ok: false` → `error` is a human-readable string surfaced to the model (e.g. `skill not found: x`).
 - `resolveAppToolResult(requestId, result)` resolves the awaiting bridge tool. A missing channel or main-side failure always comes back as `{ ok: false, error }` — the bridge **never rejects/throws**.
 
-The bridge tool formats the result for the model via `runBridgeTool` (`agent-server/app-tool-tools.ts`): on `ok`, the `data` (stringified if not already a string); on failure, `Error: <error>` flagged `isError`.
+The bridge tool formats the result for the model via `runBridgeTool` (`agent-server/app-tool-tools.ts`): on `ok`, the `data` (stringified if not already a string); on failure, a supplied structured `data` receipt is JSON-serialized; otherwise `Error: <error>` is returned. Both failure forms are flagged `isError`.
 
 `SHELF_BRIDGE_TOOLS` in that module is the provider-neutral tool contract: each
 `BridgeToolSpec` defines `name`, `description`, `inputSchema` (Zod raw shape), and
@@ -114,6 +114,7 @@ Authoritative definition: the `REGISTRY` constant and `handleAppTool` in `src/ma
 | `web.fetch` | `{ url, method?, headers?, body? }` | `{ status, headers, body }` (raw response) | no — gated **in main** per origin (not the provider confirm; see below) | `browser_fetch` |
 | `web.open` | `{ url, reason? }` | `{ opened: true, url, message }` | no — gated **in main** per call, Open/Deny only (see below) | `browser_open` |
 | `worktree.propose_create` | `{ branch?, note?, notes?, agent? }` | `{ opened: true, branch?, notePaths: string[], agent?, message }` | no — opens UI only; errors from a worktree child | `propose_worktree_create` |
+| `worktree.merge` | `{ targetBranch: string }` | merge receipt; structured failure with `ok:false` | no — direct Git mutation, no Shelf Finish gate | `merge_worktree` |
 | `worktree.propose_finish` | — | `{ opened: true, message }` | no — opens UI only; errors outside a worktree | `propose_worktree_finish` |
 
 **Errors (`ok:false`):** missing/blank `name` / `content` / `path` → arg error; `app_skill.get` / `*_file` on absent skill → `skill not found: <name>`; `read_file` on a reserved/invalid path → `invalid or reserved skill file path: <path>`, on an absent file → `file not found: <path>`. See guards below for `update` / `*_file`. `delete` (whole-skill) is **deliberately not registered** — agents cannot delete skills (UI-only, same stance as unlock).
@@ -158,6 +159,25 @@ Like `web.fetch`, `browser_open` is skip-confirm on Claude and reaches Copilot A
 
 The model-facing descriptions state only observable capability, dialog inputs, confirmed runtime effects, and project-kind rejection. They do not decide when feature notes are created or maintained, when development is ready, or how the cross-session development workflow proceeds; those semantics belong to the development and integration skills (`context/worktree` worktree#15).
 
-For these two worktree proposal ops only, main also injects an Agent View audit card. The event is a renderer primitive (`fold_code`), not a provider-native tool card: `label: "Shelf tool"`, `subtitle` = the model-facing MCP tool name (`propose_worktree_create` / `propose_worktree_finish`), and `msgId: "app-tool-<requestId>"`. The first body is `{ args }`; after `handleAppTool` returns, main upserts the same `msgId` with `{ args, result }`. For create, `result.notePaths` shows the canonical paths actually sent to the dialog. Non-worktree app-tools are intentionally not audited here to avoid noisy timelines and accidental exposure of sensitive/large app-tool arguments.
+For the two worktree proposal ops and direct `worktree.merge`, main also injects an Agent View audit card. The event is a renderer primitive (`fold_code`), not a provider-native tool card: `label: "Shelf tool"`, `subtitle` = the model-facing MCP tool name (`propose_worktree_create` / `propose_worktree_finish` / `merge_worktree`), and `msgId: "app-tool-<requestId>"`. The first body is `{ args }`; after `handleAppTool` returns, main upserts the same `msgId` with `{ args, result }`. For create, `result.notePaths` shows the canonical paths actually sent to the dialog. Non-worktree app-tools are intentionally not audited here to avoid noisy timelines and accidental exposure of sensitive/large app-tool arguments.
 
 Persisted missing worktree projects reject Finish proposals with a rescan/remove explanation. Renderer gates enforce the same availability rule; proposal acknowledgement never enables a missing checkout.
+
+### `worktree.merge` — direct merge receipt
+
+Authoritative tool/op/outcome names and receipt: `src/shared/worktree-merge.ts`.
+Input is `merge_worktree({ targetBranch: string })`, a required existing local branch name.
+Main obtains child, parent, connection and cwd from trusted caller context; supplied project/path fields do not select a different source.
+
+Success: `{ ok:true, data:{ outcome:'merged', targetBranch, sourceCommit } }`.
+Failure: `{ ok:false, error, data:{ outcome, targetBranch, sourceCommit?, error } }`;
+outcome is `busy | non-ff | feature-dirty | base-dirty | error`. Missing source identity omits sourceCommit.
+The bridge serializes a supplied failure data receipt as MCP text and sets `isError:true`.
+Failures without data preserve the existing `Error: ...` text. HTTP MCP and Claude SDK adapters use the same formatting.
+
+The request awaits Git completion, retains the worktree environment, emits audit progress/result and never opens Finish.
+A checked-out target must be in the parent checkout and clean; free local targets advance without switching checkouts.
+Invalid/missing targets, unavailable/mismatched sources and inactive channels fail before mutation.
+Liveness is checked at request dispatch and again before starting merge; disconnecting during Git does not cancel or roll it back.
+A target already at the source commit is success; divergence still fails. No automatic retry is authorized by this operation; after lost responses inspect Git state first.
+Provider approval remains independent from the removed Shelf Finish dialog.

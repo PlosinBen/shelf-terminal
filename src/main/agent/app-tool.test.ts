@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Project } from '@shared/projects';
 import { CODEX_PROVIDER, FAKE_PROVIDER } from '@shared/agent-providers';
@@ -64,6 +65,8 @@ vi.mock('../projects/repository-provider', () => ({
   }),
 }));
 
+const mergeWorktreeProject = vi.fn();
+vi.mock('../worktree/merge-service', () => ({ mergeWorktreeProject: (...args: unknown[]) => mergeWorktreeProject(...args) }));
 const createConnector = vi.fn();
 vi.mock('../connector', () => ({ createConnector: (...args: unknown[]) => createConnector(...args) }));
 const listFeatureNotes = vi.fn();
@@ -100,6 +103,7 @@ beforeEach(() => {
   isGranted.mockReset();
   grant.mockReset();
   createConnector.mockReset();
+  mergeWorktreeProject.mockReset();
   listFeatureNotes.mockReset();
 });
 
@@ -620,4 +624,28 @@ it('rechecks agent edit permission at the serialized write boundary', async () =
   const result = await handleAppTool('app_skill.update', { name: 'foo', content: '---\nname: foo\n---\nchanged' });
   expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/locked against agent edits/) });
   expect(onSkillsChanged).not.toHaveBeenCalled();
+});
+
+describe('direct worktree merge tool', () => {
+  it('awaits the result and uses caller context rather than supplied paths or project ids', async () => {
+    let resolve!: (value: unknown) => void;
+    mergeWorktreeProject.mockImplementation(() => new Promise(r => { resolve = r; }));
+    const pending = handleAppTool(M.OP, { targetBranch: 'main', projectId: 'forged', cwd: '/forged' }, { projectId: 'child' });
+    expect(mergeWorktreeProject).toHaveBeenCalledWith('child', 'main', undefined);
+    const result = { outcome: M.OUTCOME.MERGED, sourceCommit: 'abc', targetBranch: 'main' };
+    resolve(result);
+    expect(await pending).toEqual({ ok: true, data: result });
+    expect(getMainWindow).not.toHaveBeenCalled();
+  });
+  it('returns a structured failure without misreporting it as a successful tool', async () => {
+    const result = { outcome: M.OUTCOME.NON_FF, targetBranch: 'main', error: 'Git rejected non-fast-forward' };
+    mergeWorktreeProject.mockResolvedValue(result);
+    expect(await handleAppTool(M.OP, { targetBranch: 'main' }, { projectId: 'child' }))
+      .toEqual({ ok: false, error: result.error, data: result });
+  });
+
+  it('is registered as a mutation rather than a read-only proposal', () => {
+    expect(isKnownAppToolOp(M.OP)).toBe(true);
+    expect(isSafeAppToolOp(M.OP)).toBe(false);
+  });
 });

@@ -1,3 +1,4 @@
+import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
 import { SKILL_INVOCATION as SI, SKILL_COMMAND_ERROR as SCE, validSkillValidationRequest } from '@shared/skill-invocation';
 import { AGENT_DIFF_ERROR, readAgentDiff } from '@shared/agent-diff';
 import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
@@ -1248,9 +1249,9 @@ export function wrapProcess(
           ? buildWorktreeAppToolAuditEvent({ requestId, op, args })
           : null;
         if (auditStarted) onSessionEvent?.(auditStarted);
-        const resultPromise = !active && isDelegationOperation(op)
+        const resultPromise = !active && (isDelegationOperation(op) || op === M.OP)
           ? Promise.resolve({ ok: false, error: 'Inactive Agent channel' })
-          : handleAppTool(op, args, { projectId, agentSessionId, ...viewContext });
+          : handleAppTool(op, args, { projectId, agentSessionId, ...viewContext, ...(op === M.OP ? { isActive: () => active } : {}) });
         void resultPromise.then((result) => {
           if (typeof requestId === 'string') {
             const auditCompleted = buildWorktreeAppToolAuditEvent({ requestId, op, args, result });
