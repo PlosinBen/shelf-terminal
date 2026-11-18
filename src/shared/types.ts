@@ -93,8 +93,9 @@ type WithMsgId = {
  * ellipsis + `title={subtitle}` tooltip on hover.
  *
  * `errorMessage`: when present, the card is treated as failed — renderer
- * shows a red banner and force-expands regardless of the user's display
- * setting. `body` may be undefined (pure failure) or present (failed with
+ * shows a red banner outside the collapsible body. fold_code opens on its first
+ * failure per mount, then permits manual collapse; other folds force-expand.
+ * `body` may be undefined (pure failure) or present (failed with
  * partial output — e.g. Bash exit 1 with stderr text).
  */
 export interface FoldBase {
@@ -206,7 +207,8 @@ export type AgentDisplayMode = 'collapsed' | 'expanded';
  * Per-fold-type display preference key. 1:1 mapping with the `fold_*` variants
  * of `AgentMessage` — no separate mapping layer. `reply` / `note` / `system` /
  * `error` / `user` always render (no setting); failed fold cards
- * (`errorMessage` set) always force-expand regardless of these settings.
+ * (`errorMessage` set) override these defaults. fold_code opens on its first
+ * failure per mount, then respects manual collapse; other folds force-expand.
  */
 export type AgentDisplayKey =
   | 'fold_text'      // default collapsed (reasoning, prose)

@@ -1,5 +1,5 @@
 import type { AgentDiff } from '@shared/agent-diff';
-import React, { useState, useMemo, useContext } from 'react';
+import React, { useState, useMemo, useContext, useRef, useLayoutEffect } from 'react';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { AgentDisplayContext } from './agent/AgentDisplayContext';
@@ -90,20 +90,98 @@ interface FoldHeaderProps {
   subtitle?: string;
   isExpanded: boolean;
   onToggle: () => void;
+  keyboard?: boolean;
 }
 
 /** Shared header for all fold_* variants: chevron + label + subtitle.
  *  Subtitle truncates via CSS (white-space + text-overflow:ellipsis); the
  *  full string lives in the `title` attribute so users get the original on
  *  hover regardless of viewport width. */
-function FoldHeader({ label, subtitle, isExpanded, onToggle }: FoldHeaderProps) {
+function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard }: FoldHeaderProps) {
   return (
-    <div className="fold-header" onClick={onToggle}>
+    <div className="fold-header" onClick={onToggle}
+      {...(keyboard ? { role: 'button', tabIndex: 0, 'aria-expanded': isExpanded,
+        onKeyDown: (event: React.KeyboardEvent) => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle(); }
+        },
+      } : {})}>
       <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
       <span className="fold-label">{label}</span>
       {subtitle && (
         <span className="fold-subtitle" title={subtitle}>{subtitle}</span>
       )}
+    </div>
+  );
+}
+
+/** Raw output controls are provider-independent. UI choices live for this mount;
+ * remounting a failed card reveals its output again (agent-ui#5). */
+function CodeFold({ message, settingMode, nested }: {
+  message: Extract<AgentMsg, { type: 'fold_code' }>;
+  settingMode: AgentDisplayMode;
+  nested?: AgentMsg[];
+}) {
+  const hasError = !!message.errorMessage;
+  const [expansion, setExpansion] = useState({ failureSeen: hasError, choice: null as boolean | null });
+  // Adjust during render so the first failure cannot paint collapsed. Subsequent
+  // snapshots (including duplicate failures) leave the user's choice intact.
+  if (hasError && !expansion.failureSeen) {
+    setExpansion({ failureSeen: true, choice: true });
+  }
+  const isExpanded = expansion.choice ?? (hasError || settingMode === 'expanded');
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [fullOutput, setFullOutput] = useState(false);
+  const [tailRequest, setTailRequest] = useState(0);
+  const [copyStatus, setCopyStatus] = useState('');
+  const outputRef = useRef<HTMLPreElement>(null);
+  const output = message.body?.content ?? '';
+  const preview = useMemo(() => truncateLines(output, 30), [output]);
+  useLayoutEffect(() => {
+    if (tailRequest && outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [tailRequest]);
+  const copy = async (text: string, target: 'details' | 'output') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(`Copied ${target}`);
+    } catch {
+      console.warn('Could not copy fold content', { msgId: message.id, target });
+      setCopyStatus(`Could not copy ${target}. Please select and copy the text manually.`);
+    }
+  };
+  return (
+    <div className="agent-msg agent-msg-fold">
+      <FoldHeader label={message.label} subtitle={message.subtitle} isExpanded={isExpanded} keyboard
+        onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
+      {hasError && <div className="fold-error-banner">{message.errorMessage}</div>}
+      {isExpanded && <>
+        {message.subtitle && <>
+          <div className="fold-reading-controls">
+            <button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>
+              {detailsOpen ? 'Hide details' : 'Show details'}
+            </button>
+            <button type="button" onClick={() => void copy(message.subtitle!, 'details')}>Copy details</button>
+          </div>
+          {detailsOpen && <pre className="fold-body fold-command-text">{message.subtitle}</pre>}
+        </>}
+        {nested && nested.length > 0 && <div className="agent-subagent-nested">
+          {nested.map(child => <AgentMessage key={child.id} message={child} />)}
+        </div>}
+        {output && <>
+          <div className="fold-reading-controls">
+            {preview.remaining > 0 && <>
+              <button type="button" onClick={() => setFullOutput(!fullOutput)}>
+                {fullOutput ? 'Show preview' : `Show full output (${preview.lines.length + preview.remaining} lines)`}
+              </button>
+              <button type="button" onClick={() => { setFullOutput(true); setTailRequest(n => n + 1); }}>View tail</button>
+            </>}
+            <button type="button" onClick={() => void copy(output, 'output')}>Copy output</button>
+          </div>
+          <pre ref={outputRef} className="fold-body fold-body-code" tabIndex={0} aria-label="Output">
+            {fullOutput ? output : preview.lines.join('\n') + (preview.remaining > 0 ? `\n... +${preview.remaining} more lines` : '')}
+          </pre>
+        </>}
+        {copyStatus && <div className="fold-copy-status" role="status">{copyStatus}</div>}
+      </>}
     </div>
   );
 }
@@ -205,43 +283,7 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
     }
 
     case 'fold_code': {
-      const hasError = !!message.errorMessage;
-      const settingMode = resolveDisplayMode('fold_code');
-      const isExpanded = hasError
-        ? true
-        : (userToggled !== null ? userToggled : settingMode === 'expanded');
-      return (
-        <div className="agent-msg agent-msg-fold">
-          <FoldHeader
-            label={message.label}
-            subtitle={message.subtitle}
-            isExpanded={isExpanded}
-            onToggle={() => setUserToggled(!isExpanded)}
-          />
-          {hasError && (
-            <div className="fold-error-banner">{message.errorMessage}</div>
-          )}
-          {/* Subagent activity nests inside this (Agent/Task) card's expand area. */}
-          {isExpanded && nested && nested.length > 0 && (
-            <div className="agent-subagent-nested">
-              {nested.map((child) => <AgentMessage key={child.id} message={child} />)}
-            </div>
-          )}
-          {/* Empty body.content = a completed tool with no output (e.g. copilot's
-              read/view tools). The empty body exists only to mark the card settled
-              for reload (see translate.ts / reviveOrphanPending) — don't render an
-              empty grey bar for it. */}
-          {isExpanded && message.body && message.body.content && (() => {
-            const { lines, remaining } = truncateLines(message.body.content, 30);
-            return (
-              <pre className="fold-body fold-body-code">
-                {lines.join('\n')}
-                {remaining > 0 ? `\n... +${remaining} more lines` : ''}
-              </pre>
-            );
-          })()}
-        </div>
-      );
+      return <CodeFold key={message.id} message={message} settingMode={resolveDisplayMode('fold_code')} nested={nested} />;
     }
 
     case 'fold_markdown': {

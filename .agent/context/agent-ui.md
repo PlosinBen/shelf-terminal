@@ -147,7 +147,8 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
   - `OutgoingMessage msgType='error'`：provider 業務層錯誤（已有 turn 上下文）
 - **`fold_code` vs `fold_markdown` 區分**：markdown 是否解析。`fold_code` 用 `<pre>` 不解析（shell stdout、raw output 含 `*` `#` 不會誤判）；`fold_markdown` 解析 markdown（slash 結果、MCP rich text、想顯示 code 包 ```lang fence）— **不另開 `fold_json`**
 - **`FoldBase` interface 共享** label / subtitle / errorMessage，避免四個 fold 重複定義
-- **`errorMessage` 強制 expanded** override 任何 display setting — 「失敗一定要看見」沿用既有原則
+- **`errorMessage` 保持可見**：`fold_code` 每次 mount 首次失敗自動展開，之後可手動收合；重複失敗 snapshot 不覆寫使用者選擇。紅色 banner 在 body 外，因此收合仍可見。其他 fold 保留強制 expanded。重新掛載／history reload 的失敗 code 卡重新展開，不持久化展開偏好。
+- **`fold_code` 閱讀控制**：預設預覽 30 行，可顯示全部已收到的輸出、捲至尾端及複製全部內容；沿用限高捲動區。完整 subtitle 以 Details 展開／複製，保留換行、引號與既有 redaction；不解析 command 或補讀重導向檔案。控制只依渲染原語，不判斷工具名稱。沒有輸出的空 body 不顯示空白輸出框。複製失敗顯示回饋並記錄 msgId／target，不記錄文字內容。
 - **不做 hidden** — `collapsed` 留 header 在 timeline 事後 trace；hidden 違反「不在意但回頭要找得到」原則
 - **Plan 抽出獨立 event channel**：plan 是 state update（替換語意，當前 plan = X），不該擠進 timeline；error 不像 plan 抽出是因為它兩層都該進 timeline（差別只在來源層級）
 - **Streaming flag 留在 `WithMsgId` 最外層** — 是 lifecycle metadata 跟 msgId 同類，不是 content 屬性。實際只有 `reply` / `fold_text` 會用，其他 type 不設

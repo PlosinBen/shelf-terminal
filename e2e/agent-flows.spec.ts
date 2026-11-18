@@ -56,6 +56,93 @@ async function storedAgentMessages(page: Page): Promise<any[]> {
 }
 
 test.describe('agent flows via fake provider', () => {
+  test.describe('command result reading', () => {
+    test.use({ homeProjectDirectories: false });
+
+    test('failed output can collapse, reveal the tail and copy complete received text', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page);
+      await app.evaluate(({ ipcMain }, channel) => {
+        const original = (ipcMain as any)._invokeHandlers.get(channel);
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (event, payload) => {
+          (globalThis as any).__commandReadingTab = payload.tabId;
+          return original(event, payload);
+        });
+      }, IPC.AGENT_INIT);
+      await openAgentTab(page);
+      const command = '/bin/zsh -lc \'printf "first; line"\nfalse\'';
+      const output = Array.from({ length: 45 }, (_, i) => `line ${i + 1}`).join('\n') + '\n<failure-at-tail>';
+      const sendCard = async (failed: boolean) => app.evaluate(({ BrowserWindow }, { channel, command, output, failed }) => {
+        BrowserWindow.getAllWindows()[0].webContents.send(channel, (globalThis as any).__commandReadingTab, {
+          type: 'fold_code', msgId: 'command-reading', label: 'Command', subtitle: command,
+          body: { content: output }, ...(failed ? { errorMessage: 'Command failed with exit code 1' } : {}),
+        });
+      }, { channel: IPC.AGENT_MESSAGE, command, output, failed });
+      await sendCard(false);
+      const card = page.locator('.agent-msg-fold').filter({ has: page.locator('.fold-label', { hasText: 'Command' }) });
+      const header = card.locator('.fold-header');
+      await header.click();
+      await expect(card.locator('.fold-body-code')).toBeVisible();
+      await header.click();
+      await sendCard(true);
+      await expect(card.locator('.fold-body-code')).toBeVisible();
+      await header.click();
+      await expect(card.locator('.fold-body-code')).toHaveCount(0);
+      await expect(card.locator('.fold-error-banner')).toBeVisible();
+      await sendCard(true);
+      await expect(card.locator('.fold-body-code')).toHaveCount(0);
+      await header.focus();
+      await page.keyboard.press('Enter');
+      await expect(card.locator('.fold-body-code')).not.toContainText('<failure-at-tail>');
+      await card.getByRole('button', { name: 'View tail', exact: true }).click();
+      await expect(card.locator('.fold-body-code')).toHaveText(output);
+      await expect.poll(() => card.locator('.fold-body-code').evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
+      await card.getByRole('button', { name: 'Copy output', exact: true }).click();
+      await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
+      await card.getByRole('button', { name: 'Show preview', exact: true }).click();
+      await expect(card.locator('.fold-body-code')).not.toContainText('<failure-at-tail>');
+      await card.getByRole('button', { name: 'Show full output (46 lines)', exact: true }).click();
+      await expect(card.locator('.fold-body-code')).toHaveText(output);
+      await card.getByRole('button', { name: 'Show details', exact: true }).click();
+      await expect(card.locator('.fold-command-text')).toHaveText(command);
+      await card.getByRole('button', { name: 'Copy details', exact: true }).click();
+      await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(command);
+      await expect(card.locator('.fold-body-code')).toBeVisible();
+      // Copy errors must be visible without losing the received content.
+      await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error('clipboard denied'); }; });
+      await card.getByRole('button', { name: 'Copy output', exact: true }).click();
+      await expect(card.getByRole('status')).toContainText('Could not copy output');
+      await expect(card.locator('.fold-body-code')).toHaveText(output);
+      await header.focus();
+      await page.keyboard.press('Space');
+      await expect(header).toHaveAttribute('aria-expanded', 'false');
+      await expect(card.locator('.fold-error-banner')).toBeVisible();
+      await expect.poll(async () => (await storedAgentMessages(page)).find(m => m.id === 'command-reading')?.body?.content,
+        { timeout: 15000 }).toBe(output);
+      await page.locator('.tab-bar .tab.active').click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
+      await expect.poll(async () => (await page.evaluate(() => window.shelfApi.project.getAll()))[0].defaultTabs.some(t => t.kind === 'agent')).toBe(true);
+      await page.locator('.sidebar-item').first().click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Disconnect', exact: true }).click();
+      await expect(page.locator('.connect-prompt')).toBeVisible();
+      await page.locator('.connect-prompt').click();
+      await page.locator('.tab-bar .tab').last().click();
+      // Expansion is deliberately mount-local; failure and full received output survive history reload.
+      await expect(card.locator('.fold-body-code')).toBeVisible();
+      await expect(header).toHaveAttribute('aria-expanded', 'true');
+      await card.getByRole('button', { name: 'Show full output (46 lines)', exact: true }).click();
+      await expect(card.locator('.fold-body-code')).toHaveText(output);
+      await app.evaluate(({ BrowserWindow }, channel) => {
+        BrowserWindow.getAllWindows()[0].webContents.send(channel, (globalThis as any).__commandReadingTab, {
+          type: 'fold_code', msgId: 'empty-reading', label: 'Read', body: { content: '' },
+        });
+      }, IPC.AGENT_MESSAGE);
+      const emptyCard = page.locator('.agent-msg-fold').filter({ has: page.locator('.fold-label', { hasText: /^Read$/ }) });
+      await emptyCard.locator('.fold-header').click();
+      await expect(emptyCard.locator('.fold-body-code')).toHaveCount(0);
+      await expect(emptyCard.getByRole('button', { name: 'Copy output', exact: true })).toHaveCount(0);
+    });
+  });
   // Seed historical internal inputs through the actual main→renderer bridge;
   // this verifies rendering/storage, not live Telegram routing or authorization.
   test('shows saved input sources after reconnect without inferring legacy or human sources', async ({ shelfApp: { app, page } }) => {
@@ -802,7 +889,7 @@ test.describe('agent flows via fake provider', () => {
       const toolCard = page.locator('.agent-msg-fold:has(.fold-error-banner):visible').last();
       await expect(toolCard).toBeVisible({ timeout: 5_000 });
       await expect(toolCard.locator('.fold-label')).toHaveText('Bash');
-      // Failed fold cards force-expand; error banner is visible without clicking.
+      // First failure opens the code card; its banner stays visible independently.
       await expect(toolCard.locator('.fold-error-banner')).toBeVisible();
     });
   });

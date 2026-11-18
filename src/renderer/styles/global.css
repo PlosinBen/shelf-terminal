@@ -3393,6 +3393,41 @@ button {
   font-style: italic;
 }
 
+.fold-reading-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.fold-reading-controls button {
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fold-reading-controls button:hover {
+  color: var(--text);
+}
+
+.fold-header[role="button"]:focus-visible,
+.fold-reading-controls button:focus-visible,
+.fold-body-code:focus-visible {
+  outline: 2px solid var(--text-muted);
+  outline-offset: 2px;
+}
+
+.fold-copy-status {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.fold-command-text,
 .fold-body-code {
   background: var(--surface);
   border-radius: 3px;

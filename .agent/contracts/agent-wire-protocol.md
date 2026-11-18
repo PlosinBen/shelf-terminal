@@ -70,7 +70,7 @@ Rendering (per agent-ui#5): `reply` = assistant markdown reply (streams); `note`
 
 ### Foldable card variants — `fold_text` / `fold_code` / `fold_markdown` / `fold_diff`
 
-Collapsible cards sharing the `FoldBase` header (`src/shared/types.ts`). Differ only in `body` shape and how the renderer renders the body. `errorMessage` present ⇒ card treated as failed (red banner, force-expanded regardless of display setting); `body` may be absent (pure failure) or present (failed-with-partial-output).
+Collapsible cards sharing the `FoldBase` header (`src/shared/types.ts`). Differ only in `body` shape and how the renderer renders the body. `errorMessage` present ⇒ card treated as failed with a red banner outside the collapsible body. `fold_code` opens on its first failure per mount, then permits manual collapse; duplicate failure snapshots preserve that choice. Other folds remain force-expanded regardless of display setting. `body` may be absent (pure failure) or present (failed-with-partial-output).
 
 Common fields (all four):
 
@@ -81,7 +81,7 @@ Common fields (all four):
 | `msgType` | `'fold_text'` \| `'fold_code'` \| `'fold_markdown'` \| `'fold_diff'` | |
 | `label` | `string` | Required — main drops the card if missing. |
 | `subtitle` | `string?` | Full string; renderer CSS-truncates + `title=` tooltip. |
-| `errorMessage` | `string?` | Set ⇒ failed card, force-expanded. |
+| `errorMessage` | `string?` | Set ⇒ failed card; fold_code opens on first failure per mount, other folds force-expand. |
 
 Body shape per variant:
 
