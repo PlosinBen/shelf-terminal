@@ -3,6 +3,7 @@ import { SHELF_MCP_SERVER_NAME } from '@shared/mcp';
 import type { ShelfMcpEndpoint } from '@shared/shelf-mcp';
 
 interface CodexConfigObject {
+  tools: { update_plan: { enabled: boolean } };
   mcp_servers?: Record<string, CodexMcpServerConfig>;
 }
 
@@ -53,7 +54,8 @@ export function buildCodexRuntimeConfig(input: BuildConfigInput): CodexSdkRuntim
     if (mapped) mcpServers[serverName] = mapped;
   }
 
-  const config: CodexConfigObject = {};
+  // Codex defaults this tool off; Shelf's task panel needs native plan updates (agent-ui#1).
+  const config: CodexConfigObject = { tools: { update_plan: { enabled: true } } };
   if (Object.keys(mcpServers).length > 0) {
     config.mcp_servers = mcpServers;
   }

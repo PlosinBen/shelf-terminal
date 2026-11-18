@@ -233,7 +233,10 @@ describe('Codex official app-server backend lifecycle', () => {
     await backend.query({ prompt: 'hi', cwd: '/repo', appId: 'app-1' }, (m) => out.push(m));
 
     expect(app.calls.map((call) => call.method)).toEqual(['initialize', 'thread/start', 'turn/start']);
-    expect(app.calls.find((call) => call.method === 'thread/start')?.params).toMatchObject({ cwd: '/repo', sessionStartSource: 'startup' });
+    expect(app.calls.find((call) => call.method === 'thread/start')?.params).toMatchObject({
+      cwd: '/repo', sessionStartSource: 'startup',
+      config: { tools: { update_plan: { enabled: true } } },
+    });
     expect(app.calls.find((call) => call.method === 'turn/start')?.params).toMatchObject({
       threadId: 'thread-1',
       input: [{ type: 'text', text: 'hi', text_elements: [] }],
@@ -463,7 +466,10 @@ describe('Codex official app-server backend lifecycle', () => {
 
     await backend.query({ prompt: 'again', cwd: '/repo', restoreContext: restoreContext('thread-existing') }, (m) => out.push(m));
 
-    expect(ok.calls.find((call) => call.method === 'thread/resume')?.params).toMatchObject({ threadId: 'thread-existing' });
+    expect(ok.calls.find((call) => call.method === 'thread/resume')?.params).toMatchObject({
+      threadId: 'thread-existing',
+      config: { tools: { update_plan: { enabled: true } } },
+    });
     expect(out).toContainEqual({ type: 'context_patch', patch: { lastSdkSessionId: 'thread-existing' } });
 
     const mismatch = new FakeAppServer({

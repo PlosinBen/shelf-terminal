@@ -25,6 +25,7 @@ describe('Codex SDK pure runtime config mapping', () => {
     });
     expect(mapped.ok).toBe(true);
     expect(mapped.codexOptions.config).toEqual({
+      tools: { update_plan: { enabled: true } },
       mcp_servers: {
         shelf: {
           url: 'http://127.0.0.1:1234/mcp',
@@ -45,6 +46,7 @@ describe('Codex SDK pure runtime config mapping', () => {
     });
     expect(mapped.ok).toBe(true);
     expect(mapped.codexOptions.config).toEqual({
+      tools: { update_plan: { enabled: true } },
       mcp_servers: {
         gh: {
           command: 'node',
@@ -74,6 +76,7 @@ describe('Codex SDK pure runtime config mapping', () => {
     });
     expect(mapped.ok).toBe(true);
     expect(mapped.codexOptions.config).toEqual({
+      tools: { update_plan: { enabled: true } },
       mcp_servers: {
         api: {
           url: 'https://mcp.example.test',
