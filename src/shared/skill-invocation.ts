@@ -7,7 +7,7 @@ export const SKILL_INVOCATION = {
 export const SKILL_COMMAND_ERROR = {
   INVALID: 'invalid_command', STALE: 'stale_selection', CHANGED: 'target_changed',
   DISABLED: 'target_disabled', CONFLICT: 'command_conflict', UNAVAILABLE: 'native_unavailable',
-  SOURCE: 'source_unverified', PROJECTION: 'projection_mismatch', TIMEOUT: 'validation_timeout',
+  ATTACHMENTS: 'unsupported_attachments', SOURCE: 'source_unverified', PROJECTION: 'projection_mismatch', TIMEOUT: 'validation_timeout',
 } as const;
 export type SkillCommandErrorCode = typeof SKILL_COMMAND_ERROR[keyof typeof SKILL_COMMAND_ERROR];
 export interface SkillCommandSelection { registrationId: string; catalogRevision: string }

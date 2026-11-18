@@ -1,10 +1,11 @@
+import { assertCopilotSkillInput } from '../copilot/skill-invocation';
 import { AgentInitializationError, AgentInitRecoveryKind, savedPrefRecovery } from '@shared/agent-init-recovery';
 import { randomUUID } from 'node:crypto';
 import { inputPromptForDispatch } from '../../input-prompt';
 import { CONFIG_EDIT_KEYS, formatConfigAck } from '@shared/config-ack';
 import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { parseSlashPrefix } from '@shared/slash-prefix';
-import { FAKE_PROVIDER, type AgentProvider } from '@shared/agent-providers';
+import { FAKE_PROVIDER, COPILOT_PROVIDER, type AgentProvider } from '@shared/agent-providers';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
@@ -757,6 +758,14 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       lastSend = send;
 
       if (input.invocation) {
+        if (_representedProvider === COPILOT_PROVIDER) {
+          try { assertCopilotSkillInput(input); }
+          catch (error) {
+            send({ type: 'error', error: (error as Error).message });
+            send({ type: 'status', state: 'idle' });
+            return;
+          }
+        }
         send({ type: 'status', state: 'streaming' });
         send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: `App skill ${input.invocation.skillName}: ${input.invocation.args}${input.attachments?.length ? `\nAttachments: ${input.attachments.length}` : ''}` });
         send({ type: 'status', state: 'idle' });

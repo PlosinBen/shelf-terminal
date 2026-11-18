@@ -1430,4 +1430,38 @@ test.describe('custom skill commands', () => {
     await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
   });
 
+
+  test('app skill command: Copilot accepts text commands and rejects command attachments without blocking image chat', async ({ shelfApp: { page } }) => {
+    await registerCommand(page, 'dev-flow');
+    await setupProject(page);
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+    const input = page.locator('.agent-textarea:visible');
+    await expect(input).toBeEnabled();
+    await input.fill('/dev-');
+    const command = page.locator('.agent-slash-item', { hasText: '/dev-flow' });
+    await expect(command).toHaveAttribute('aria-disabled', 'false');
+    await command.click(); await input.fill('/dev-flow text'); await input.press('Enter');
+    await expect(page.locator('.agent-messages:visible')).toContainText('App skill my-skill: text');
+    const pasteImage = async () => {
+      await input.evaluate(target => {
+        const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([bytes], 'command-shot.png', { type: 'image/png' }));
+        target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+      });
+      await expect(page.locator('.agent-attachment-chip')).toHaveCount(1);
+    };
+    await pasteImage(); await input.fill('/dev-flow image'); await input.press('Enter');
+    const messages = page.locator('.agent-messages:visible');
+    await expect(messages).toContainText('unsupported_attachments');
+    await expect(messages).not.toContainText('App skill my-skill: image');
+    // History writes are batched for 5s; allow the same window as other persistence cases.
+    await expect.poll(async () => (await storedAgentMessages(page)).find(row => row.type === 'user' && row.content === '/dev-flow image')?.inputMessage?.attachments, { timeout: 15_000 }).toEqual([expect.objectContaining({ kind: 'image', name: 'command-shot.png' })]);
+    await pasteImage(); await input.fill('text:ordinary-image-still-works'); await input.press('Enter');
+    await expect(messages).toContainText('ordinary-image-still-works');
+    await expect.poll(async () => (await storedAgentMessages(page)).find(row => row.type === 'user' && row.content === 'text:ordinary-image-still-works')?.inputMessage?.attachments, { timeout: 15_000 }).toEqual([expect.objectContaining({ kind: 'image', name: 'command-shot.png' })]);
+    await expect(page.locator('.agent-msg-queued')).toHaveCount(0);
+  });
+
 });

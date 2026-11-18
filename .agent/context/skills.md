@@ -177,7 +177,7 @@ related:
 
 **Reason**：folder rename／delete 自然攜帶設定，whole-item Backup／Import 可維持完整資料；中央 registry 會多一份跨 rename／delete 對帳。metadata 與 temp 排除 aux／Files／兩條投影路徑及 consumption hash，避免 agent 改使用者入口、把控制設定送給 provider，或因 alias 修改觸發 reload。portable sidecar 需獨立 schema 驗證，不能當成「不備份且保留 destination」的 local marker；Import 在 swap 前驗最終 alias／ID 唯一性，metadata-only Import 只刷新 renderer。
 
-**Boundary**：命令設定已有 schema、source service、pure parser／lookup、資料邊界與 Skills editor／IPC；Agent menu／queue binding 已接線；Codex 與 Claude 有原生 adapter；Copilot 的 Shelf app invocation 仍因 multipart／來源限制不可用。lookup match 不等於已執行，也不取消 native feasibility 的驗證需求。讀取／解析失敗明確回傳 error並記錄 context，不當作未登記。
+**Boundary**：命令設定已有 schema、source service、pure parser／lookup、資料邊界與 Skills editor／IPC；Agent menu／queue binding 已接線；Codex 與 Claude 有原生 adapter；Copilot 以 native source catalog 與新 session snapshot 驗證純文字 invocation，帶附件的命令明確拒絕（skills#18）。lookup match 不等於已執行，也不取消 native feasibility 的驗證需求。讀取／解析失敗明確回傳 error並記錄 context，不當作未登記。
 
 **Related**：`contracts/skill-commands`、`architecture/skills-projection`、`src/shared/skill-commands.ts`、`src/main/{skill-commands,skills-mutation,skills-store}.ts`。
 
@@ -191,14 +191,14 @@ The user editor validates the full draft before writing, serializes content/rena
 
 **Reason**: Re-resolving aliases after queue delay could execute a different skill. Hash equality alone also misses a managed edit followed by byte restoration or a whole-item replacement, so managed revisions and directory identity participate. Alias/description changes preserve prior bindings; content/mount/identity changes invalidate them. An independent control lane avoids a turn waiting for its own queued validation reply.
 
-**Boundary**: Native control names win collisions, and stale selected entries fail explicitly. Codex verifies enabled canonical native source and target projection before skill-item dispatch. Claude verifies a refreshed live plugin namespace/path and command index before native slash dispatch, retains images, and rejects qualified-name shadows. Copilot app dispatch remains unavailable rather than silently forwarding alias text or expanding instructions. This preserves the requested semantics without claiming unobserved provider support.
+**Boundary**: Native control names win collisions, and stale selected entries fail explicitly. Codex verifies enabled canonical native source and target projection before skill-item dispatch. Claude verifies a refreshed live plugin namespace/path and command index before native slash dispatch, retains images, and rejects qualified-name shadows. Copilot dispatches text-only commands after native source and loaded-payload verification; command attachments fail inside the provider (skills#18). No provider silently forwards an unverified alias or copies instructions into the prompt.
 
 **Related**: `contracts/skill-commands`, `contracts/agent-routing`, `src/main/agent/skill-invocations.ts`, `agent-server/skill-invocation-client.ts`.
 
 
 ## skills#15 — Native command completion does not prove image skill dispatch · [Gotcha]
 
-Copilot CLI 1.0.103 ACP expands text-only skill slash prompts into native skill context, but multipart text/image prompts can retain the literal slash while passing the image to model input. This occurs in existing and fresh sessions with either block order. An `end_turn` result therefore does not prove the requested skill was invoked; verify current-turn native source expansion and attachment together before enabling Shelf invocation. Same-name project skills also take precedence over personal skills, so alias text alone cannot guarantee the Shelf target. Do not copy skill instructions or discard attachments to bypass these requirements.
+Copilot CLI 1.0.103 ACP expands text-only skill slash prompts into native skill context, but multipart text/image prompts can retain the literal slash while passing the image to model input. This occurs in existing and fresh sessions with either block order. An `end_turn` result therefore does not prove the requested skill was invoked; verify current-turn native source expansion for the supported input shape; command attachments must fail explicitly (skills#18). Same-name project skills also take precedence over personal skills, so alias text alone cannot guarantee the Shelf target. Do not copy skill instructions or discard attachments to bypass these requirements.
 
 Claude CLI 2.1.159 with SDK 0.3.159 can dispatch namespaced plugin skills with images, reload existing content, and dispatch a newly added name after `reloadPlugins()` in a live query. A reload command list alone is still weaker evidence than the exact current-turn source expansion. These are native preprocessing observations using synthetic inference, not real model service or Shelf adapter acceptance.
 
@@ -211,3 +211,12 @@ Claude app invocation reloads the actual streaming query, verifies the sole Shel
 ## skills#17 — Codex plugin discovery can qualify the native skill name · [Gotcha]
 
 Codex discovers Shelf's projected plugin manifest and may advertise `shelf-skills:<name>` even though source identity and folder use the leaf name. Native invocation accepts either expected catalog name only when enabled and its canonical path exactly matches the bound app target. Use the matched native name consistently in the text reference and native skill item. Requiring the leaf name alone rejects a valid app projection; trusting a matching name without the exact path can select a project shadow. Source mismatch diagnostics log candidate names/paths/enabled state and loader errors without skill instruction bodies.
+
+
+## skills#18 — Copilot limits command input rather than disabling the provider · [Decision]
+
+Copilot supports text-only app skill commands, including empty arguments. Native `skill list --json` under the live session cwd and config-home supplies source precedence; canonical target and enabled state must match the bound app skill. A same-name project skill is rejected rather than invoked as the app skill. Native discovery reports skill directories, so validation resolves their SKILL.md files before comparing canonical paths.
+
+ACP has no skill reload or loaded-payload RPC. Shelf captures app payload snapshots around new session creation and verifies the invocation against that unchanged snapshot plus current discovery. Changed content and resumed sessions without a verified snapshot reject the affected command and request a new conversation; ordinary chat stays usable. A disk listing alone cannot prove what an older session loaded. Shelf does not reset conversations to hide this restriction.
+
+ACP multipart slash prompts can pass images while failing to expand the skill, so attachment-bearing app and advertised native commands fail with `unsupported_attachments` before prompt dispatch. Do not disable all Copilot commands, drop attachments, or copy skill instructions as a workaround. Ordinary image chat retains its existing path, and stop invalidates pending source checks. This policy is provider-local; renderer remains provider-neutral.

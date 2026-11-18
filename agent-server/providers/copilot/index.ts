@@ -1,4 +1,6 @@
-import { SKILL_COMMAND_ERROR as SCE } from '@shared/skill-invocation';
+import { assertCopilotSkillInput, readCopilotSkillCatalog, snapshotCopilotSkills, loadedCopilotSkills, resolveCopilotSkillCommand, type CopilotNativeSkill, type CopilotSkillSnapshot } from './skill-invocation';
+import { resolveSkillsPluginRoot } from '../shared';
+import { SKILL_COMMAND_ERROR as SCE, SkillCommandFailure } from '@shared/skill-invocation';
 import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-recovery';
 // Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
 // Uses the shared, semantics-free acp/ toolkit for the runtime and OWNS copilot
@@ -120,6 +122,7 @@ export interface CopilotDeps {
   getShelfMcp?: () => Promise<ShelfMcpEndpoint | null>;
   /** Test seam for the provider-local native-mode confirmation bound. */
   modeConfirmationTimeoutMs?: number;
+  readSkillCatalog?: (cwd: string, appId?: string) => Promise<CopilotNativeSkill[]>;
 }
 
 function defaultOpenAgent(cwd: string, appId?: string): CopilotAgentTarget {
@@ -134,7 +137,7 @@ function defaultOpenAgent(cwd: string, appId?: string): CopilotAgentTarget {
 
 /** Where `copilot --acp` scans for skills, for `appId`: `$COPILOT_HOME/skills`.
  *  The provider only DECLARES this; the agent-server projects the canonical tree
- *  here (provider-boundary principle — the backend does no fs). */
+ *  here (provider-boundary principle — the backend only reads sources for validation). */
 function copilotSkillTarget(appId: string | undefined): string | undefined {
   const home = copilotConfigHome(appId);
   return home ? path.join(home, 'skills') : undefined;
@@ -144,6 +147,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   const openAgent = deps.openAgent ?? defaultOpenAgent;
   const getShelfMcp = deps.getShelfMcp ?? getSharedShelfMcp;
   const modeConfirmationTimeoutMs = deps.modeConfirmationTimeoutMs ?? COPILOT_MODE_CONFIRMATION_TIMEOUT_MS;
+  const readSkillCatalog = deps.readSkillCatalog ?? readCopilotSkillCatalog;
+  let sessionSkills: { sessionId: string; snapshot: CopilotSkillSnapshot } | null = null;
+  let invocationEpoch = 0;
   const usageObserver = createCopilotUsageObserver();
 
   let conn: AcpConnection | null = null;
@@ -354,6 +360,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     const base = mapSessionCapabilities(input);
     return {
       ...base,
+      appSkillCommands: { available: true },
       permissionModes: [],
       permissionControl: nativePermissionControl(),
       ...(currentModel ? { currentModel } : {}),
@@ -536,6 +543,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   }
 
   function resetLiveSessionState(): void {
+    sessionSkills = null;
+    invocationEpoch++;
     activeAutopilotCompletion?.resolve('terminated');
     activeAutopilotCompletion = null;
     rejectNativeModeConfirmation('Copilot session replaced during native mode confirmation');
@@ -682,8 +691,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     pendingContextUsage = undefined;
 
     // Skills are already projected to `$COPILOT_HOME/skills` by the agent-server
-    // (it calls skillTarget + projectAppSkills before this) — the backend does no
-    // fs. copilot --acp scans config-home for them (ACP has no per-session field).
+    // (it calls skillTarget + projectAppSkills before this) — the backend does not
+    // mutate the projection. copilot --acp scans config-home for them (ACP has no per-session field).
     const c = ensureConnection(input.cwd, appId);
     // ACP requires the `initialize` handshake before any session op. copilot --acp
     // has tolerated its absence, but sending it is spec-correct and consistent with
@@ -719,6 +728,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // advertised, the shared driver suppresses its conversation
         // replay while retaining mode/config/command metadata.
         try {
+          sessionSkills = null;
           session = supportsResume
             ? await driver.resume(c.agent, input.resumeId, opts)
             : await driver.load(c.agent, input.resumeId, opts);
@@ -742,7 +752,21 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           recoveredMissingSession = true;
         }
       }
+      sessionSkills = null;
+      const root = resolveSkillsPluginRoot(appId);
+      let before: CopilotSkillSnapshot | undefined;
+      if (root) {
+        try { before = snapshotCopilotSkills(await readSkillCatalog(input.cwd, appId), root); }
+        catch (error) { serverLog('warn', 'copilot', `App skill source snapshot unavailable before session creation appId=${appId}: ${(error as Error).message}`); }
+      }
       session = await driver.startNew(c.agent, opts);
+      if (root && before) {
+        try {
+          const after = snapshotCopilotSkills(await readSkillCatalog(input.cwd, appId), root);
+          sessionSkills = { sessionId: session.sessionId, snapshot: loadedCopilotSkills(before, after) };
+        } catch (error) { serverLog('warn', 'copilot', `App skill source snapshot unavailable after session creation session=${session.sessionId}: ${(error as Error).message}`); }
+      }
+
       sessionCwd = input.cwd;
       sessionAppId = appId;
       // Cache the advertised config so set-mode / set-config-option can resolve ids
@@ -786,7 +810,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     async query(input: QueryInput, send: SendFn): Promise<void> {
       activeExecutionSend = send;
       try {
-        if (input.invocation) throw new Error(`[${SCE.SOURCE}] Copilot app skill source and live slash dispatch are not verified`);
+        const epoch = invocationEpoch;
+        assertCopilotSkillInput(input);
         // A config-edit turn (picker / status-bar) carries no prompt — apply it
         // imperatively (set-mode / set-config-option) and return, rather than
         // driving an empty prompt. Ordinary input does not replay preferences.
@@ -796,7 +821,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           return;
         }
 
-        const slash = parseSlashPrefix(inputPromptForDispatch(input));
+        const slash = input.invocation ? null : parseSlashPrefix(inputPromptForDispatch(input));
         if (slash && (slash.cmd === COPILOT_COMMANDS.NEW || slash.cmd === COPILOT_COMMANDS.RESET)) {
           send({
             type: 'message',
@@ -854,6 +879,14 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             send,
           );
         }
+        if (input.invocation) {
+          const root = resolveSkillsPluginRoot(input.appId ?? lastAppId);
+          const current = root ? snapshotCopilotSkills(await readSkillCatalog(input.cwd, input.appId ?? lastAppId), root) : [];
+          const loaded = sessionSkills?.sessionId === s.sessionId ? sessionSkills.snapshot : null;
+          prompt = resolveCopilotSkillCommand(input.invocation, root, loaded, current);
+          if (epoch !== invocationEpoch || session !== s) throw new SkillCommandFailure(SCE.STALE, 'Invocation stopped during native source validation');
+        }
+        assertCopilotSkillInput(input, driver.getAvailableCommands(s.sessionId) ?? []);
         // Install the observer before session/prompt starts. A restored Copilot
         // session can publish its authoritative mode only after the prompt is in
         // flight; deciding whether to observe here would miss both that mode
@@ -861,7 +894,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         const autopilotCompletion = createAutopilotCompletionGate(s.sessionId);
         activeAutopilotCompletion = autopilotCompletion;
         const promptSlash = parseSlashPrefix(prompt);
-        const isAdvertisedSlashCommand = promptSlash !== null
+        const isAdvertisedSlashCommand = !!input.invocation || promptSlash !== null
           && driver.getAvailableCommands(s.sessionId)?.some((command) => command.name === promptSlash.cmd) === true;
         const settleUsagePrompt = usageObserver.beginPrompt(s.sessionId);
         let usageStopReason: StopReason | undefined;
@@ -1031,6 +1064,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     async stop(): Promise<void> {
+      invocationEpoch++;
       // Cooperative cancel while session/prompt is live; after that response has
       // already settled, Copilot autopilot may still emit session work. There is
       // no remaining request whose stopReason can acknowledge cancellation, so
@@ -1083,6 +1117,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
      *  only this respawn after login. Mirrors the appId-change respawn, minus the
      *  appId check. */
     reconnect(): void {
+      sessionSkills = null;
+      invocationEpoch++;
       activeAutopilotCompletion?.resolve('terminated');
       activeAutopilotCompletion = null;
       rejectNativeModeConfirmation('Copilot connection closed during native mode confirmation');
@@ -1098,6 +1134,8 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     dispose(): void {
+      sessionSkills = null;
+      invocationEpoch++;
       loginRunner?.cancel();
       permissions.cancelAll();
       activeAutopilotCompletion?.resolve('terminated');
