@@ -1,3 +1,4 @@
+import { EXECUTION_STATE as ES } from '@shared/agent-execution';
 import { SKILL_COMMAND_AVAILABILITY as SCA } from '@shared/skill-invocation';
 import { selectSkillCommand, setSkillCommandMenu, reconcileSkillCommandSelection } from './agentTabStore';
 import { AgentInitRecoveryKind } from '@shared/agent-init-recovery';
@@ -77,6 +78,20 @@ it('keeps direct config requests out of history and ignores results after incarn
   setInitStatus(TAB, 'starting'); setInitStatus(TAB, 'ready');
   updateConfigControl(TAB, { ...next, state: 'confirmed' });
   expect(__getTabForTests(TAB)?.configControl).toBeUndefined();
+});
+
+it('retains command outcomes across late output and marks unfinished partial output unknown on idle', () => {
+  initTab(TAB, { sessionId: SESSION, provider: 'codex' });
+  setExecutionActive(TAB, true);
+  const base = { id: 'cmd', type: 'fold_code' as const, label: 'Command', timestamp: 1 };
+  upsertMessage(TAB, { ...base, execution: { state: ES.FAILED, exitCode: 130 }, errorMessage: 'failed', body: { content: 'first' } });
+  upsertMessage(TAB, { ...base, execution: { state: ES.RUNNING }, body: { content: 'first\nlate' } });
+  expect(__getTabForTests(TAB)?.messages[0]).toMatchObject({ execution: { state: ES.FAILED, exitCode: 130 }, errorMessage: 'failed', body: { content: 'first\nlate' } });
+  upsertMessage(TAB, { ...base, id: 'unfinished', execution: { state: ES.RUNNING }, body: { content: 'partial' } });
+  setExecutionActive(TAB, false);
+  expect(__getTabForTests(TAB)?.messages[1]).toMatchObject({ execution: { state: ES.UNKNOWN }, body: { content: 'partial' } });
+  upsertMessage(TAB, { ...base, id: 'unfinished', execution: { state: ES.SUCCEEDED, exitCode: 0 } });
+  expect(__getTabForTests(TAB)?.messages[1]).toMatchObject({ execution: { state: ES.SUCCEEDED, exitCode: 0 }, body: { content: 'partial' } });
 });
 
 it('does not let delayed progress overwrite a terminal control result', () => {
@@ -196,13 +211,21 @@ describe('agentTabStore — lifecycle', () => {
     initTab(TAB, { sessionId: SESSION, provider: 'claude' });
     setExecutionActive(TAB, true);
     appendChunk(TAB, 'reply-partial', 'received before exit', 'text');
+    upsertMessage(TAB, { id: 'partial-command', type: 'fold_code', label: 'Command', timestamp: 1,
+      execution: { state: ES.RUNNING }, body: { content: 'not a result' } });
+    upsertMessage(TAB, { id: 'done-empty-command', type: 'fold_code', label: 'Command', timestamp: 2,
+      execution: { state: ES.SUCCEEDED, exitCode: 0 } });
     await flushAgentHistoryForExit([SESSION]);
     expect(mockedStorage.saveAgentMessagesDelta).toHaveBeenLastCalledWith(SESSION, expect.arrayContaining([
       expect.objectContaining({ id: 'reply-partial', content: 'received before exit', streaming: false, exitInterrupted: true }),
+      expect.objectContaining({ id: 'partial-command', execution: { state: ES.UNKNOWN }, body: { content: 'not a result' } }),
     ]));
     expect(__getTabForTests(TAB)!.isExecutionActive).toBe(true);
-    expect(__getTabForTests(TAB)!.messages[0]).toMatchObject({ streaming: true });
-    expect(__getTabForTests(TAB)!.messages[0]).not.toHaveProperty('exitInterrupted');
+    expect(__getTabForTests(TAB)!.messages.find(m => m.id === 'reply-partial')).toMatchObject({ streaming: true });
+    expect(__getTabForTests(TAB)!.messages.find(m => m.id === 'reply-partial')).not.toHaveProperty('exitInterrupted');
+    expect(__getTabForTests(TAB)!.messages.find(m => m.id === 'partial-command')).toMatchObject({ execution: { state: ES.RUNNING } });
+    const saved = mockedStorage.saveAgentMessagesDelta.mock.calls.at(-1)![1];
+    expect(saved.find(m => m.id === 'done-empty-command')).not.toHaveProperty('errorMessage');
   });
 
   it('exit retries failed dirty messages even after in-memory trimming', async () => {

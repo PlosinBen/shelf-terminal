@@ -3427,6 +3427,19 @@ button {
   margin-top: 4px;
 }
 
+.fold-execution {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 3px 4px;
+}
+
+.fold-execution[data-state="failed"],
+.fold-execution[data-state="declined"],
+.fold-execution[data-state="interrupted"],
+.fold-execution[data-state="unknown"] {
+  color: var(--agent-error, #e06c75);
+}
+
 .fold-command-text,
 .fold-body-code {
   background: var(--surface);

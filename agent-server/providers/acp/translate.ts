@@ -1,3 +1,4 @@
+import { EXECUTION_STATE as ES, type AgentExecution } from '@shared/agent-execution';
 // Pure ACP → Shelf-wire translation.
 //
 // This is the semantics-FREE core of the shared `acp/` toolkit (agent-providers#6):
@@ -224,6 +225,10 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       const label = toolCallLabel('kind' in update ? update.kind : undefined, title);
       const status = 'status' in update ? update.status : undefined;
       const errorMessage = errorFor(status);
+      // ACP status applies to the tool invocation; it supplies no portable exit code.
+      const executionStates = { pending: ES.PENDING, in_progress: ES.RUNNING, completed: ES.SUCCEEDED, failed: ES.FAILED } as const;
+      const execution: AgentExecution | undefined = 'kind' in update && update.kind === 'execute' && status
+        ? { state: executionStates[status] ?? ES.UNKNOWN } : undefined;
       const diff = firstDiff('content' in update ? update.content : undefined);
       // subtitle = the affected file PATH (ACP `locations`, else the diff block's
       // path), matching claude (`Edit` → subtitle=<path>). copilot's edit/apply_patch
@@ -252,6 +257,7 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       const settled = status === 'completed';
       return [{
         type: 'message', msgId, msgType: 'fold_code', label,
+        ...(execution ? { execution } : {}),
         ...(subtitle ? { subtitle } : {}),
         ...(errorMessage ? { errorMessage } : {}),
         ...((bodyText || settled) ? { body: { content: bodyText } } : {}),

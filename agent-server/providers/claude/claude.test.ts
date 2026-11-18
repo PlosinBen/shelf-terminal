@@ -4,6 +4,21 @@ import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extra
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
 
+describe('Bash execution outcome', () => {
+  it('uses Bash tool results as tool outcomes without inventing shell exit codes', () => {
+    for (const isError of [true, false]) {
+      const out: OutgoingMessage[] = [];
+      const send = (message: OutgoingMessage) => out.push(message);
+      const map = createBlockMsgIdState();
+      const id = `bash-state-${isError}`;
+      processMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'false' } }] } } as any, send, '/x', map);
+      expect(out).toContainEqual(expect.objectContaining({ msgId: id, execution: { state: 'running' } }));
+      processMessage({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'received result', is_error: isError }] } } as any, send, '/x', map);
+      expect(out).toContainEqual(expect.objectContaining({ msgId: id, execution: { state: isError ? 'failed' : 'succeeded' } }));
+    }
+  });
+});
+
 describe('mergeClaudeModels', () => {
   it('returns SDK models unchanged when no customs', () => {
     const sdk = [

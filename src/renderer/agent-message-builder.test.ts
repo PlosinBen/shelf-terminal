@@ -5,6 +5,14 @@ import type { AgentMsg } from './components/AgentMessage';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 
 describe('buildAgentMsg', () => {
+  it('preserves valid execution metadata and makes malformed metadata unknown', () => {
+    const base = { type: 'fold_code', msgId: 'cmd', label: 'Command', body: { content: 'partial' } };
+    expect(buildAgentMsg({ ...base, execution: { state: 'failed', exitCode: 130 } }, CLAUDE_PROVIDER))
+      .toMatchObject({ execution: { state: 'failed', exitCode: 130 } });
+    expect(buildAgentMsg({ ...base, execution: { state: 'succeeded', exitCode: '0' } }, CLAUDE_PROVIDER))
+      .toMatchObject({ execution: { state: 'unknown' }, body: { content: 'partial' } });
+    expect(buildAgentMsg(base, CLAUDE_PROVIDER)).not.toHaveProperty('execution');
+  });
   it('preserves mirrored Telegram original text and canonical metadata without changing old history', () => {
     const built = createAgentInputMessage({ source: { kind: AGENT_INPUT_SOURCE.TELEGRAM }, content: 'original', replyRequirement: AGENT_REPLY_REQUIREMENT.BRIEF_PLAIN_TEXT });
     if (!built.ok) throw new Error(built.error);

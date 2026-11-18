@@ -1,4 +1,5 @@
 import { AGENT_DIFF_ERROR, readAgentDiff } from '@shared/agent-diff';
+import { readAgentExecution } from '@shared/agent-execution';
 import type { AgentMsg } from './components/AgentMessage';
 import { validateAgentInputMessage } from '@shared/agent-input';
 
@@ -70,14 +71,18 @@ function buildAgentMsgInner(msg: any, provider: string): AgentMsg | null {
           : {}),
         provider, timestamp: ts,
       };
-    case 'fold_code':
+    case 'fold_code': {
+      const checked = readAgentExecution(msg.execution);
+      if (checked.anomaly) console.warn(checked.anomaly, { msgId: id });
       return {
         id, type: 'fold_code', ...foldBase(msg),
+        ...(checked.execution ? { execution: checked.execution } : {}),
         ...(msg.body && typeof msg.body.content === 'string'
           ? { body: { content: msg.body.content } }
           : {}),
         provider, timestamp: ts,
       };
+    }
     case 'fold_markdown':
       return {
         id, type: 'fold_markdown', ...foldBase(msg),

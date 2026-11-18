@@ -1,4 +1,5 @@
 import { WORKTREE_MERGE as M } from '@shared/worktree-merge';
+import { readAgentExecution } from '@shared/agent-execution';
 import { SKILL_INVOCATION as SI, SKILL_COMMAND_ERROR as SCE, validSkillValidationRequest } from '@shared/skill-invocation';
 import { AGENT_DIFF_ERROR, readAgentDiff } from '@shared/agent-diff';
 import { AgentInitializationError, readInitRecovery } from '@shared/agent-init-recovery';
@@ -1507,9 +1508,12 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
     }
     case 'fold_code': {
       if (typeof msg.label !== 'string') return null;
+      const checked = readAgentExecution(msg.execution);
+      if (checked.anomaly) log.warn('agent-execution', checked.anomaly, { msgId });
       return {
         msgId,
         type: 'fold_code',
+        ...(checked.execution ? { execution: checked.execution } : {}),
         label: msg.label,
         ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),
         ...(typeof msg.errorMessage === 'string' ? { errorMessage: msg.errorMessage } : {}),

@@ -796,6 +796,12 @@ describe('parseRemoteMessage — mid-execution capabilities', () => {
 });
 
 describe('File Diff wire projection', () => {
+  it('preserves structured command outcomes through the main wire boundary', async () => {
+    const { parseRemoteMessage } = await import('./remote');
+    expect(parseRemoteMessage({ type: 'message', msgType: 'fold_code', msgId: 'command', label: 'Command',
+      execution: { state: 'failed', exitCode: 130 }, body: { content: 'partial' } }))
+      .toMatchObject({ payload: { execution: { state: 'failed', exitCode: 130 } } });
+  });
   it('preserves every hunk through main and keeps the legacy body readable', async () => {
     const { parseRemoteMessage } = await import('./remote');
     const bodies = [

@@ -74,11 +74,16 @@ describe('translateSessionUpdate', () => {
     };
     expect(translateSessionUpdate(u)).toEqual([{
       type: 'message', msgId: 't2', msgType: 'fold_code', label: 'Execute', subtitle: 'Run',
+      execution: { state: 'succeeded' },
       body: { content: 'output line' },
     }]);
   });
 
   it('surfaces a failed tool_call as an error card', () => {
+    for (const [status, state] of [['pending', 'pending'], ['in_progress', 'running'], ['completed', 'succeeded'], ['failed', 'failed']] as const) {
+      expect(translateSessionUpdate({ sessionUpdate: 'tool_call', toolCallId: 'exec', title: 'Run', kind: 'execute', status })[0])
+        .toMatchObject({ execution: { state } });
+    }
     const u: SessionUpdate = { sessionUpdate: 'tool_call', toolCallId: 't3', title: 'Boom', status: 'failed' };
     const out = translateSessionUpdate(u);
     expect(out[0]).toMatchObject({ type: 'message', msgType: 'fold_code', errorMessage: 'Tool call failed' });

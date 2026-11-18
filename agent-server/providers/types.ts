@@ -267,6 +267,7 @@ export type OutgoingMessage = WireEnvelope & (
   | {
       type: 'message'; msgId: string; msgType: 'fold_code';
       label: string; subtitle?: string; errorMessage?: string;
+      execution?: import('@shared/agent-execution').AgentExecution;
       body?: { content: string }; parentToolUseId?: string;
     }
   | {

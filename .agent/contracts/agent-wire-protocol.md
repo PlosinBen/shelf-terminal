@@ -82,6 +82,11 @@ Common fields (all four):
 | `label` | `string` | Required — main drops the card if missing. |
 | `subtitle` | `string?` | Full string; renderer CSS-truncates + `title=` tooltip. |
 | `errorMessage` | `string?` | Set ⇒ failed card; fold_code opens on first failure per mount, other folds force-expand. |
+| `execution` | `{state, exitCode?}?` | Optional fold_code operation outcome. State is pending / running / succeeded / failed / declined / interrupted / unknown, defined by `EXECUTION_STATE` in `shared/agent-execution.ts`. Exit code is an optional signed 32-bit integer; absence is not zero. |
+
+Execution metadata is independent of body/error text. Main and renderer validate it; malformed or contradictory metadata logs IDs and becomes unknown without dropping the body. Legacy messages without metadata retain legacy rendering and history behavior; no text parsing or history migration supplies synthetic success. Badges remain visible when the body is collapsed. `interrupted` requires explicit operation-level evidence; turn end or exit 130 alone is insufficient.
+
+For the same fold_code msgId, subsequent output may update the body while an established terminal outcome remains stable. Conflicting terminal outcomes warn and retain the first result. Missing body/subtitle on metadata-bearing partial updates preserves previously received fields; an explicit empty body can clear content. Unknown can be corrected by a later final result but cannot return to pending/running. On execution idle, unfinished metadata-bearing operations become unknown; exit snapshots and history reload also mark pending/running as unknown even with partial output. Exit snapshots do not mutate the live operation state.
 
 Body shape per variant:
 

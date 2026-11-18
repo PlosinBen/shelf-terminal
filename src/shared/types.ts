@@ -102,6 +102,8 @@ export interface FoldBase {
   label: string;
   subtitle?: string;
   errorMessage?: string;
+  /** Optional operation outcome; currently emitted/rendered on fold_code only. */
+  execution?: import('./agent-execution').AgentExecution;
 }
 
 /**

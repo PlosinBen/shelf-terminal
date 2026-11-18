@@ -24,6 +24,7 @@ import type { OutgoingMessage, SendFn } from '../types';
 import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
 import { readUploadedImageAttachments } from '../shared';
 import { serverLog } from '../../server-logger';
+import { EXECUTION_STATE as ES } from '@shared/agent-execution';
 
 interface SessionRouteState {
   send: SendFn | null;
@@ -140,6 +141,9 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
     for (const raw of translateSessionUpdate(carriedUpdate)) {
       let wire = raw;
       if (wire.type === 'message') {
+        if (wire.msgType === 'fold_code' && wire.execution?.state === ES.UNKNOWN) {
+          serverLog('warn', 'acp', 'Unknown execution outcome', { sessionId, msgId: wire.msgId });
+        }
         // Tool/other card after streamed text = message boundary → next text
         // is a new segment. Consecutive tools do not over-bump.
         if (state.streamedSinceTool) {

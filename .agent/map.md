@@ -281,6 +281,7 @@ title: shelf-terminal — Intent → File Index
 | Agent UI 訊息持久化 | `storage/agent-history.ts` | IndexedDB session/message upsert、Project 刪除清理待辦與原子完成 |
 | 未引用 Agent View 回收 | `agent-view-cleanup.ts` | Default／runtime 引用保護、等待 teardown 與 history-before-metadata 清理 |
 | Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant 渲染原語 discriminated union（inline + fold_* 卡片類） |
+| Command execution outcome | `src/shared/agent-execution.ts` | 共用 fold_code 狀態、wire 驗證與 terminal 更新保護；provider 正規化、main/builder/store/history 共用 |
 | Inline SVG icon | `components/icons.tsx` | 手繪原創 line icon（24x24，`currentColor`），footer toggle 用 |
 | 主題定義 | `themes.ts` | 5 個內建主題（terminal + UI 色彩） |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |

@@ -104,6 +104,20 @@ describe('translateCodexAppServerNotification', () => {
     })).toEqual([]);
   });
 
+  it('preserves command outcomes independently of output and missing exit codes', () => {
+    for (const [status, exitCode, state] of [
+      ['inProgress', null, 'running'], ['completed', 0, 'succeeded'],
+      ['completed', 7, 'failed'], ['completed', null, 'unknown'], ['failed', null, 'failed'],
+      ['failed', 130, 'failed'], ['declined', null, 'declined'], ['unexpected', null, 'unknown'],
+    ] as const) {
+      const out = translateCodexAppServerNotification('item/completed', { item: {
+        id: 'outcome', type: 'commandExecution', command: 'false', status, exitCode, aggregatedOutput: 'partial',
+      } });
+      expect(out[0]).toMatchObject({ execution: { state, ...(exitCode !== null ? { exitCode } : {}) }, body: { content: 'partial' } });
+      if (exitCode === null) expect((out[0] as any).execution).not.toHaveProperty('exitCode');
+    }
+  });
+
   it('maps command execution items to fold_code cards', () => {
     expect(translateCodexAppServerNotification('item/updated', {
       item: {
@@ -115,7 +129,7 @@ describe('translateCodexAppServerNotification', () => {
         exitCode: null,
       },
     })).toEqual([
-      { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test' },
+      { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test', execution: { state: 'running' } },
     ]);
     expect(translateCodexAppServerNotification('item/completed', {
       item: {
@@ -127,7 +141,7 @@ describe('translateCodexAppServerNotification', () => {
         exitCode: 0,
       },
     })).toEqual([
-      { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test', body: { content: 'ok' } },
+      { type: 'message', msgId: 'cmd-1', msgType: 'fold_code', label: 'Command', subtitle: 'npm test', body: { content: 'ok' }, execution: { state: 'succeeded', exitCode: 0 } },
     ]);
   });
 
@@ -148,6 +162,7 @@ describe('translateCodexAppServerNotification', () => {
         msgType: 'fold_code',
         label: 'Command',
         subtitle: 'true',
+        execution: { state: 'succeeded', exitCode: 0 },
         body: { content: '(no output)' },
       },
     ]);
@@ -170,6 +185,7 @@ describe('translateCodexAppServerNotification', () => {
         msgType: 'fold_code',
         label: 'Command',
         subtitle: 'false',
+        execution: { state: 'failed', exitCode: 1 },
         errorMessage: 'Command failed with exit code 1',
         body: { content: 'no' },
       },

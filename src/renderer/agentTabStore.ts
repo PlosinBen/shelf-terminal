@@ -1,4 +1,5 @@
 import type { SkillCommandMenu, SkillCommandMenuEntry } from '@shared/skill-invocation';
+import { EXECUTION_STATE as ES, isExecutionPending, reconcileExecution } from '@shared/agent-execution';
 import { parseShelfCommandPrefix } from '@shared/skill-commands';
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
 import { CONFIG_CONTROL as CC, isConfigControlPending, type ConfigControlUpdate, type ConfigControlRequest } from '@shared/agent-config-control';
@@ -365,6 +366,9 @@ export async function flushAgentHistoryForExit(sessionIds: readonly string[], ca
     const messages = new Map(dirty.map(message => [message.id, message]));
     for (const message of tabs.get(tabId)?.messages ?? []) messages.set(message.id, message);
     const snapshot = [...messages.values()].map(message => {
+      if (message.type === 'fold_code' && message.execution) {
+        return isExecutionPending(message.execution) ? { ...message, execution: { state: ES.UNKNOWN } } : message;
+      }
       if ('streaming' in message && message.streaming) return { ...message, streaming: false, exitInterrupted: true as const };
       if (message.type.startsWith('fold_') && 'label' in message && !message.body && !message.errorMessage) {
         return { ...message, errorMessage: AGENT_EXIT_INTERRUPTED_LABEL };
@@ -420,6 +424,19 @@ function upsertById(prev: AgentMsg[], built: AgentMsg): AgentMsg[] {
   for (let i = prev.length - 1; i >= 0; i--) {
     if (prev[i].id === built.id) {
       const next = prev.slice();
+      const old = prev[i];
+      if (old.type === 'fold_code' && built.type === 'fold_code' && old.execution) {
+        const checked = reconcileExecution(old.execution, built.execution);
+        if (checked.anomaly) console.warn(checked.anomaly, { msgId: built.id });
+        if (built.execution && checked.execution.state !== built.execution.state) {
+          debugLog('agent-execution', `retained outcome msg=${built.id} previous=${old.execution.state} incoming=${built.execution.state}`);
+        }
+        built = { ...built, execution: checked.execution,
+          ...(built.body === undefined && old.body !== undefined ? { body: old.body } : {}),
+          ...(built.subtitle === undefined && old.subtitle !== undefined ? { subtitle: old.subtitle } : {}),
+          ...(checked.execution.state === old.execution.state && old.errorMessage && !built.errorMessage ? { errorMessage: old.errorMessage } : {}),
+        };
+      }
       next[i] = { ...built, timestamp: prev[i].timestamp };
       return next;
     }
@@ -886,6 +903,13 @@ export function setExecutionActive(tabId: string, value: boolean) {
   // streamed responses would never land in storage.
   if (wasStreaming && !value) {
     const cleared = cur.messages.map((m) => {
+      if (m.type === 'fold_code' && m.execution && isExecutionPending(m.execution)) {
+        mutated = true;
+        const settled = { ...m, execution: { state: ES.UNKNOWN } };
+        debugLog('agent-execution', `result missing at idle tab=${tabId} msg=${m.id}`);
+        markDirty(tabId, settled);
+        return settled;
+      }
       if ((m.type === 'reply' || m.type === 'fold_text') && m.streaming) {
         mutated = true;
         const settled = { ...m, streaming: false };

@@ -59,6 +59,65 @@ test.describe('agent flows via fake provider', () => {
   test.describe('command result reading', () => {
     test.use({ homeProjectDirectories: false });
 
+    test('structured outcomes remain visible and survive history without guessing legacy results', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page);
+      await app.evaluate(({ ipcMain }, channel) => {
+        const original = (ipcMain as any)._invokeHandlers.get(channel);
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (event, payload) => {
+          (globalThis as any).__outcomeTab = payload.tabId;
+          return original(event, payload);
+        });
+      }, IPC.AGENT_INIT);
+      await openAgentTab(page);
+      await app.evaluate(({ BrowserWindow }, channel) => {
+        const target = BrowserWindow.getAllWindows()[0].webContents;
+        const tabId = (globalThis as any).__outcomeTab;
+        const send = (id: string, execution?: unknown, body = 'partial output') => target.send(channel, tabId, {
+          type: 'fold_code', msgId: id, label: id, body: { content: body }, ...(execution ? { execution } : {}),
+        });
+        send('outcome-ok', { state: 'succeeded', exitCode: 0 }, '');
+        send('outcome-failed', { state: 'failed', exitCode: 130 });
+        send('outcome-failed', { state: 'running' }, 'partial output\nlate output');
+        send('outcome-declined', { state: 'declined' }, '');
+        send('outcome-interrupted', { state: 'interrupted' });
+        send('outcome-pending', { state: 'pending' });
+        send('outcome-running', { state: 'running' });
+        send('outcome-malformed', { state: 'succeeded', exitCode: '0' });
+        send('outcome-legacy');
+      }, IPC.AGENT_MESSAGE);
+      const card = (name: string) => page.locator('.agent-msg-fold').filter({ has: page.locator('.fold-label', { hasText: new RegExp(`^${name}$`) }) });
+      const expectResults = async () => {
+        await expect(card('outcome-ok').locator('.fold-execution')).toHaveText('Succeeded · exit 0');
+        await expect(card('outcome-failed').locator('.fold-execution')).toHaveText('Failed · exit 130');
+        await expect(card('outcome-declined').locator('.fold-execution')).toHaveText('Not executed: declined');
+        await expect(card('outcome-interrupted').locator('.fold-execution')).toHaveText('Interrupted');
+        await expect(card('outcome-malformed').locator('.fold-execution')).toHaveText('Result unknown');
+        await expect(card('outcome-legacy').locator('.fold-execution')).toHaveCount(0);
+      };
+      await expectResults();
+      await expect(card('outcome-pending').locator('.fold-execution')).toHaveText('Waiting');
+      await expect(card('outcome-running').locator('.fold-execution')).toHaveText('Running');
+      await expect(card('outcome-failed').locator('.fold-body-code')).toContainText('late output');
+      await card('outcome-failed').locator('.fold-header').click();
+      await expect(card('outcome-failed').locator('.fold-body-code')).toHaveCount(0);
+      await expect(card('outcome-failed').locator('.fold-execution')).toBeVisible();
+      await expect.poll(async () => (await storedAgentMessages(page)).filter(m => m.id.startsWith('outcome-')).length,
+        { timeout: 15000 }).toBe(8);
+      await page.locator('.tab-bar .tab.active').click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
+      await expect.poll(async () => (await page.evaluate(() => window.shelfApi.project.getAll()))[0].defaultTabs.some(t => t.kind === 'agent')).toBe(true);
+      await page.locator('.sidebar-item').first().click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Disconnect', exact: true }).click();
+      await expect(page.locator('.connect-prompt')).toBeVisible();
+      await page.locator('.connect-prompt').click();
+      await page.locator('.tab-bar .tab').last().click();
+      await expectResults();
+      await expect(card('outcome-pending').locator('.fold-execution')).toHaveText('Result unknown');
+      await expect(card('outcome-running').locator('.fold-execution')).toHaveText('Result unknown');
+      await expect(card('outcome-running').locator('.fold-body-code')).toHaveText('partial output');
+    });
+
     test('failed output can collapse, reveal the tail and copy complete received text', async ({ shelfApp: { app, page } }) => {
       await setupProject(page);
       await app.evaluate(({ ipcMain }, channel) => {

@@ -1,6 +1,7 @@
 import type { OutgoingMessage, StatusSegment } from '../types';
 import { serverLog } from '../../server-logger';
 import { fileChangesToMessages } from './file-changes';
+import { EXECUTION_STATE as ES, type AgentExecution } from '@shared/agent-execution';
 
 export const CODEX_PLAN_UPDATED = 'turn/plan/updated';
 const PLAN_STATUS_MARKERS = { pending: '[ ]', inProgress: '[~]', completed: '[x]' } as const;
@@ -195,6 +196,21 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
   const command = stringValue(item.command) ?? 'command';
   const output = stringValue(item.aggregatedOutput ?? item.aggregated_output) ?? '';
   const exitCode = numberValue(item.exitCode ?? item.exit_code);
+  const validExit = typeof exitCode === 'number' && Number.isInteger(exitCode) && exitCode >= -2147483648 && exitCode <= 2147483647;
+  let state: AgentExecution['state'] = ES.UNKNOWN;
+  if (status === 'inProgress') state = ES.RUNNING;
+  if (status === 'completed' && validExit) state = exitCode !== 0 ? ES.FAILED : ES.SUCCEEDED;
+  if (status === 'failed') state = ES.FAILED;
+  if (status === 'declined') state = ES.DECLINED;
+  const contradictory = (status === 'completed' && validExit && exitCode !== 0)
+    || (status === 'failed' && exitCode === 0)
+    || ((state === ES.RUNNING || state === ES.DECLINED) && validExit);
+  if ((state === ES.RUNNING || state === ES.DECLINED) && validExit) state = ES.UNKNOWN;
+  const rawExit = item.exitCode ?? item.exit_code;
+  if (state === ES.UNKNOWN || contradictory || (rawExit != null && !validExit)) {
+    serverLog('warn', 'codex-command', 'Unexpected command outcome', { itemId: id, status, exitCode });
+    if (rawExit != null && !validExit) state = ES.UNKNOWN;
+  }
   const settled = status === 'completed' || status === 'failed' || status === 'declined';
   const bodyContent = output || (settled ? '(no output)' : '');
   return {
@@ -202,8 +218,9 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
     msgId: id,
     msgType: 'fold_code',
     label: 'Command',
+    execution: { state, ...(validExit ? { exitCode } : {}) },
     subtitle: redactText(command, opts.redactValues),
-    ...(status === 'failed' ? { errorMessage: `Command failed with exit code ${exitCode ?? 'unknown'}` } : {}),
+    ...(state === ES.FAILED ? { errorMessage: validExit ? `Command failed with exit code ${exitCode}` : 'Command failed (exit code unavailable)' } : {}),
     ...(bodyContent
       ? { body: { content: redactText(bodyContent, opts.redactValues) } }
       : {}),

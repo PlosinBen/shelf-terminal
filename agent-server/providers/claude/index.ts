@@ -1,4 +1,5 @@
 import { SKILL_PLUGIN } from '@shared/skill-commands';
+import { EXECUTION_STATE as ES } from '@shared/agent-execution';
 import { resolveInvocationSkillPath } from '../skill-invocation';
 import { SKILL_INVOCATION, SkillCommandFailure, SKILL_COMMAND_ERROR as SCE } from '@shared/skill-invocation';
 import { query as sdkQuery, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
@@ -1826,6 +1827,7 @@ function emitClaudeToolUse(
     type: 'message', msgId: block.id, msgType: 'fold_code',
     label: block.name,
     subtitle: input,
+    ...(block.name === 'Bash' ? { execution: { state: ES.RUNNING } } : {}),
     ...parent,
   });
 }
@@ -1904,6 +1906,7 @@ function emitClaudeToolResult(
       type: 'message', msgId: toolUseId, msgType: 'fold_code',
       label: entry.toolName,
       subtitle: entry.input,
+      ...(entry.toolName === 'Bash' ? { execution: { state: isError ? ES.FAILED : ES.SUCCEEDED } } : {}),
       ...(isError && !suppressError
         ? { body: { content }, errorMessage: 'Tool returned an error' }
         : { body: { content } }),

@@ -1,4 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
+import { EXECUTION_STATE as ES, readAgentExecution, isExecutionPending } from '@shared/agent-execution';
 import type { AgentMsg } from '../components/AgentMessage';
 
 const DB_NAME = 'shelf-agent-history';
@@ -52,6 +53,12 @@ type StoredMsg = AgentMsg & { dbId?: number; sessionId: string };
  * sees what happened.
  */
 function reviveOrphanPending(msg: AgentMsg): AgentMsg {
+  if (msg.type === 'fold_code' && msg.execution !== undefined) {
+    const checked = readAgentExecution(msg.execution);
+    if (checked.anomaly) console.warn(checked.anomaly, { msgId: msg.id });
+    const execution = checked.execution!;
+    return { ...msg, execution: isExecutionPending(execution) ? { state: ES.UNKNOWN } : execution };
+  }
   if ((msg.type === 'fold_text' || msg.type === 'fold_code'
        || msg.type === 'fold_markdown' || msg.type === 'fold_diff')
        && !msg.body && !msg.errorMessage) {

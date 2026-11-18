@@ -61,6 +61,8 @@ title: Shelf — 驗證能力與執行入口
 
 ### Codex 與共用 renderer plan 診斷
 
+Command execution 狀態另由 `codex-command` warning 記錄未知／矛盾的原始 status 與 exitCode（含 itemId）；renderer 的 `agent-execution` debugLog 記錄保留舊結果或 idle 缺最終結果的 msgId/context。main／builder／history 對 malformed execution metadata 留警告並顯示 unknown。`e2e/agent-flows.spec.ts --grep 'command result reading'` 透過 IPC 注入驗證狀態、完整輸出、複製與 history reload；它不證明真實 provider 會發出 interrupted，provider 來源能力需另看 adapter unit 與 pinned 契約。
+
 Debug level 的 `codex-plan` tag 記錄 `turn/plan/updated` 的 `received`、`output`、`rejected` 或 `dropped: no output sink`，帶 threadId、turnId、entryCount；成功輸出另帶 contentLength。Malformed snapshot 另有 `codex-app-server` warning。內容長度 0 表示清空；這些紀錄不包含待辦文字。`output` 表示已呼叫 provider 輸出接收端，不代表 UI 已顯示。
 
 Renderer 共用 `setPlan` 透過 `debugLog` 記錄 `agent-plan` tag（main 以 Info level 落檔）：`received`、`applied` 或 `dropped: uninitialized`，帶完整 tab ID 與 contentLength，適用所有 provider。`applied` 證明 store 已套用，不證明 DOM 可見。以 main 的 session/tab 對應與既有 `wire-rx type=plan` 紀錄串起前後兩端；不同 turn 可能有相同項目數／長度，不可只靠長度認定同一事件。

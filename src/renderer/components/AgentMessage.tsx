@@ -1,4 +1,5 @@
 import type { AgentDiff } from '@shared/agent-diff';
+import { EXECUTION_STATE as ES, EXECUTION_LABEL } from '@shared/agent-execution';
 import React, { useState, useMemo, useContext, useRef, useLayoutEffect } from 'react';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
@@ -121,7 +122,8 @@ function CodeFold({ message, settingMode, nested }: {
   settingMode: AgentDisplayMode;
   nested?: AgentMsg[];
 }) {
-  const hasError = !!message.errorMessage;
+  const hasError = !!message.errorMessage || (message.execution !== undefined &&
+    [ES.FAILED, ES.DECLINED, ES.INTERRUPTED, ES.UNKNOWN].some(state => state === message.execution!.state));
   const [expansion, setExpansion] = useState({ failureSeen: hasError, choice: null as boolean | null });
   // Adjust during render so the first failure cannot paint collapsed. Subsequent
   // snapshots (including duplicate failures) leave the user's choice intact.
@@ -152,7 +154,11 @@ function CodeFold({ message, settingMode, nested }: {
     <div className="agent-msg agent-msg-fold">
       <FoldHeader label={message.label} subtitle={message.subtitle} isExpanded={isExpanded} keyboard
         onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
-      {hasError && <div className="fold-error-banner">{message.errorMessage}</div>}
+      {message.execution && <div className="fold-execution" data-state={message.execution.state}>
+        {EXECUTION_LABEL[message.execution.state]}
+        {message.execution.exitCode !== undefined && ` · exit ${message.execution.exitCode}`}
+      </div>}
+      {message.errorMessage && <div className="fold-error-banner">{message.errorMessage}</div>}
       {isExpanded && <>
         {message.subtitle && <>
           <div className="fold-reading-controls">
