@@ -29,7 +29,12 @@ import { severityFromUtilization } from '../types';
  * session driver detects this sentinel and namespaces it per-turn (see client.ts).
  */
 export const DEFAULT_AGENT_MSG_ID = 'agent-message';
-export const COPILOT_TASK_COMPLETE_TOOL_TITLE = 'task_complete';
+const COPILOT_TASK_COMPLETE_TOOL_TITLES = ['task_complete', 'Task completion'] as const;
+
+/** Exact observed Copilot ACP aliases; not a generic completion-title heuristic. */
+export function isCopilotTaskCompleteTitle(title: unknown): boolean {
+  return COPILOT_TASK_COMPLETE_TOOL_TITLES.some((candidate) => candidate === title);
+}
 
 /** Flatten a single ACP ContentBlock to display text (non-text blocks degrade). */
 export function contentBlockToText(block: ContentBlock): string {
@@ -217,7 +222,7 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       // Copilot-specific title match — no ACP standard marker exists; revisit if it
       // is renamed. `title` is carried across partial updates (createToolMetaCarry).
       // See agent-providers#24.
-      if (title === COPILOT_TASK_COMPLETE_TOOL_TITLE) {
+      if (isCopilotTaskCompleteTitle(title)) {
         const summary = toolContentToText('content' in update ? update.content : undefined)
           || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
         return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];

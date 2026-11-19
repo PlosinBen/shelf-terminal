@@ -266,11 +266,11 @@ Shelf 不提供 Project Secret Variables；Project.envPlain 是明碼設定，�
 
 ## agent-providers#24 — Copilot `task_complete` 有內容時視為一般對話結尾  ·  [Decision]
 
-**Decision**：pure ACP translator 把 `title === 'task_complete'` 且帶內容的摘要直接翻成 Markdown `reply`（靠 session-scoped tool metadata carry 保留 title），一律使用一般 assistant 對話 surface；裸訊號（無內容）仍不顯示。
+**Decision**：pure ACP translator 以共用精確判斷識別 `task_complete`／`Task completion`，把帶內容的摘要直接翻成 Markdown `reply`（靠 session-scoped tool metadata carry 保留 title），一律使用一般 assistant 對話 surface；裸訊號（無內容）仍不顯示。Autopilot completion gate 使用同一判斷，避免摘要轉換與執行完成識別不一致。
 
 **Reason**：Copilot 把最終摘要放在 internal `task_complete` tool 的 `content`／`rawOutput`，而且是否另送 `agent_message_chunk` 不穩定。依前面是否已有 assistant chunk 分類，會讓同樣是最終回答的內容有時呈現成一般對話、有時落進 `Task completed` note。結尾語意應一致；即使前面已有進度文字，最終摘要仍是正常 assistant reply。
 
-**Do not change casually because**：這是 **Copilot title 慣例的特判，不是 ACP 標準**；Copilot 改名就會失效。terminal update 可能在 prompt settlement、甚至下一 prompt 開始後才到（`#37`），所以 output sink 必須維持 session lifetime；不要用 stop reason 當內容 barrier。`task_complete` 無內容時仍只是一個控制訊號，不應產生空 reply。
+**Do not change casually because**：這是 **Copilot title 慣例的特判，不是 ACP 標準**；Copilot 改名就會失效。實際 ACP 可只提供 `Task completion` title，沒有 toolName 或 _meta 識別欄位，不能假設原生事件的名稱會傳給 Shelf。只接受已觀測的精確別名，不以相似字詞推斷完成。terminal update 可能在 prompt settlement、甚至下一 prompt 開始後才到（`#37`），所以 output sink 必須維持 session lifetime；不要用 stop reason 當內容 barrier。`task_complete` 無內容時仍只是一個控制訊號，不應產生空 reply。
 
 ## agent-providers#25 — Copilot ACP ctx 使用經驗證的 usage 欄位  ·  [Gotcha]
 

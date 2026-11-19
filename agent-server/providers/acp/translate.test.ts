@@ -151,9 +151,9 @@ describe('translateSessionUpdate', () => {
     expect(translateSessionUpdate(u)[0]).toMatchObject({ body: { content: 'exit 0\nok' } });
   });
 
-  it('renders copilot `task_complete` content as a normal reply, not a tool card', () => {
+  it.each(['task_complete', 'Task completion'])('renders copilot %s content as a normal reply, not a tool card', (title) => {
     const u = {
-      sessionUpdate: 'tool_call_update', toolCallId: 'tc1', title: 'task_complete', status: 'completed',
+      sessionUpdate: 'tool_call_update', toolCallId: 'tc1', title, status: 'completed',
       rawOutput: { content: '## Done\n- fixed the auto_renew override' },
     } as unknown as SessionUpdate;
     expect(translateSessionUpdate(u)).toEqual([
@@ -161,8 +161,8 @@ describe('translateSessionUpdate', () => {
     ]);
   });
 
-  it('a bare `task_complete` signal with no content emits nothing', () => {
-    const u: SessionUpdate = { sessionUpdate: 'tool_call', toolCallId: 'tc2', title: 'task_complete', status: 'pending' };
+  it.each(['task_complete', 'Task completion'])('a bare %s signal with no content emits nothing', (title) => {
+    const u: SessionUpdate = { sessionUpdate: 'tool_call', toolCallId: 'tc2', title, status: 'pending' };
     expect(translateSessionUpdate(u)).toEqual([]);
   });
 

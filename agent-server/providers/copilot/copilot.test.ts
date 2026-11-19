@@ -572,14 +572,14 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
-  it('keeps an Autopilot execution active until task_complete finishes after the prompt response', async () => {
+  it.each(['task_complete', 'Task completion'])('keeps Autopilot active until %s finishes after the prompt response', async (title) => {
     const autopilotModes = { ...COPILOT_MODES, currentModeId: COPILOT_AUTOPILOT_MODE_ID } as SessionModeState;
     const mock = createMockAcpAgent({
       modes: autopilotModes,
       updatesOnPrompt: [{
         sessionUpdate: 'tool_call',
         toolCallId: 'task-complete-late',
-        title: 'task_complete',
+        title,
         kind: 'other',
         status: 'in_progress',
       }],
@@ -613,6 +613,45 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
 
     backend.dispose();
+  });
+
+  it.each(['task_complete', 'Task completion'])('recognizes %s completed before end_turn without a terminal title', async (title) => {
+    const mock = createMockAcpAgent({
+      modes: { ...COPILOT_MODES, currentModeId: COPILOT_AUTOPILOT_MODE_ID } as SessionModeState,
+      updatesOnPrompt: [
+        { sessionUpdate: 'tool_call', toolCallId: 'early-completion', title, status: 'pending' },
+        { sessionUpdate: 'tool_call_update', toolCallId: 'early-completion', status: 'completed' },
+      ],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: 'finish', cwd: '/tmp/project' }, (message) => out.push(message));
+      expect(out.at(-1)).toEqual({ type: 'status', state: 'idle' });
+      expect(out.filter((message) => message.type === 'message')).toEqual([]);
+    } finally {
+      backend.dispose();
+    }
+  });
+
+  it('does not treat a similar title or another completed tool ID as completion', async () => {
+    const mock = createMockAcpAgent({
+      modes: { ...COPILOT_MODES, currentModeId: COPILOT_AUTOPILOT_MODE_ID } as SessionModeState,
+      updatesOnPrompt: [
+        { sessionUpdate: 'tool_call', toolCallId: 'real', title: 'Task completion', status: 'pending' },
+        { sessionUpdate: 'tool_call', toolCallId: 'other', title: 'Task completion check', status: 'completed' },
+      ],
+    });
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const out: OutgoingMessage[] = [];
+    let settled = false;
+    const done = backend.query({ prompt: 'work', cwd: '/tmp/project' }, (message) => out.push(message))
+      .then(() => { settled = true; });
+    await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
+    expect(settled).toBe(false);
+    expect(out).not.toContainEqual({ type: 'status', state: 'idle' });
+    backend.dispose();
+    await done;
   });
 
   it('settles an advertised slash command in Autopilot without waiting for task_complete', async () => {

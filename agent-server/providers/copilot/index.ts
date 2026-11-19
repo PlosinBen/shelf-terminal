@@ -32,7 +32,7 @@ import { severityFromUtilization, type ServerBackend, type QueryInput, type Send
 import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
-import { COPILOT_TASK_COMPLETE_TOOL_TITLE } from '../acp/translate';
+import { isCopilotTaskCompleteTitle } from '../acp/translate';
 import { FILE_TOOL_LOG_TAG, summarizeAcpFileTool } from '../file-tool-diagnostics';
 import { COPILOT_COMPLETION_LOG_TAG, summarizeCompletionIdentity } from './completion-diagnostics';
 import { createPermissionBridge } from '../acp/permission';
@@ -249,12 +249,13 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     if (!gate || gate.sessionId !== notification.sessionId) return;
     const update = notification.update;
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
-    if ('title' in update && update.title === COPILOT_TASK_COMPLETE_TOOL_TITLE) {
+    const titleMatched = 'title' in update && isCopilotTaskCompleteTitle(update.title);
+    if (titleMatched) {
       gate.toolCallIds.add(update.toolCallId);
     }
     serverLog('debug', COPILOT_COMPLETION_LOG_TAG, 'gate observed tool', {
       sessionId: notification.sessionId, toolCallId: update.toolCallId,
-      titleMatched: 'title' in update && update.title === COPILOT_TASK_COMPLETE_TOOL_TITLE,
+      titleMatched,
       tracked: gate.toolCallIds.has(update.toolCallId), gateSettled: gate.settled,
       status: 'status' in update ? update.status : undefined,
     });
