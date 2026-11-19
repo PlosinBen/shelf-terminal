@@ -3413,7 +3413,11 @@ button {
 
 .fold-copy-button {
   position: absolute;
-  top: 4px;
+  /* Match the pre's padding and first line, independent of output height. */
+  top: calc(6px + 0.5lh);
+  transform: translateY(-50%);
+  font-size: 12px;
+  line-height: inherit;
   right: 4px;
   display: flex;
   align-items: center;

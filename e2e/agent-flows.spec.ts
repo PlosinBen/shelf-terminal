@@ -143,12 +143,26 @@ test.describe('agent flows via fake provider', () => {
           body: { content: output }, ...(failed ? { errorMessage: 'Command failed with exit code 1' } : {}),
         });
       }, { channel: IPC.AGENT_MESSAGE, command, output: content, failed });
-      await sendCard(false, 'alpha\nkeep');
+      await sendCard(false, 'alpha');
       const card = page.locator('.agent-msg-fold').filter({ has: page.locator('.fold-label', { hasText: 'Command' }) });
       const header = card.locator('.fold-header');
       await header.click();
       await expect(card.locator('.fold-body-code')).toBeVisible();
       await expect(card.locator('.fold-command-text')).toHaveText(command);
+      const expectCopyAligned = async () => {
+        for (const block of await card.locator('.fold-body-container').all()) {
+          const offset = await block.evaluate(el => {
+            const pre = el.querySelector('pre')!;
+            const button = el.querySelector('button')!;
+            const style = getComputedStyle(pre);
+            const firstLineCenter = pre.getBoundingClientRect().top + parseFloat(style.paddingTop) + parseFloat(style.lineHeight) / 2;
+            const rect = button.getBoundingClientRect();
+            return Math.abs(rect.top + rect.height / 2 - firstLineCenter);
+          });
+          expect(offset).toBeLessThan(1);
+        }
+      };
+      await expectCopyAligned();
       const colors = await card.evaluate(el => {
         const style = getComputedStyle(el);
         return { muted: style.getPropertyValue('--text-muted').trim(), text: style.getPropertyValue('--text').trim() };
@@ -174,6 +188,7 @@ test.describe('agent flows via fake provider', () => {
       await sendCard(true);
       await expect(card.locator('.fold-body-code')).toBeVisible();
       await expect(card.locator('.fold-reading-controls')).toHaveCSS('margin-top', '12px');
+      await expectCopyAligned();
       await header.click();
       await expect(card.locator('.fold-body-code')).toHaveCount(0);
       await expect(card.locator('.fold-error-banner')).toBeVisible();
