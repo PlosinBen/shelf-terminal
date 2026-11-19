@@ -17,6 +17,24 @@ import type { OutgoingMessage } from '../types';
 import * as mcpConfig from '../mcp-config';
 import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-lifecycle';
 import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
+import { FILE_TOOL_LOG_TAG } from '../file-tool-diagnostics';
+
+it('observes original ACP diff nulls and tool IDs before rendering normalization', async () => {
+  const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+  const mock = createMockAcpAgent({ updatesOnPrompt: [
+    { sessionUpdate: 'tool_call', toolCallId: 'file-diag', title: 'private-title', kind: 'edit', status: 'completed',
+      content: [{ type: 'diff', path: '/repo/new', oldText: null, newText: 'private-content' }] },
+  ] });
+  const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+  try {
+    await backend.query({ prompt: 'private-prompt', cwd: '/repo' }, () => {});
+    const trace = log.mock.calls.filter(call => call[1] === FILE_TOOL_LOG_TAG.COPILOT);
+    expect(trace).toHaveLength(1);
+    expect(trace[0][3]).toMatchObject({ sessionId: 'mock-session', toolCallId: 'file-diag', kind: 'edit',
+      diffs: [{ paths: { path: '/repo/new' }, oldTextShape: 'null', newTextLength: 15 }] });
+    expect(JSON.stringify(trace)).not.toContain('private-');
+  } finally { backend.dispose(); log.mockRestore(); }
+});
 
 const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
 

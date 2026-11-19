@@ -118,6 +118,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   let appServerInitialized = false;
   let activeSend: SendFn | null = null;
   let activeThreadId: string | null = null;
+  let displayCwd: string | undefined;
   let activeTurnId: string | null = null;
   let resolveActiveTurn: (() => void) | null = null;
   const commandMetadataByItemId = new Map<string, { command?: string }>();
@@ -207,7 +208,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         const translatedParams = method === 'item/started' || method === 'item/updated' || method === 'item/completed'
           ? carryAppServerItemState(params)
           : params;
-        const messages = translateCodexAppServerNotification(method, translatedParams);
+        const messages = translateCodexAppServerNotification(method, translatedParams, { cwd: displayCwd });
         if (planTrace && messages.length === 0) serverLog('debug', CODEX_PLAN_LOG_TAG, 'rejected', planTrace);
         if (method === 'item/started' || method === 'item/updated' || method === 'item/completed') {
           logReasoningNotification(method, translatedParams, messages);
@@ -706,6 +707,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       appId,
       restoreContext,
     ): Promise<ProviderCapabilities> {
+      displayCwd = _cwd;
       if (appId) lastAppId = appId;
       if (intent?.model) currentModel = intent.model;
       if (intent?.effort) currentEffort = intent.effort;
@@ -845,6 +847,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     send: SendFn,
     baseEnv: NodeJS.ProcessEnv,
   ): Promise<string> {
+        displayCwd = input.cwd;
         if (activeThreadId) {
           nativeControls.assertUsable();
           return activeThreadId;

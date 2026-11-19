@@ -188,7 +188,7 @@ test.describe('Codex file changes use File Diff display settings', () => {
     await setDiffDisplay(page, 'collapsed');
     await sendAgentPrompt(page, FAKE_FILE_CHANGES.SUCCESS);
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
-    const cards = page.locator('.agent-msg-fold:visible').filter({ has: page.locator('.fold-label', { hasText: /^File changes$/ }) });
+    const cards = page.locator('.agent-msg-fold:visible').filter({ has: page.locator('.fold-label', { hasText: /^Edit file$/ }) });
     await expect(cards).toHaveCount(2);
     await expect(cards.locator('.fold-body')).toHaveCount(0);
     await expect(page.locator('.fold-body-markdown:visible')).toHaveText('Ordinary Markdown stays expanded');
@@ -219,19 +219,41 @@ test.describe('Codex file changes use File Diff display settings', () => {
     await expect(fileCard(page, 'legacy.ts').locator('.agent-diff-hunk')).toHaveCount(0);
   });
 
-  test('preserves mixed fallback content and existing failed/declined presentation', async ({ shelfApp: { page } }) => {
+  test('shows operation labels, relative paths, raw content and settled summaries through history', async ({ shelfApp: { page } }) => {
     await setupProject(page);
-    await openAgentTab(page, OFFICIAL_MENU_LABEL);
+    const panel = await openProjectEdit(page);
+    await panel.locator('.default-tab-add', { hasText: 'Add Agent' }).click();
+    const agentRow = panel.locator('.default-tab-row', { has: page.locator('.default-tab-kind-agent') });
+    await agentRow.locator('.default-tab-provider').selectOption(CODEX_PROVIDER);
+    await agentRow.locator('.default-tab-name').fill(OFFICIAL_LABEL);
+    await panel.locator('.project-edit-footer .conn-btn-next').click();
+    await expect(panel).not.toBeVisible();
+    await disconnectAndReconnect(page);
     await setDiffDisplay(page, 'collapsed');
     await sendAgentPrompt(page, FAKE_FILE_CHANGES.MIXED);
-    const cards = page.locator('.agent-msg-fold:visible').filter({ has: page.locator('.fold-label', { hasText: /^File changes$/ }) });
-    await expect(cards).toHaveCount(6);
+    const cards = page.locator('.agent-msg-fold:visible').filter({ has: page.locator('.fold-label', { hasText: /^(Create|Edit|Delete|Move) file$/ }) });
+    await expect(cards).toHaveCount(7);
     await expect(fileCard(page, 'a.ts').locator('.fold-body')).toHaveCount(0);
-    await expect(fileCard(page, 'added.md').locator('pre')).toContainText(['"add"', '```\noriginal added content\n```']);
+    await expect(fileCard(page, 'added.md').locator('.fold-label')).toHaveText('Create file');
+    await expect(fileCard(page, 'added.md').locator('pre')).toHaveCount(0);
+    await fileCard(page, 'added.md').locator('.fold-header').click();
+    await expect(fileCard(page, 'added.md').locator('pre')).toHaveText('```\noriginal added content\n```\n');
+    await expect(fileCard(page, 'deleted.ts').locator('.fold-label')).toHaveText('Delete file');
+    await fileCard(page, 'deleted.ts').locator('.fold-header').click();
     await expect(fileCard(page, 'deleted.ts')).toContainText('deleted content');
-    await expect(fileCard(page, 'moved.ts')).toContainText('destination.ts');
+    for (const file of ['moved.ts → destination.ts', 'empty.ts']) {
+      await expect(fileCard(page, file).locator('.agent-chevron')).toHaveCount(0);
+      await fileCard(page, file).locator('.fold-header').click();
+      await expect(fileCard(page, file).locator('.fold-body')).toHaveCount(0);
+    }
     await expect(fileCard(page, 'invalid.ts')).toContainText('malformed');
     await expect(fileCard(page, 'invalid.ts')).toContainText('preserved');
+    await disconnectAndReconnect(page);
+    await expect(cards).toHaveCount(7);
+    for (const file of ['moved.ts → destination.ts', 'empty.ts']) {
+      await expect(fileCard(page, file).locator('.agent-chevron')).toHaveCount(0);
+      await expect(fileCard(page, file).locator('.fold-error-banner')).toHaveCount(0);
+    }
     for (const [scenario, status] of [[FAKE_FILE_CHANGES.FAILED, 'failed'], [FAKE_FILE_CHANGES.DECLINED, 'declined']]) {
       await sendAgentPrompt(page, scenario);
       await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
@@ -240,6 +262,6 @@ test.describe('Codex file changes use File Diff display settings', () => {
         await expect(fileCard(page, path).locator('.fold-body-diff')).toHaveCount(0);
       }
     }
-    await expect(cards).toHaveCount(10);
+    await expect(cards).toHaveCount(11);
   });
 });

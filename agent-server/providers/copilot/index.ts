@@ -33,6 +33,7 @@ import { serverLog } from '../../server-logger';
 import { openAcpConnection, spawnAgentStdio, type AcpConnection, type PermissionHandler } from '../acp/connection';
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { COPILOT_TASK_COMPLETE_TOOL_TITLE } from '../acp/translate';
+import { FILE_TOOL_LOG_TAG, summarizeAcpFileTool } from '../file-tool-diagnostics';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
@@ -612,6 +613,11 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // Observe before any provider/driver filtering, including session hydration.
         // Exclude high-volume text chunks; never copy content or tool payloads.
         const update = notification.update;
+        if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+          serverLog('debug', FILE_TOOL_LOG_TAG.COPILOT, 'ACP tool event', {
+            sessionId: notification.sessionId, ...summarizeAcpFileTool(update),
+          });
+        }
         if (update.sessionUpdate !== 'agent_message_chunk' && update.sessionUpdate !== 'agent_thought_chunk') {
           serverLog('debug', COPILOT_PLAN_LOG_TAG, 'ACP notification', {
             sessionId: notification.sessionId,

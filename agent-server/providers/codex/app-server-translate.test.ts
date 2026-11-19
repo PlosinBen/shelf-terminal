@@ -3,6 +3,25 @@ import * as serverLogger from '../../server-logger';
 import { CODEX_PLAN_UPDATED, summarizeTokenUsageForLog, tokenUsageToContextSegment, translateCodexAppServerNotification } from './app-server-translate';
 
 describe('translateCodexAppServerNotification', () => {
+  it('redacts raw file text without replacing project paths inside content', () => {
+    expect(translateCodexAppServerNotification('item/completed', { item: {
+      id: 'raw', type: 'fileChange', status: 'completed', changes: [
+        { path: '/repo/app/secret.txt', kind: { type: 'add' }, diff: '/repo/app/content secret' },
+      ],
+    } }, { cwd: '/repo/app', redactValues: ['secret'] })).toMatchObject([
+      { msgType: 'fold_code', label: 'Create file', subtitle: '[REDACTED].txt', body: { content: '/repo/app/content [REDACTED]' } },
+    ]);
+  });
+
+  it('keeps mixed command text and output despite a read-only action summary', () => {
+    const command = 'cat /repo/app/a && printf extra';
+    expect(translateCodexAppServerNotification('item/completed', { item: {
+      id: 'mixed', type: 'commandExecution', command, status: 'completed', exitCode: 0,
+      commandActions: [{ type: 'read', path: '/repo/app/a', command: 'cat /repo/app/a' }], aggregatedOutput: 'file\nextra',
+    } }, { cwd: '/repo/app' })).toMatchObject([
+      { label: 'Command', subtitle: command, body: { content: 'file\nextra' } },
+    ]);
+  });
   it('redacts plan steps and treats an empty snapshot as a clear even with explanation', () => {
     expect(translateCodexAppServerNotification(CODEX_PLAN_UPDATED, {
       plan: [{ step: 'inspect secret', status: 'pending' }], explanation: 'Updated tasks',

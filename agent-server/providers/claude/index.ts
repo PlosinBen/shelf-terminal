@@ -4,6 +4,7 @@ import { resolveInvocationSkillPath } from '../skill-invocation';
 import { SKILL_INVOCATION, SkillCommandFailure, SKILL_COMMAND_ERROR as SCE } from '@shared/skill-invocation';
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { ConfigControlRejectedError } from '@shared/agent-config-control';
+import { FILE_TOOL_LOG_TAG, summarizeFileToolData } from '../file-tool-diagnostics';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { createShelfSdkServer } from './shelf-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
@@ -1773,6 +1774,11 @@ function emitClaudeToolUse(
   cwd: string,
   parentToolUseId?: string,
 ): void {
+  if (['Read', 'Write', 'Edit', 'Bash'].includes(block.name)) {
+    serverLog('debug', FILE_TOOL_LOG_TAG.CLAUDE, 'tool input', {
+      toolUseId: block.id, toolName: block.name, parentToolUseId, data: summarizeFileToolData(block.input),
+    });
+  }
   // When set (subagent inner tool_use), nest under the outer Agent card and keep
   // the link on the inflight entry so the tool_result re-emit stays nested too.
   const parent = parentToolUseId ? { parentToolUseId } : {};
@@ -2089,6 +2095,16 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
       break;
     }
     case 'user': {
+      if (Array.isArray(msg.message.content)) {
+        const results = msg.message.content.filter(block => block.type === 'tool_result');
+        if (results.length) serverLog('debug', FILE_TOOL_LOG_TAG.CLAUDE, 'tool result envelope', {
+          sessionId: msg.session_id, parentToolUseId: msg.parent_tool_use_id,
+          toolUseIds: results.map(block => block.type === 'tool_result' ? block.tool_use_id : undefined),
+          errors: results.map(block => block.type === 'tool_result' && block.is_error === true),
+          resultCount: results.length,
+          data: summarizeFileToolData((msg as { tool_use_result?: unknown }).tool_use_result),
+        });
+      }
       if (Array.isArray(msg.message.content)) {
         for (const block of msg.message.content) {
           if ((block as any).type === 'tool_result') {

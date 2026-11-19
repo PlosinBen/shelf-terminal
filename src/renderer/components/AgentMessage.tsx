@@ -92,21 +92,23 @@ interface FoldHeaderProps {
   isExpanded: boolean;
   onToggle: () => void;
   keyboard?: boolean;
+  summary?: boolean;
 }
 
 /** Shared header for all fold_* variants: chevron + label + subtitle.
  *  Subtitle truncates via CSS (white-space + text-overflow:ellipsis); the
  *  full string lives in the `title` attribute so users get the original on
  *  hover regardless of viewport width. */
-function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard }: FoldHeaderProps) {
+function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard, summary }: FoldHeaderProps) {
   return (
-    <div className="fold-header" onClick={onToggle}
-      {...(keyboard ? { role: 'button', tabIndex: 0, 'aria-expanded': isExpanded,
+    <div className="fold-header" onClick={summary ? undefined : onToggle}
+      style={summary ? { cursor: 'default' } : undefined}
+      {...(keyboard && !summary ? { role: 'button', tabIndex: 0, 'aria-expanded': isExpanded,
         onKeyDown: (event: React.KeyboardEvent) => {
           if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle(); }
         },
       } : {})}>
-      <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>
+      {!summary && <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>}
       <span className="fold-label">{label}</span>
       {subtitle && (
         <span className="fold-subtitle" title={subtitle}>{subtitle}</span>
@@ -130,7 +132,9 @@ function CodeFold({ message, settingMode, nested }: {
   if (hasError && !expansion.failureSeen) {
     setExpansion({ failureSeen: true, choice: true });
   }
-  const isExpanded = expansion.choice ?? (hasError || settingMode === 'expanded');
+  // An explicit empty body is settled, unlike an absent (pending) body.
+  const summary = message.body?.content === '' && !nested?.length;
+  const isExpanded = !summary && (expansion.choice ?? (hasError || settingMode === 'expanded'));
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fullOutput, setFullOutput] = useState(false);
   const [tailRequest, setTailRequest] = useState(0);
@@ -152,7 +156,7 @@ function CodeFold({ message, settingMode, nested }: {
   };
   return (
     <div className="agent-msg agent-msg-fold">
-      <FoldHeader label={message.label} subtitle={message.subtitle} isExpanded={isExpanded} keyboard
+      <FoldHeader label={message.label} subtitle={message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
         onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
       {message.execution && <div className="fold-execution" data-state={message.execution.state}>
         {EXECUTION_LABEL[message.execution.state]}

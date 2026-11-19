@@ -69,14 +69,31 @@ describe('fileChangesToMessages', () => {
       { path: 'move.ts', kind: { type: 'update', move_path: 'dest.ts' }, diff: patch },
     ]);
     expect(messages).toHaveLength(4);
-    expect(messages[0]).toMatchObject({ msgType: 'fold_diff' });
+    expect(messages[0]).toMatchObject({ msgType: 'fold_diff', label: 'Edit file' });
     expect(messages.slice(1)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ subtitle: 'new.md', body: { content: expect.stringContaining('````diff\n' + raw + '\n````') } }),
-      expect.objectContaining({ subtitle: 'gone.ts', body: { content: expect.stringContaining('```diff\n  \n\n```') } }),
-      expect.objectContaining({ subtitle: 'move.ts', body: { content: expect.stringContaining('dest.ts') } }),
+      expect.objectContaining({ label: 'Create file', msgType: 'fold_code', subtitle: 'new.md', body: { content: raw } }),
+      expect.objectContaining({ label: 'Delete file', msgType: 'fold_code', subtitle: 'gone.ts', body: { content: '  \n' } }),
+      expect.objectContaining({ label: 'Move file', msgType: 'fold_diff', subtitle: 'move.ts → dest.ts' }),
     ]));
     expect(diagnostics.every(d => d.level === 'debug')).toBe(true);
     expect(JSON.stringify(diagnostics)).not.toContain('before');
+  });
+
+  it('shortens path fields only, preserves raw text and handles settled empty summaries', () => {
+    const changes = [
+      { path: '/repo/app/new', kind: { type: 'add' }, diff: '/repo/app/content stays absolute' },
+      { path: '/repo/app/old', kind: { type: 'delete' }, diff: '' },
+      { path: '/repo/app/from', kind: { type: 'update', move_path: '/repo/other/to' }, diff: '\n\nMoved to: /repo/other/to' },
+    ];
+    const before = JSON.stringify(changes);
+    const result = fileChangesToMessages('paths', { changes, status: 'completed' }, '/repo/app/');
+    expect(result.messages).toMatchObject([
+      { subtitle: 'new', body: { content: '/repo/app/content stays absolute' } },
+      { label: 'Delete file', subtitle: 'old', body: { content: '' } },
+      { label: 'Move file', subtitle: 'from → /repo/other/to', body: { content: '' } },
+    ]);
+    expect(JSON.stringify(changes)).toBe(before);
+    expect(fileChangesToMessages('paths', { changes: [changes[1]], status: 'inProgress' }, '/repo/app').messages[0]).not.toHaveProperty('body');
   });
 
   it.each(['failed', 'declined'])('carries %s to every file', status => {

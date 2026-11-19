@@ -3,6 +3,29 @@ import { processMessage, createBlockMsgIdState, createClaudeBackend, isCompactBo
 import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, isSubagentTaskStart, pickSessionTasksDir } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
+import * as serverLogger from '../../server-logger';
+import { FILE_TOOL_LOG_TAG } from '../file-tool-diagnostics';
+
+it('logs paired Write input and structured result metadata without file content', () => {
+  const logger = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+  try {
+    const out: OutgoingMessage[] = [];
+    const send = (m: OutgoingMessage) => out.push(m);
+    const state = createBlockMsgIdState();
+    processMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'write-diag', name: 'Write',
+      input: { file_path: '/repo/file', content: 'private-content' } }] } } as any, send, '/repo', state);
+    processMessage({ type: 'user', session_id: 'session', tool_use_result: { type: 'create', filePath: '/repo/file',
+      content: 'private-content', originalFile: null, structuredPatch: [] },
+      message: { content: [{ type: 'tool_result', tool_use_id: 'write-diag', content: 'private-result' }] },
+    } as any, send, '/repo', state);
+    expect(logger).toHaveBeenCalledWith('debug', FILE_TOOL_LOG_TAG.CLAUDE, 'tool input', expect.objectContaining({ toolUseId: 'write-diag' }));
+    expect(logger).toHaveBeenCalledWith('debug', FILE_TOOL_LOG_TAG.CLAUDE, 'tool result envelope', expect.objectContaining({
+      sessionId: 'session', toolUseIds: ['write-diag'], data: expect.objectContaining({ operation: 'create', originalFileShape: 'null' }),
+    }));
+    expect(JSON.stringify(logger.mock.calls)).not.toContain('private-');
+    expect(out.at(-1)).toMatchObject({ label: 'Write', body: { content: 'private-content' } });
+  } finally { logger.mockRestore(); }
+});
 
 describe('Bash execution outcome', () => {
   it('uses Bash tool results as tool outcomes without inventing shell exit codes', () => {

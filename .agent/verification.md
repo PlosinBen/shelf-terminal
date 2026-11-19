@@ -53,7 +53,16 @@ title: Shelf — 驗證能力與執行入口
 
 `test:docker`／`test:ssh` scripts 在測試後以分號接 `docker rm -f`，最後清理成功可能掩蓋前段失敗 exit code。檢查完整 Playwright 結果與前置錯誤，不單憑 wrapper 回傳 0 宣告通過；本檔記錄限制，未修正 scripts。
 
-### Copilot 待辦／plan 通知診斷
+### Claude／Copilot 檔案工具診斷
+
+Settings → Terminal → Log level 設 Debug，重啟包含目前 agent-server bundle 的 dev runtime。只在自建暫存目錄測試讀取、新增、覆寫、修改、搬移及刪除測試檔；一次操作完成後保留同 session 的 main log。
+
+- `claude-file-tool`：tool input 帶 toolUseId、toolName、parentToolUseId 與 path；tool result envelope 帶 sessionId、toolUseIds、resultCount、errors 及 tool_use_result 的形狀、create/update 等 discriminator、originalFile 的 null/missing/string、長度與 patch 數。多個結果 ID 不代表每個 ID 都對應同一份 envelope 資料，須按實際事件確認。
+- `copilot-file-tool`：在 provider/driver 正規化前記錄 ACP toolCallId、sessionId、kind/status、locations、diff 的 oldText/newText 形狀與長度，以及 rawInput/rawOutput 摘要。保留 null 與缺欄位差異；locations/diffs 最多記 20 筆並另記總數。
+- 不記錄檔案內容、命令全文、工具 title、任意欄位或 token。紀錄包含檔案路徑，分享前依資料用途處理。
+- Logger 接線與資料排除由 provider unit tests 驗證；真實模型事件需 dev 操作取得，不能用 mock 測試宣稱已完成。Codex 卡片行為由 `npm run test:e2e -- e2e/codex-provider-flow.spec.ts --grep 'Codex file changes'` 驗證 fake provider 經實際轉換與 renderer/history 的路徑。
+
+### Copilot 待辦／plan 通知診斷（事件與輸出）
 
 使用包含目前 agent-server bundle 的 runtime，將 Settings → Terminal 的 Log level 設為 Debug；`copilot-plan` tag 經既有 main logger 寫入該次 userData log。`ACP notification` 在 provider/driver 篩選前記錄 sessionId、事件類型與 entries 陣列長度，略過高頻文字／思考 chunk；不記錄對話、工具輸入輸出或待辦文字。`plan output` 記錄送往 Shelf 的 plan 內容長度（0 表示清空）。`prompt begin`／`prompt settled` 標示觀察區間；settled 不代表 session 後續內容已結束，晚到通知仍可出現。
 

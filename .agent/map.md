@@ -153,7 +153,9 @@ title: shelf-terminal — Intent → File Index
 | Copilot usage E2E transport fixture | `providers/copilot/test-agent.ts` | 僅於測試替換模式提供實際 Copilot provider + mock ACP transport |
 | Codex provider (app-server) | `providers/codex/index.ts` | `createCodexBackend`：直接驅動 pinned `codex app-server` JSON-RPC，封裝 turn/session、auth、config、skills/MCP、quota/context、tool items 與 approval bridge |
 | Codex native controls | `providers/codex/native-controls.ts` | 原生選項、有效設定、managed 限制與 settings confirmation；不保存 project Prefs |
-| Codex File Changes | `providers/codex/file-changes.ts` | 完整 unified patch 解析、逐檔穩定 ID、多 hunk File Diff 與保留原文的逐檔 Markdown fallback |
+| Codex File Changes | `providers/codex/file-changes.ts` | 操作 label、原文／多 hunk diff／摘要、逐檔穩定 ID 與無損 fallback |
+| Provider 路徑顯示 | `providers/display-path.ts` | 依來源路徑語法縮短專案內路徑，不修改內文或原始操作資料 |
+| File tool 診斷摘要 | `providers/file-tool-diagnostics.ts` | Claude／Copilot 事件 ID、path、結果形狀與長度；排除內容與命令全文 |
 | ACP 共用 toolkit | `providers/acp/` | provider-agnostic ACP runtime：connection/initialize、new/resume/load（load replay suppression）、update translation、permission、capabilities、MCP 與測試 mock |
 | Provider session replacement transaction | `providers/acp/session-replacement.ts` | 以 opaque callbacks 編排 capture、invalidate、reset、establish 與 initialize 的 fail-closed helper |
 | Provider registry（identity 單一來源） | `src/shared/agent-providers.ts` | provider key → label / visibility / runtime binding，衍生 `AgentProvider` 與 presentation helpers（見 `context/agent-providers` #36） |

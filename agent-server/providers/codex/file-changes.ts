@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readAgentDiff, type AgentDiffHunk } from '@shared/agent-diff';
 import type { OutgoingMessage } from '../types';
+import { displayFilePath } from '../display-path';
 
 const CHANGE_KIND = { UPDATE: 'update', ADD: 'add', DELETE: 'delete' } as const;
 const CARD_ID_PREFIX = 'codex-file-change:';
@@ -87,6 +88,7 @@ function fence(content: string, language = ''): string {
 export function fileChangesToMessages(
   itemId: string,
   item: Record<string, unknown>,
+  cwd?: string,
 ): { messages: OutgoingMessage[]; diagnostics: FileChangeDiagnostic[] } {
   const messages: OutgoingMessage[] = [];
   const diagnostics: FileChangeDiagnostic[] = [];
@@ -94,8 +96,8 @@ export function fileChangesToMessages(
     : item.status === 'declined' ? { errorMessage: 'File change declined' } : {};
   const base = { type: 'message' as const, label: 'File changes', ...error };
   const warn = (reason: string, index?: number, path?: string) => diagnostics.push({ itemId, reason, level: 'warn', index, path });
-  const fallback = (msgId: string, content: string, path?: string) => {
-    messages.push({ ...base, msgId, msgType: 'fold_markdown', ...(path ? { subtitle: path } : {}), body: { content } });
+  const fallback = (msgId: string, content: string, path?: string, label = base.label) => {
+    messages.push({ ...base, label, msgId, msgType: 'fold_markdown', ...(path ? { subtitle: path } : {}), body: { content } });
   };
   if (!Array.isArray(item.changes) || item.changes.length === 0) {
     warn(Array.isArray(item.changes) ? 'empty-changes' : 'invalid-changes');
@@ -120,30 +122,50 @@ export function fileChangesToMessages(
     if (emitted.has(path)) continue; // Duplicate entries are preserved together below.
     emitted.add(path);
     const msgId = cardId(CARD_ID_PREFIX, itemId, path);
+    const displayPath = displayFilePath(path, cwd);
     const duplicates = groups.get(path)!;
     if (duplicates.length > 1) {
       warn('duplicate-path', index, path);
-      fallback(msgId, fence(json(duplicates), 'json'), path);
+      fallback(msgId, fence(json(duplicates), 'json'), displayPath);
       continue;
     }
     const kind = record(change.kind);
     if (!kind || !Object.values(CHANGE_KIND).includes(kind.type as typeof CHANGE_KIND[keyof typeof CHANGE_KIND])
       || typeof change.diff !== 'string') {
       warn('invalid-change', index, path);
-      fallback(msgId, fence(json(change), 'json'), path);
+      fallback(msgId, fence(json(change), 'json'), displayPath);
       continue;
     }
-    if (kind.type === CHANGE_KIND.UPDATE && kind.move_path == null) {
-      const parsed = parseFileChangeDiff(change.diff);
+    if (kind.move_path != null && (kind.type !== CHANGE_KIND.UPDATE || typeof kind.move_path !== 'string' || !kind.move_path.trim())) {
+      warn('invalid-move-path', index, path);
+      fallback(msgId, fence(json(change), 'json'), displayPath);
+      continue;
+    }
+    const movePath = typeof kind.move_path === 'string' ? kind.move_path : undefined;
+    const label = kind.type === CHANGE_KIND.ADD ? 'Create file'
+      : kind.type === CHANGE_KIND.DELETE ? 'Delete file' : movePath ? 'Move file' : 'Edit file';
+    const subtitle = movePath ? `${displayPath} → ${displayFilePath(movePath, cwd)}` : displayPath;
+    // agent-ui#15: labels describe operations; cards follow the supplied data.
+    // Codex add/delete diff fields are file text, even when the file resembles a patch.
+    // A pure move carries only the canonical transport annotation, already in the header.
+    const moveMarker = movePath ? `\n\nMoved to: ${movePath}` : undefined;
+    const diff = moveMarker && change.diff.endsWith(moveMarker) ? change.diff.slice(0, -moveMarker.length) : change.diff;
+    if (kind.type === CHANGE_KIND.ADD || kind.type === CHANGE_KIND.DELETE || diff === '') {
+      const settled = item.status === 'completed' || item.status === 'failed' || item.status === 'declined';
+      messages.push({ ...base, label, msgId, msgType: 'fold_code', subtitle,
+        ...(diff !== '' || settled ? { body: { content: kind.type === CHANGE_KIND.UPDATE ? diff : change.diff } } : {}),
+      });
+      continue;
+    }
+    if (kind.type === CHANGE_KIND.UPDATE) {
+      const parsed = parseFileChangeDiff(diff);
       if (parsed.ok) {
-        messages.push({ ...base, msgId, msgType: 'fold_diff', subtitle: path, body: { diff: { hunks: parsed.hunks } } });
+        messages.push({ ...base, label, msgId, msgType: 'fold_diff', subtitle, body: { diff: { hunks: parsed.hunks } } });
         continue;
       }
       diagnostics.push({ itemId, path, index, reason: parsed.reason, level: parsed.level });
-    } else {
-      diagnostics.push({ itemId, path, index, reason: 'unsupported-change-kind', level: 'debug' });
     }
-    fallback(msgId, `${fence(json(kind), 'json')}\n\n${fence(change.diff, 'diff')}`, path);
+    fallback(msgId, `${fence(json(kind), 'json')}\n\n${fence(change.diff, 'diff')}`, subtitle, label);
   }
   return { messages, diagnostics };
 }

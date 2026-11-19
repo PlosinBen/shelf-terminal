@@ -70,6 +70,8 @@ Rendering (per agent-ui#5): `reply` = assistant markdown reply (streams); `note`
 
 ### Foldable card variants — `fold_text` / `fold_code` / `fold_markdown` / `fold_diff`
 
+An explicit `fold_code` body `{content: ""}` with no nested children renders as a header-only summary: no chevron, toggle or empty controls. Error and execution indicators remain visible. An absent body is distinct (pending or pure failure), and later nonempty content restores normal folding. Providers must not omit the body to represent a settled empty result. File labels describe the operation while body format follows available evidence (agent-ui#15).
+
 Collapsible cards sharing the `FoldBase` header (`src/shared/types.ts`). Differ only in `body` shape and how the renderer renders the body. `errorMessage` present ⇒ card treated as failed with a red banner outside the collapsible body. `fold_code` opens on its first failure per mount, then permits manual collapse; duplicate failure snapshots preserve that choice. Other folds remain force-expanded regardless of display setting. `body` may be absent (pure failure) or present (failed-with-partial-output).
 
 Common fields (all four):

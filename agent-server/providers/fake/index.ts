@@ -420,17 +420,18 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       if (step === FAKE_FILE_CHANGES.MIXED) changes.push(
         { path: 'added.md', kind: { type: 'add' }, diff: '```\noriginal added content\n```\n' },
         { path: 'deleted.ts', kind: { type: 'delete' }, diff: 'deleted content\n' },
-        { path: 'moved.ts', kind: { type: 'update', move_path: 'destination.ts' }, diff: 'move content' },
+        { path: 'moved.ts', kind: { type: 'update', move_path: '/fixture/project/destination.ts' }, diff: '\n\nMoved to: /fixture/project/destination.ts' },
+        { path: 'empty.ts', kind: { type: 'delete' }, diff: '' },
         { path: 'invalid.ts', kind: { type: 'update' }, diff: '@@ -1,2 +1 @@\n-malformed\n+preserved\n' },
       );
-      const item = { id: mintId('file-item'), type: 'fileChange', changes };
+      const item = { id: mintId('file-item'), type: 'fileChange', changes: changes.map(change => ({ ...change, path: `/fixture/project/${change.path}` })) };
       const status = step === FAKE_FILE_CHANGES.FAILED ? 'failed' : step === FAKE_FILE_CHANGES.DECLINED ? 'declined' : 'completed';
       // Exercise actual translation, then normal wire/main/renderer upserts.
       for (const [method, currentStatus] of [
         ['item/started', 'inProgress'], ['item/updated', 'inProgress'],
         ['item/completed', status], ['item/completed', status],
       ]) {
-        for (const message of translateCodexAppServerNotification(method, { item: { ...item, status: currentStatus } })) send(message);
+        for (const message of translateCodexAppServerNotification(method, { item: { ...item, status: currentStatus } }, { cwd: '/fixture/project' })) send(message);
       }
       send({ type: 'message', msgId: mintId('markdown'), msgType: 'fold_markdown', label: 'Details',
         body: { content: '**Ordinary Markdown stays expanded**' } });

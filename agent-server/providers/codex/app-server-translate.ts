@@ -8,6 +8,7 @@ const PLAN_STATUS_MARKERS = { pending: '[ ]', inProgress: '[~]', completed: '[x]
 
 export interface CodexAppServerTranslateOptions {
   redactValues?: string[];
+  cwd?: string;
 }
 
 export function translateCodexAppServerNotification(
@@ -228,7 +229,7 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
 }
 
 function fileChangeToMessages(id: string, item: Record<string, unknown>, opts: CodexAppServerTranslateOptions): OutgoingMessage[] {
-  const result = fileChangesToMessages(id, item);
+  const result = fileChangesToMessages(id, item, opts.cwd);
   for (const diagnostic of result.diagnostics) {
     serverLog(diagnostic.level, 'codex-file-change', redactText(JSON.stringify(diagnostic), opts.redactValues));
   }
@@ -248,7 +249,7 @@ function fileChangeToMessages(id: string, item: Record<string, unknown>, opts: C
         hunks: message.body.diff.hunks.map(hunk => ({ ...hunk, oldLines: redactLines(hunk.oldLines), newLines: redactLines(hunk.newLines) })),
       } } };
     }
-    if (message.msgType === 'fold_markdown') {
+    if (message.msgType === 'fold_markdown' || message.msgType === 'fold_code') {
       return { ...message, ...(message.subtitle ? { subtitle: redactText(message.subtitle, opts.redactValues) } : {}),
         ...(message.body ? { body: { content: redactText(message.body.content, opts.redactValues) } } : {}),
       };
