@@ -36,6 +36,37 @@ test.describe('worktree reconciliation', () => {
   });
   test.afterEach(async () => { await app?.close().catch(() => {}); fs.rmSync(root, { recursive: true, force: true }); });
 
+  test('explains duplicate main projects and preserves existing worktrees on rescan', async () => {
+    const [main] = await page.evaluate(() => window.shelfApi.project.getAll());
+    const other = { ...main, id: 'other-main', agentViews: {} };
+    // Git reports canonical checkout paths; macOS tmpdir may use the /var alias.
+    const existing = { ...other, id: 'existing-child', cwd: fs.realpathSync(child), parentProjectId: other.id,
+      worktreeBranch: 'external', baseBranch: 'main' };
+    await app.close();
+    fs.writeFileSync(path.join(userData, 'projects.json'), JSON.stringify({
+      schemaVersion: 4, projects: [main, other, existing],
+    }));
+    const gitBefore = git(base, 'worktree', 'list', '--porcelain');
+    await launch();
+    await connectMain();
+    await page.getByRole('button', { name: 'Worktree scan failed' }).click();
+    const warning = page.locator('.worktree-scan-popover');
+    await expect(warning).toContainText('Duplicate main projects');
+    for (const detail of ['Scan Base', 'ID: base', 'ID: other-main', 'ID: existing-child', base, child,
+      'No scan updates were saved', 'Rescanning will fail again']) {
+      await expect(warning).toContainText(detail);
+    }
+    await warning.getByRole('button', { name: 'Rescan project worktrees' }).click();
+    await expect(warning.getByRole('button', { name: 'Rescan project worktrees' })).toBeEnabled();
+    await expect(warning).toContainText('Duplicate main projects');
+    await expect(rows()).toHaveCount(1);
+    const saved = await page.evaluate(() => window.shelfApi.project.getAll());
+    expect(saved).toHaveLength(3);
+    expect(saved.find(project => project.id === other.id)).toEqual(other);
+    expect(saved.find(project => project.id === existing.id)).toEqual(existing);
+    expect(git(base, 'worktree', 'list', '--porcelain')).toBe(gitBefore);
+  });
+
   test('discovers external worktrees without focus, tabs or inherited sessions; persists missing and restores', async () => {
     await connectMain();
     await expect(rows()).toHaveCount(1);

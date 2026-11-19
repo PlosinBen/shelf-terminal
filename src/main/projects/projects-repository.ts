@@ -266,8 +266,23 @@ export function createMainProjectsRepository(
         ...created,
       ], 'save');
       for (const child of created) {
-        if (candidate.some(other => other.id !== child.id && sameProjectTarget(other, child))) {
-          throw new ProjectRepositoryError('add', `duplicate worktree target ${child.cwd}`);
+        const duplicate = candidate.find(other => other.id !== child.id && sameProjectTarget(other, child));
+        if (duplicate) {
+          const parent = candidate.find(project => project.id === child.parentProjectId);
+          const owner = candidate.find(project => project.id === duplicate.parentProjectId);
+          const label = (project: Project) => `"${project.name}" (ID: ${project.id})`;
+          const duplicateMains = parent && owner && parent.id !== owner.id
+            && !parent.parentProjectId && !owner.parentProjectId && sameProjectTarget(parent, owner);
+          const reason = duplicateMains
+            ? `Duplicate main projects: ${label(parent)} and ${label(owner)} point to the same target (${parent.cwd}). `
+            : '';
+          throw new ProjectRepositoryError('add',
+            `Worktree scan could not complete. ${reason}`
+            + `The worktree at ${child.cwd} is already registered as ${label(duplicate)}`
+            + (owner ? ` under main project ${label(owner)}. ` : '. ')
+            + 'No scan updates were saved; existing project data and Git worktrees were not changed. '
+            + 'Review the conflicting project entries and their worktree children before removing any entry. '
+            + 'Rescanning will fail again while this conflict remains.');
         }
       }
       if (isDeepStrictEqual(candidate, projects)) return projects;

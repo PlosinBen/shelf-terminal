@@ -270,6 +270,41 @@ describe('main projects repository', () => {
 });
 
 describe('worktree batch reconciliation', () => {
+  it('identifies duplicate main projects without publishing the conflicting scan', async () => {
+    const main = { ...project('main-a'), name: 'Same name' };
+    const other = { ...project('main-b'), name: main.name, cwd: `${main.cwd}/` };
+    const existing = project('existing-child', other.id);
+    const config = persistence([main, other, existing]);
+    const repo = readyRepository(config.value, () => 'new-child');
+    const baseline = repo.getAll();
+    const error = await repo.reconcileWorktrees(baseline, [], [createInput({
+      parentProjectId: main.id, cwd: existing.cwd,
+    })]).catch(error => error);
+    expect(error).toBeInstanceOf(ProjectRepositoryError);
+    expect(error.message).toContain('Duplicate main projects');
+    for (const value of [main.name, main.id, other.id, main.cwd, existing.cwd, existing.id]) {
+      expect(error.message).toContain(value);
+    }
+    expect(error.message).toContain('No scan updates were saved');
+    expect(config.save).not.toHaveBeenCalled();
+    expect(repo.getAll()).toEqual(baseline);
+  });
+
+  it.each(['standalone', 'different-parent'])('does not diagnose duplicate main projects for a %s conflict', async kind => {
+    const main = project('main');
+    const other = project('other');
+    const existing = project('existing', kind === 'standalone' ? null : other.id);
+    const config = persistence([main, other, existing]);
+    const repo = readyRepository(config.value, () => 'new-child');
+    const error = await repo.reconcileWorktrees(repo.getAll(), [], [createInput({
+      parentProjectId: main.id, cwd: existing.cwd,
+    })]).catch(error => error);
+    expect(error.message).toContain('already registered');
+    expect(error.message).toContain(existing.id);
+    expect(error.message).not.toContain('Duplicate main projects');
+    expect(config.save).not.toHaveBeenCalled();
+  });
+
   it('saves a whole batch once and rejects a stale baseline', async () => {
     const config = persistence([project('main')]);
     const repo = readyRepository(config.value, () => 'child');

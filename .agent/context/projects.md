@@ -110,6 +110,7 @@ Folder Picker treats a matching selection as reopening the first matching projec
 - Multiple legacy matches resolve to the first project in reconciled order without modifying any record.
 - Target comparison is configuration-level and lexical. It does not use filesystem I/O, `realpath`, symlink resolution, case folding, `.` / `..` normalization, or connection aliases.
 - The same path on distinct connection identities remains valid. A Git worktree remains distinct because its configured working directory differs.
+- Worktree discovery compares children within the scanned parent, so legacy duplicate main projects can cause a discovered checkout to collide with a child under the other parent. The batch remains rejected before persistence. Its error identifies both main project names/ids and the conflicting checkout when their effective targets match; other target conflicts must not be diagnosed as duplicate main projects. The message does not authorize automatic merging, reparenting or deletion.
 
 ## projects#9 — Sidebar Project Search locates visible rows without filtering  ·  [Decision]
 
