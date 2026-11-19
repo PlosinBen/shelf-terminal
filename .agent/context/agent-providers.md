@@ -227,6 +227,8 @@ Shelf 不提供 Project Secret Variables；Project.envPlain 是明碼設定，�
 
 ## agent-providers#20 — ACP 工具卡片:`kind` → 短 label(粉紅工具名)、`title` → subtitle(灰色描述),對齊 claude 的 label/subtitle 語意  ·  [Decision]
 
+ACP execute 有有效字串 rawInput.command 時輸出 Command 與獨立 details，title 留作描述；缺少命令時維持 Execute 並提供空 details，避免把描述放進程式碼區。Raw input 與其他 metadata 一樣按 toolCallId carry 至 terminal update，renderer 不辨識原生工具。Copilot provider 在進入 driver 前，僅對 completed、有效 structuredContent.shellId 與精確 `<shellId: ID completed with exit code 0>` 尾註一致的結果移除成功包裝；其他內容、非零退出、failed 或缺證據一律保留。只同步替換與 rawOutput.content 完全相同的 ACP text block，不掃描任意輸出。清理記錄 sessionId/toolCallId debug 訊息，不記錄命令或結果全文。
+
 **Decision**：ACP tool_call 的 wire 卡片 **`label` = `kind` 對應的短工具名**（`read`→`Read`、`search`→`Search`、`execute`→`Execute`…；`other`/缺 → 泛用 `Tool`），**`subtitle` = 影響的檔案路徑（ACP `locations[0].path`,否則 diff block 的 `path`),沒有路徑才退回 `title`**。對應 `translate.ts` 的 `TOOL_KIND_LABELS`/`toolKindLabel()` + `firstDiff().path`/`locations`。
 
 - 檔案路徑優先的原因:copilot 的 edit 工具 `title` 是泛用的 **`apply_patch`**（沒帶檔案),但 ACP 標準欄位 `locations`/diff `path` 有絕對路徑 → 拿它當 subtitle 才對齊 claude（`Edit` → subtitle=`<file path>`）。無檔案的工具（execute/search）沒有 locations → subtitle 退回 `title`（命令/pattern）。

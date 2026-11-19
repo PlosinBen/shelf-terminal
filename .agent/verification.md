@@ -108,4 +108,6 @@ Claude 的 Shelf 工具註冊另由 `agent-server/shelf-tool-sdk-smoke.test.ts` 
 
 ### Copilot Autopilot 完成等待診斷
 
+Copilot 命令描述／details 以 `command-output.test.ts`、ACP translator、Copilot backend、main wire 與 renderer builder/store tests 驗證；`e2e/codex-provider-flow.spec.ts --grep 'Copilot command descriptions'` 經 fake transport 驗完整命令複製、空輸出可展開、描述 fallback、失敗與歷史。成功尾註清理必須有結構化 shellId 配對，缺少時保留原文；真實 dev 可查 `copilot` 的 `Removed confirmed shell success trailer`（只有 IDs），此 E2E 不證明 CLI 每個版本都提供該結構。
+
 Debug tag `copilot-completion` 依序觀察原始 ACP tool identity、gate observed tool、waiting for task completion 與 gate settled。以 sessionId/toolCallId 配對，查看 titleMatched、tracked、gateSettled、stopReason 與 outcome，區分 prompt 已回覆但 gate 未命中的情境。只記錄完成形狀的 title、短工具識別與 payload 欄位名稱；一般 title 僅記長度，不記錄命令或輸入／輸出全文。使用者重啟新 bundle 後，在 Autopilot 發送短任務重現。診斷不改完成判斷，也不表示已修復 running 卡住。

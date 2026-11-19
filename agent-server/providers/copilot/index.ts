@@ -1,5 +1,6 @@
 import { assertCopilotSkillInput, readCopilotSkillCatalog, snapshotCopilotSkills, loadedCopilotSkills, resolveCopilotSkillCommand, type CopilotNativeSkill, type CopilotSkillSnapshot } from './skill-invocation';
 import { resolveSkillsPluginRoot } from '../shared';
+import { normalizeCopilotCommandOutput } from './command-output';
 import { SKILL_COMMAND_ERROR as SCE, SkillCommandFailure } from '@shared/skill-invocation';
 import { AgentInitializationError, savedPrefRecovery } from '@shared/agent-init-recovery';
 // Copilot agent provider over ACP (ServerBackend), peer to createCodexBackend.
@@ -660,7 +661,14 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           serverLog('debug', 'copilot', `suppressed ACP cancellation notice (session=${notification.sessionId})`);
           return;
         }
-        driver.onSessionUpdate(notification);
+        const normalized = normalizeCopilotCommandOutput(notification.update);
+        if (normalized !== notification.update) {
+          serverLog('debug', 'copilot', 'Removed confirmed shell success trailer', {
+            sessionId: notification.sessionId,
+            toolCallId: 'toolCallId' in normalized ? normalized.toolCallId : undefined,
+          });
+        }
+        driver.onSessionUpdate({ ...notification, update: normalized });
       },
     });
     // Drop refs when the agent process/connection ends so the next turn respawns —

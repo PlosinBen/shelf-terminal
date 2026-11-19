@@ -150,6 +150,7 @@ title: shelf-terminal — Intent → File Index
 | Claude 設定套用測試 | `providers/claude/config-apply.test.ts` | live SDK control、effort rebuild／resume、拒絕不回報成功與 init bypass 驗證 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
 | Copilot completion diagnostics | `providers/copilot/completion-diagnostics.ts` | 最小化 ACP 工具識別摘要，配合 Autopilot gate 診斷，避免記錄命令與結果全文 |
+| Copilot shell 結果顯示 | `providers/copilot/command-output.ts` | 依結構化 shellId 與 completed 狀態辨識精確成功尾註，保留其他原始輸出 |
 | Copilot app command 驗證 | `providers/copilot/skill-invocation.ts` | native source discovery、session payload snapshot、純文字 native slash dispatch 與 command 附件拒絕（skills#18） |
 | Copilot usage 觀測 | `providers/copilot/usage-observation.ts` | 攔截 usage、驗證並摘要標準欄位、記錄 session/prompt 時序診斷 |
 | Copilot usage E2E transport fixture | `providers/copilot/test-agent.ts` | 僅於測試替換模式提供實際 Copilot provider + mock ACP transport |

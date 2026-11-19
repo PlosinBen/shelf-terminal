@@ -1513,6 +1513,7 @@ function buildAgentMessagePayload(msg: any): import('./types').AgentMessage | nu
       return {
         msgId,
         type: 'fold_code',
+        ...(typeof msg.details === 'string' ? { details: msg.details } : {}),
         ...(checked.execution ? { execution: checked.execution } : {}),
         label: msg.label,
         ...(typeof msg.subtitle === 'string' ? { subtitle: msg.subtitle } : {}),

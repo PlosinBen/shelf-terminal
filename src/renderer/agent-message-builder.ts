@@ -76,6 +76,7 @@ function buildAgentMsgInner(msg: any, provider: string): AgentMsg | null {
       if (checked.anomaly) console.warn(checked.anomaly, { msgId: id });
       return {
         id, type: 'fold_code', ...foldBase(msg),
+        ...(typeof msg.details === 'string' ? { details: msg.details } : {}),
         ...(checked.execution ? { execution: checked.execution } : {}),
         ...(msg.body && typeof msg.body.content === 'string'
           ? { body: { content: msg.body.content } }

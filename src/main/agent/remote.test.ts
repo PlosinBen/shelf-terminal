@@ -796,6 +796,11 @@ describe('parseRemoteMessage — mid-execution capabilities', () => {
 });
 
 describe('File Diff wire projection', () => {
+  it.each(['mkdir "a b"', ''])('preserves separate details %j through main', async details => {
+    const { parseRemoteMessage } = await import('./remote');
+    expect(parseRemoteMessage({ type: 'message', msgType: 'fold_code', msgId: 'cmd', label: 'Command',
+      subtitle: '建立目錄', details, body: { content: '' } })).toMatchObject({ payload: { subtitle: '建立目錄', details } });
+  });
   it('preserves structured command outcomes through the main wire boundary', async () => {
     const { parseRemoteMessage } = await import('./remote');
     expect(parseRemoteMessage({ type: 'message', msgType: 'fold_code', msgId: 'command', label: 'Command',

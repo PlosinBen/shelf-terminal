@@ -70,7 +70,7 @@ Rendering (per agent-ui#5): `reply` = assistant markdown reply (streams); `note`
 
 ### Foldable card variants — `fold_text` / `fold_code` / `fold_markdown` / `fold_diff`
 
-An explicit `fold_code` body `{content: ""}` with no nested children renders as a header-only summary: no chevron, toggle or empty controls. Error and execution indicators remain visible. An absent body is distinct (pending or pure failure), and later nonempty content restores normal folding. Providers must not omit the body to represent a settled empty result. File labels describe the operation while body format follows available evidence (agent-ui#15).
+An explicit `fold_code` body `{content: ""}` with no nonempty `details` or nested children renders as a header-only summary: no chevron, toggle or empty controls. Nonempty `details` keeps the card expandable even without output. Error and execution indicators remain visible. An absent body is distinct (pending or pure failure), and later nonempty content restores normal folding. Providers must not omit the body to represent a settled empty result. File labels describe the operation while body format follows available evidence (agent-ui#15).
 
 Collapsible cards sharing the `FoldBase` header (`src/shared/types.ts`). Differ only in `body` shape and how the renderer renders the body. `errorMessage` present ⇒ card treated as failed with a red banner outside the collapsible body. `fold_code` opens on its first failure per mount, then permits manual collapse; duplicate failure snapshots preserve that choice. Other folds remain force-expanded regardless of display setting. `body` may be absent (pure failure) or present (failed-with-partial-output).
 
@@ -83,12 +83,13 @@ Common fields (all four):
 | `msgType` | `'fold_text'` \| `'fold_code'` \| `'fold_markdown'` \| `'fold_diff'` | |
 | `label` | `string` | Required — main drops the card if missing. |
 | `subtitle` | `string?` | Full string; renderer CSS-truncates + `title=` tooltip. |
+| `details` | `string?` | fold_code only: separate copyable detail text. When present, subtitle stays in the header; an empty string suppresses the detail block. When absent, legacy subtitle-as-details behavior is preserved. Main, renderer and history retain this optional field. |
 | `errorMessage` | `string?` | Set ⇒ failed card; fold_code opens on first failure per mount, other folds force-expand. |
 | `execution` | `{state, exitCode?}?` | Optional fold_code operation outcome. State is pending / running / succeeded / failed / declined / interrupted / unknown, defined by `EXECUTION_STATE` in `shared/agent-execution.ts`. Exit code is an optional signed 32-bit integer; absence is not zero. |
 
 Execution metadata is independent of body/error text. Main and renderer validate it; malformed or contradictory metadata logs IDs and becomes unknown without dropping the body. Legacy messages without metadata retain legacy rendering and history behavior; no text parsing or history migration supplies synthetic success. Badges remain visible when the body is collapsed. `interrupted` requires explicit operation-level evidence; turn end or exit 130 alone is insufficient.
 
-For the same fold_code msgId, subsequent output may update the body while an established terminal outcome remains stable. Conflicting terminal outcomes warn and retain the first result. Missing body/subtitle on metadata-bearing partial updates preserves previously received fields; an explicit empty body can clear content. Unknown can be corrected by a later final result but cannot return to pending/running. On execution idle, unfinished metadata-bearing operations become unknown; exit snapshots and history reload also mark pending/running as unknown even with partial output. Exit snapshots do not mutate the live operation state.
+For the same fold_code msgId, subsequent output may update the body while an established terminal outcome remains stable. Conflicting terminal outcomes warn and retain the first result. Missing body/subtitle/details on metadata-bearing partial updates preserves previously received fields; explicit empty values can clear content. Unknown can be corrected by a later final result but cannot return to pending/running. On execution idle, unfinished metadata-bearing operations become unknown; exit snapshots and history reload also mark pending/running as unknown even with partial output. Exit snapshots do not mutate the live operation state.
 
 Body shape per variant:
 

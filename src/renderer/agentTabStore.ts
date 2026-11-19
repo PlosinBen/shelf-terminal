@@ -434,6 +434,7 @@ function upsertById(prev: AgentMsg[], built: AgentMsg): AgentMsg[] {
         built = { ...built, execution: checked.execution,
           ...(built.body === undefined && old.body !== undefined ? { body: old.body } : {}),
           ...(built.subtitle === undefined && old.subtitle !== undefined ? { subtitle: old.subtitle } : {}),
+          ...(built.details === undefined && old.details !== undefined ? { details: old.details } : {}),
           ...(checked.execution.state === old.execution.state && old.errorMessage && !built.errorMessage ? { errorMessage: old.errorMessage } : {}),
         };
       }

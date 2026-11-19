@@ -41,7 +41,7 @@ export type AgentMsg = {
   | { type: 'system'; content: string }
   | { type: 'error'; content: string }
   | (FoldBase & { type: 'fold_text';     body?: { content: string; tone?: 'muted' }; streaming?: boolean })
-  | (FoldBase & { type: 'fold_code';     body?: { content: string } })
+  | (FoldBase & { type: 'fold_code'; details?: string; body?: { content: string } })
   | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
   | (FoldBase & { type: 'fold_diff';     body?: { diff: AgentDiff } })
   | { type: 'user'; content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }
@@ -157,7 +157,9 @@ function CodeFold({ message, settingMode, nested }: {
     setExpansion({ failureSeen: true, choice: true });
   }
   // An explicit empty body is settled, unlike an absent (pending) body.
-  const summary = message.body?.content === '' && !nested?.length;
+  const hasSeparateDetails = message.details !== undefined;
+  const details = hasSeparateDetails ? message.details : message.subtitle;
+  const summary = message.body?.content === '' && !message.details && !nested?.length;
   const isExpanded = !summary && (expansion.choice ?? (hasError || settingMode === 'expanded'));
   const [fullOutput, setFullOutput] = useState(false);
   const [tailRequest, setTailRequest] = useState(0);
@@ -181,7 +183,7 @@ function CodeFold({ message, settingMode, nested }: {
   };
   return (
     <div className="agent-msg agent-msg-fold">
-      <FoldHeader label={message.label} subtitle={isExpanded ? undefined : message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
+      <FoldHeader label={message.label} subtitle={isExpanded && !hasSeparateDetails ? undefined : message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
         onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
       {message.execution && message.execution.state !== ES.SUCCEEDED && <div className="fold-execution" data-state={message.execution.state}>
         {EXECUTION_LABEL[message.execution.state]}
@@ -189,9 +191,9 @@ function CodeFold({ message, settingMode, nested }: {
       </div>}
       {message.errorMessage && <div className="fold-error-banner">{message.errorMessage}</div>}
       {isExpanded && <>
-        {message.subtitle && <div className="fold-body-container">
-          <FoldCopyButton target="details" onCopy={() => copy(message.subtitle!, 'details')} />
-          <pre className="fold-body fold-command-text" tabIndex={0} aria-label="Details">{message.subtitle}</pre>
+        {details && <div className="fold-body-container">
+          <FoldCopyButton target="details" onCopy={() => copy(details, 'details')} />
+          <pre className="fold-body fold-command-text" tabIndex={0} aria-label="Details">{details}</pre>
         </div>}
         {nested && nested.length > 0 && <div className="agent-subagent-nested">
           {nested.map(child => <AgentMessage key={child.id} message={child} />)}

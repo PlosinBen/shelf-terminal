@@ -11,6 +11,7 @@ export const FAKE_TEST_ENV = {
 export const FAKE_RETIRED_MODEL = 'fake-retired-model';
 
 export const FAKE_FILE_CHANGES = {
+  COPILOT_COMMAND: 'file_changes:copilot-command',
   COPILOT: 'file_changes:copilot',
   CLAUDE: 'file_changes:claude',
   SUCCESS: 'file_changes:success',

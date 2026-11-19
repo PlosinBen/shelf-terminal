@@ -408,6 +408,25 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     }
 
     if (Object.values(FAKE_FILE_CHANGES).some(scenario => scenario === step)) {
+      if (step === FAKE_FILE_CHANGES.COPILOT_COMMAND) {
+        const { createToolMetaCarry, translateSessionUpdate } = await import('../acp/translate');
+        const { normalizeCopilotCommandOutput } = await import('../copilot/command-output');
+        const carry = createToolMetaCarry();
+        for (const [title, command, content, status] of [
+          ['建立目錄', 'mkdir "a b"', '\n<shellId: 14 completed with exit code 0>', 'completed'],
+          ['讀取位置', 'pwd', '/fixture/project\n<shellId: 14 completed with exit code 0>', 'completed'],
+          ['沒有命令資料', undefined, 'raw output', 'completed'],
+          ['失敗命令', 'false', 'failure output', 'failed'],
+        ] as const) {
+          const toolCallId = mintId('acp-command');
+          for (const update of [
+            { sessionUpdate: 'tool_call' as const, toolCallId, title, kind: 'execute' as const, rawInput: { command } },
+            { sessionUpdate: 'tool_call_update' as const, toolCallId, status,
+              rawOutput: { content, structuredContent: { shellId: '14' } } },
+          ]) for (const message of translateSessionUpdate(carry(normalizeCopilotCommandOutput(update)))) send(message);
+        }
+        return;
+      }
       if (step === FAKE_FILE_CHANGES.COPILOT) {
         const { createToolMetaCarry, translateSessionUpdate } = await import('../acp/translate');
         const carry = createToolMetaCarry();

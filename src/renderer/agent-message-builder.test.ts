@@ -5,6 +5,10 @@ import type { AgentMsg } from './components/AgentMessage';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 
 describe('buildAgentMsg', () => {
+  it.each(['mkdir "a b"', ''])('preserves separate details %j', details => {
+    expect(buildAgentMsg({ type: 'fold_code', msgId: 'cmd', label: 'Command', subtitle: '建立目錄', details }, CLAUDE_PROVIDER))
+      .toMatchObject({ subtitle: '建立目錄', details });
+  });
   it('preserves valid execution metadata and makes malformed metadata unknown', () => {
     const base = { type: 'fold_code', msgId: 'cmd', label: 'Command', body: { content: 'partial' } };
     expect(buildAgentMsg({ ...base, execution: { state: 'failed', exitCode: 130 } }, CLAUDE_PROVIDER))

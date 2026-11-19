@@ -3,6 +3,18 @@ import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import { translateSessionUpdate, createToolMetaCarry, contentBlockToText, renderPlan } from './translate';
 
 describe('translateSessionUpdate', () => {
+  it('keeps the executable command separate from the description across partial completion', () => {
+    const carry = createToolMetaCarry();
+    carry({ sessionUpdate: 'tool_call', toolCallId: 'cmd', title: '建立目錄', kind: 'execute',
+      rawInput: { command: 'mkdir "a b"', description: '建立目錄' } });
+    const done = carry({ sessionUpdate: 'tool_call_update', toolCallId: 'cmd', status: 'completed', rawOutput: { content: '' } });
+    expect(translateSessionUpdate(done)[0]).toMatchObject({ label: 'Command', subtitle: '建立目錄', details: 'mkdir "a b"', body: { content: '' } });
+  });
+
+  it.each([undefined, { command: 42 }, { command: '' }])('does not turn a description into command details when input is %j', (rawInput) => {
+    expect(translateSessionUpdate({ sessionUpdate: 'tool_call', toolCallId: 'cmd', title: '執行工作', kind: 'execute', rawInput })[0])
+      .toMatchObject({ label: 'Execute', subtitle: '執行工作', details: '' });
+  });
   it('keeps a file location through partial completion and shortens only its display', () => {
     const carry = createToolMetaCarry();
     const initial = carry({ sessionUpdate: 'tool_call', toolCallId: 'file-read', title: 'View', kind: 'read',
@@ -113,6 +125,7 @@ describe('translateSessionUpdate', () => {
     };
     expect(translateSessionUpdate(u)).toEqual([{
       type: 'message', msgId: 't2', msgType: 'fold_code', label: 'Execute', subtitle: 'Run',
+      details: '',
       execution: { state: 'succeeded' },
       body: { content: 'output line' },
     }]);

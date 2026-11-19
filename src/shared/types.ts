@@ -137,7 +137,8 @@ export type AgentMessage = WithMsgId & (
   | { type: 'system';  content: string }
   | { type: 'error';   content: string }
   | (FoldBase & { type: 'fold_text';     body?: { content: string; tone?: 'muted' } })
-  | (FoldBase & { type: 'fold_code';     body?: { content: string } })
+  // details: undefined uses legacy subtitle-as-details; '' keeps description in header only.
+  | (FoldBase & { type: 'fold_code'; details?: string; body?: { content: string } })
   | (FoldBase & { type: 'fold_markdown'; body?: { content: string } })
   | (FoldBase & { type: 'fold_diff';     body?: { diff: AgentDiff } })
   | { type: 'user';    content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }

@@ -172,6 +172,46 @@ function fileCard(page: Page, file: string) {
 }
 
 test.describe('Codex file changes use File Diff display settings', () => {
+  test('Copilot command descriptions stay in headers while full details survive copy and history', async ({ shelfApp: { app, page } }) => {
+    await setupProject(page);
+    const panel = await openProjectEdit(page);
+    await panel.locator('.default-tab-add', { hasText: 'Add Agent' }).click();
+    const agentRow = panel.locator('.default-tab-row', { has: page.locator('.default-tab-kind-agent') });
+    await agentRow.locator('.default-tab-provider').selectOption(CODEX_PROVIDER);
+    await agentRow.locator('.default-tab-name').fill(OFFICIAL_LABEL);
+    await panel.locator('.project-edit-footer .conn-btn-next').click();
+    await expect(panel).not.toBeVisible();
+    await disconnectAndReconnect(page);
+    await sendAgentPrompt(page, FAKE_FILE_CHANGES.COPILOT_COMMAND);
+    const card = (description: string) => page.locator('.agent-msg-fold:visible')
+      .filter({ has: page.locator('.fold-subtitle', { hasText: description }) });
+    const empty = card('建立目錄');
+    await expect(empty.locator('.fold-label')).toHaveText('Command');
+    await empty.locator('.fold-header').click();
+    await expect(empty.locator('.fold-header')).toContainText('建立目錄');
+    await expect(empty.locator('.fold-command-text')).toHaveText('mkdir "a b"');
+    await expect(empty.locator('.fold-body-code')).toHaveCount(0);
+    await empty.getByRole('button', { name: 'Copy details', exact: true }).click();
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('mkdir "a b"');
+    const output = card('讀取位置');
+    await output.locator('.fold-header').click();
+    await expect(output.locator('.fold-command-text')).toHaveText('pwd');
+    await expect(output.locator('.fold-body-code')).toHaveText('/fixture/project');
+    const fallback = card('沒有命令資料');
+    await fallback.locator('.fold-header').click();
+    await expect(fallback.locator('.fold-command-text')).toHaveCount(0);
+    await expect(fallback.locator('.fold-body-code')).toHaveText('raw output');
+    const failed = card('失敗命令');
+    await expect(failed.locator('.fold-error-banner')).toBeVisible();
+    await expect(failed.locator('.fold-command-text')).toHaveText('false');
+    await failed.locator('.fold-header').click();
+    await expect(failed.locator('.fold-error-banner')).toBeVisible();
+    await disconnectAndReconnect(page);
+    await empty.locator('.fold-header').click();
+    await expect(empty.locator('.fold-command-text')).toHaveText('mkdir "a b"');
+    await expect(empty.locator('.fold-body-code')).toHaveCount(0);
+    await expect(empty.locator('.fold-header')).toContainText('建立目錄');
+  });
   test('Copilot structured file cards keep relative paths and content through history', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     const panel = await openProjectEdit(page);

@@ -87,11 +87,13 @@ it('retains command outcomes across late output and marks unfinished partial out
   upsertMessage(TAB, { ...base, execution: { state: ES.FAILED, exitCode: 130 }, errorMessage: 'failed', body: { content: 'first' } });
   upsertMessage(TAB, { ...base, execution: { state: ES.RUNNING }, body: { content: 'first\nlate' } });
   expect(__getTabForTests(TAB)?.messages[0]).toMatchObject({ execution: { state: ES.FAILED, exitCode: 130 }, errorMessage: 'failed', body: { content: 'first\nlate' } });
-  upsertMessage(TAB, { ...base, id: 'unfinished', execution: { state: ES.RUNNING }, body: { content: 'partial' } });
+  upsertMessage(TAB, { ...base, id: 'unfinished', details: 'pwd', execution: { state: ES.RUNNING }, body: { content: 'partial' } });
   setExecutionActive(TAB, false);
   expect(__getTabForTests(TAB)?.messages[1]).toMatchObject({ execution: { state: ES.UNKNOWN }, body: { content: 'partial' } });
   upsertMessage(TAB, { ...base, id: 'unfinished', execution: { state: ES.SUCCEEDED, exitCode: 0 } });
-  expect(__getTabForTests(TAB)?.messages[1]).toMatchObject({ execution: { state: ES.SUCCEEDED, exitCode: 0 }, body: { content: 'partial' } });
+  expect(__getTabForTests(TAB)?.messages[1]).toMatchObject({ details: 'pwd', execution: { state: ES.SUCCEEDED, exitCode: 0 }, body: { content: 'partial' } });
+  upsertMessage(TAB, { ...base, id: 'unfinished', details: '' });
+  expect(__getTabForTests(TAB)?.messages[1]).toMatchObject({ details: '' });
 });
 
 it('does not let delayed progress overwrite a terminal control result', () => {

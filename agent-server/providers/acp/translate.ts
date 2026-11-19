@@ -143,7 +143,7 @@ function errorFor(status: ToolCallStatus | null | undefined): string | undefined
  * entries on session reset/forget.
  */
 export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate {
-  const metaByToolCall = new Map<string, { title?: string; kind?: ToolKind; locations?: Extract<SessionUpdate, { sessionUpdate: 'tool_call_update' }>['locations'] }>();
+  const metaByToolCall = new Map<string, { title?: string; kind?: ToolKind; rawInput?: unknown; locations?: Extract<SessionUpdate, { sessionUpdate: 'tool_call_update' }>['locations'] }>();
   return (update) => {
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
       return update;
@@ -152,11 +152,13 @@ export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate 
     const title = (update.title || prev.title) ?? undefined;
     const kind = (update.kind || prev.kind) ?? undefined;
     const locations = update.locations === undefined ? prev.locations : update.locations;
+    const rawInput = update.rawInput === undefined ? prev.rawInput : update.rawInput;
     const carried = { ...update, ...(title ? { title } : {}), ...(kind ? { kind } : {}),
+      ...(rawInput !== undefined ? { rawInput } : {}),
       ...(locations !== undefined ? { locations } : {}) } as SessionUpdate;
     const status = 'status' in update ? update.status : undefined;
     if (status === 'completed' || status === 'failed') metaByToolCall.delete(update.toolCallId);
-    else metaByToolCall.set(update.toolCallId, { title, kind, locations });
+    else metaByToolCall.set(update.toolCallId, { title, kind, locations, rawInput });
     return carried;
   };
 }
@@ -231,6 +233,12 @@ export function translateSessionUpdate(update: SessionUpdate, cwd?: string): Out
         return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];
       }
       let label = toolCallLabel('kind' in update ? update.kind : undefined, title);
+      const isCommand = 'kind' in update && update.kind === 'execute';
+      const input = update.rawInput;
+      const command = input && typeof input === 'object' && !Array.isArray(input)
+        ? (input as Record<string, unknown>).command : undefined;
+      const details = isCommand ? (typeof command === 'string' ? command : '') : undefined;
+      if (details) label = 'Command';
       const status = 'status' in update ? update.status : undefined;
       const errorMessage = errorFor(status);
       // ACP status applies to the tool invocation; it supplies no portable exit code.
@@ -268,6 +276,7 @@ export function translateSessionUpdate(update: SessionUpdate, cwd?: string): Out
       const settled = status === 'completed';
       return [{
         type: 'message', msgId, msgType: 'fold_code', label,
+        ...(details !== undefined ? { details } : {}),
         ...(execution ? { execution } : {}),
         ...(subtitle ? { subtitle } : {}),
         ...(errorMessage ? { errorMessage } : {}),

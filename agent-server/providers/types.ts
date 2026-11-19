@@ -267,6 +267,8 @@ export type OutgoingMessage = WireEnvelope & (
   | {
       type: 'message'; msgId: string; msgType: 'fold_code';
       label: string; subtitle?: string; errorMessage?: string;
+      /** Separate copyable detail text; empty means description-only, absent preserves legacy subtitle details. */
+      details?: string;
       execution?: import('@shared/agent-execution').AgentExecution;
       body?: { content: string }; parentToolUseId?: string;
     }

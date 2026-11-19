@@ -46,6 +46,21 @@ it('observes original ACP diff nulls and tool IDs before rendering normalization
 
 const COPILOT_AGENT_MODE_ID = 'https://agentclientprotocol.com/protocol/session-modes#agent';
 
+it('keeps shell details after partial completion and removes only its confirmed success trailer', async () => {
+  const mock = createMockAcpAgent({ updatesOnPrompt: [
+    { sessionUpdate: 'tool_call', toolCallId: 'cmd', title: '建立目錄', kind: 'execute', rawInput: { command: 'mkdir test' } },
+    { sessionUpdate: 'tool_call_update', toolCallId: 'cmd', status: 'completed',
+      rawOutput: { content: '\n<shellId: 14 completed with exit code 0>', structuredContent: { shellId: '14' } } },
+  ] });
+  const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+  const out: OutgoingMessage[] = [];
+  try {
+    await backend.query({ prompt: 'test', cwd: '/repo' }, m => out.push(m));
+    expect(out.filter(m => m.type === 'message').at(-1)).toMatchObject({ label: 'Command', subtitle: '建立目錄',
+      details: 'mkdir test', body: { content: '' }, execution: { state: 'succeeded' } });
+  } finally { backend.dispose(); }
+});
+
 it('traces incoming ACP plan metadata and outgoing snapshots without logging contents', async () => {
   const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
   const mock = createMockAcpAgent({ updatesOnPrompt: [
