@@ -59,7 +59,7 @@ test.describe('agent flows via fake provider', () => {
   test.describe('command result reading', () => {
     test.use({ homeProjectDirectories: false });
 
-    test('structured outcomes remain visible and survive history without guessing legacy results', async ({ shelfApp: { app, page } }) => {
+    test('structured outcomes hide success and preserve exceptions through history', async ({ shelfApp: { app, page } }) => {
       await setupProject(page);
       await app.evaluate(({ ipcMain }, channel) => {
         const original = (ipcMain as any)._invokeHandlers.get(channel);
@@ -77,6 +77,7 @@ test.describe('agent flows via fake provider', () => {
           type: 'fold_code', msgId: id, label: id, body: { content: body }, ...(execution ? { execution } : {}),
         });
         send('outcome-ok', { state: 'succeeded', exitCode: 0 }, '');
+        send('outcome-ok-output', { state: 'succeeded' }, 'successful output');
         send('outcome-failed', { state: 'failed', exitCode: 130 });
         send('outcome-failed', { state: 'running' }, 'partial output\nlate output');
         send('outcome-declined', { state: 'declined' }, '');
@@ -88,7 +89,8 @@ test.describe('agent flows via fake provider', () => {
       }, IPC.AGENT_MESSAGE);
       const card = (name: string) => page.locator('.agent-msg-fold').filter({ has: page.locator('.fold-label', { hasText: new RegExp(`^${name}$`) }) });
       const expectResults = async () => {
-        await expect(card('outcome-ok').locator('.fold-execution')).toHaveText('Succeeded · exit 0');
+        await expect(card('outcome-ok').locator('.fold-execution')).toHaveCount(0);
+        await expect(card('outcome-ok-output').locator('.fold-execution')).toHaveCount(0);
         await expect(card('outcome-failed').locator('.fold-execution')).toHaveText('Failed · exit 130');
         await expect(card('outcome-declined').locator('.fold-execution')).toHaveText('Not executed: declined');
         await expect(card('outcome-interrupted').locator('.fold-execution')).toHaveText('Interrupted');
@@ -96,6 +98,9 @@ test.describe('agent flows via fake provider', () => {
         await expect(card('outcome-legacy').locator('.fold-execution')).toHaveCount(0);
       };
       await expectResults();
+      await card('outcome-ok-output').locator('.fold-header').click();
+      await expect(card('outcome-ok-output').locator('.fold-body-code')).toHaveText('successful output');
+      await expect(card('outcome-ok-output').locator('.fold-execution')).toHaveCount(0);
       await expect(card('outcome-pending').locator('.fold-execution')).toHaveText('Waiting');
       await expect(card('outcome-running').locator('.fold-execution')).toHaveText('Running');
       await expect(card('outcome-failed').locator('.fold-body-code')).toContainText('late output');
@@ -103,7 +108,8 @@ test.describe('agent flows via fake provider', () => {
       await expect(card('outcome-failed').locator('.fold-body-code')).toHaveCount(0);
       await expect(card('outcome-failed').locator('.fold-execution')).toBeVisible();
       await expect.poll(async () => (await storedAgentMessages(page)).filter(m => m.id.startsWith('outcome-')).length,
-        { timeout: 15000 }).toBe(8);
+        { timeout: 15000 }).toBe(9);
+      expect((await storedAgentMessages(page)).find(m => m.id === 'outcome-ok')).toMatchObject({ execution: { state: 'succeeded', exitCode: 0 } });
       await page.locator('.tab-bar .tab.active').click({ button: 'right' });
       await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
       await expect.poll(async () => (await page.evaluate(() => window.shelfApi.project.getAll()))[0].defaultTabs.some(t => t.kind === 'agent')).toBe(true);

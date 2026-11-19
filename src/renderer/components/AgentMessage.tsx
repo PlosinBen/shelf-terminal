@@ -158,7 +158,7 @@ function CodeFold({ message, settingMode, nested }: {
     <div className="agent-msg agent-msg-fold">
       <FoldHeader label={message.label} subtitle={message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
         onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
-      {message.execution && <div className="fold-execution" data-state={message.execution.state}>
+      {message.execution && message.execution.state !== ES.SUCCEEDED && <div className="fold-execution" data-state={message.execution.state}>
         {EXECUTION_LABEL[message.execution.state]}
         {message.execution.exitCode !== undefined && ` · exit ${message.execution.exitCode}`}
       </div>}
