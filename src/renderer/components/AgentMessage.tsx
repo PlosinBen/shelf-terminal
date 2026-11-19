@@ -1,6 +1,6 @@
 import type { AgentDiff } from '@shared/agent-diff';
 import { EXECUTION_STATE as ES, EXECUTION_LABEL } from '@shared/agent-execution';
-import React, { useState, useMemo, useContext, useRef, useLayoutEffect } from 'react';
+import React, { useState, useMemo, useContext, useRef, useLayoutEffect, useEffect } from 'react';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { AgentDisplayContext } from './agent/AgentDisplayContext';
@@ -119,12 +119,24 @@ function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard, summary }
   );
 }
 
-function FoldCopyButton({ target, onCopy }: { target: 'details' | 'output'; onCopy: () => void }) {
+function FoldCopyButton({ target, onCopy }: { target: 'details' | 'output'; onCopy: () => Promise<boolean> }) {
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
+  const handleCopy = async () => {
+    const success = await onCopy();
+    clearTimeout(resetTimer.current);
+    setCopied(success);
+    if (success) resetTimer.current = setTimeout(() => setCopied(false), 1500);
+  };
   const label = `Copy ${target}`;
-  return <button type="button" className="fold-copy-button" aria-label={label} title={label} onClick={onCopy}>
+  return <button type="button" className="fold-copy-button" aria-label={label} title={copied ? 'Copied' : label}
+    data-copied={copied} onClick={() => void handleCopy()}>
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      {copied ? <path d="m5 12 4 4L19 6" /> : <>
       <rect x="8" y="8" width="12" height="13" rx="2" />
       <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+      </>}
     </svg>
   </button>;
 }
@@ -159,10 +171,12 @@ function CodeFold({ message, settingMode, nested }: {
   const copy = async (text: string, target: 'details' | 'output') => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopyStatus(`Copied ${target}`);
+      setCopyStatus('');
+      return true;
     } catch {
       console.warn('Could not copy fold content', { msgId: message.id, target });
       setCopyStatus(`Could not copy ${target}. Please select and copy the text manually.`);
+      return false;
     }
   };
   return (
@@ -176,7 +190,7 @@ function CodeFold({ message, settingMode, nested }: {
       {message.errorMessage && <div className="fold-error-banner">{message.errorMessage}</div>}
       {isExpanded && <>
         {message.subtitle && <div className="fold-body-container">
-          <FoldCopyButton target="details" onCopy={() => void copy(message.subtitle!, 'details')} />
+          <FoldCopyButton target="details" onCopy={() => copy(message.subtitle!, 'details')} />
           <pre className="fold-body fold-command-text" tabIndex={0} aria-label="Details">{message.subtitle}</pre>
         </div>}
         {nested && nested.length > 0 && <div className="agent-subagent-nested">
@@ -190,7 +204,7 @@ function CodeFold({ message, settingMode, nested }: {
             <button type="button" onClick={() => { setFullOutput(true); setTailRequest(n => n + 1); }}>View tail</button>
           </div>}
           <div className="fold-body-container">
-            <FoldCopyButton target="output" onCopy={() => void copy(output, 'output')} />
+            <FoldCopyButton target="output" onCopy={() => copy(output, 'output')} />
             <pre ref={outputRef} className="fold-body fold-body-code" tabIndex={0} aria-label="Output">
               {fullOutput ? output : preview.lines.join('\n') + (preview.remaining > 0 ? `\n... +${preview.remaining} more lines` : '')}
             </pre>

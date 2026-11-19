@@ -200,8 +200,15 @@ test.describe('agent flows via fake provider', () => {
       const copyOutput = card.locator('.fold-body-container').getByRole('button', { name: 'Copy output', exact: true });
       await expect(copyOutput).toBeVisible();
       await expect(copyOutput).toHaveText('');
+      const heightBeforeCopy = (await card.boundingBox())!.height;
       await copyOutput.click();
+      await expect(copyOutput).toHaveAttribute('data-copied', 'true');
+      await expect(copyOutput.locator('svg rect')).toHaveCount(0);
+      await expect(card.getByRole('status')).toHaveCount(0);
+      expect((await card.boundingBox())!.height).toBe(heightBeforeCopy);
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
+      await expect(copyOutput).toHaveAttribute('data-copied', 'false');
+      await expect(copyOutput.locator('svg rect')).toHaveCount(1);
       await card.getByRole('button', { name: 'View tail', exact: true }).click();
       await expect(card.locator('.fold-body-code')).toHaveText(output);
       await expect.poll(() => card.locator('.fold-body-code').evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
@@ -216,12 +223,15 @@ test.describe('agent flows via fake provider', () => {
       await expect(copyDetails).toHaveText('');
       await copyDetails.focus();
       await page.keyboard.press('Enter');
+      await expect(copyDetails).toHaveAttribute('data-copied', 'true');
+      await expect(card.getByRole('status')).toHaveCount(0);
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(command);
       await expect(card.locator('.fold-body-code')).toBeVisible();
       // Copy errors must be visible without losing the received content.
       await page.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error('clipboard denied'); }; });
       await card.getByRole('button', { name: 'Copy output', exact: true }).click();
       await expect(card.getByRole('status')).toContainText('Could not copy output');
+      await expect(copyOutput).toHaveAttribute('data-copied', 'false');
       await expect(card.locator('.fold-body-code')).toHaveText(output);
       await header.focus();
       await page.keyboard.press('Space');
