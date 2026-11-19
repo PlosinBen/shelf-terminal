@@ -179,18 +179,24 @@ function CodeFold({ message, settingMode, nested }: {
           {nested.map(child => <AgentMessage key={child.id} message={child} />)}
         </div>}
         {output && <>
-          <div className="fold-reading-controls">
-            {preview.remaining > 0 && <>
-              <button type="button" onClick={() => setFullOutput(!fullOutput)}>
-                {fullOutput ? 'Show preview' : `Show full output (${preview.lines.length + preview.remaining} lines)`}
-              </button>
-              <button type="button" onClick={() => { setFullOutput(true); setTailRequest(n => n + 1); }}>View tail</button>
-            </>}
-            <button type="button" onClick={() => void copy(output, 'output')}>Copy output</button>
+          {preview.remaining > 0 && <div className="fold-reading-controls">
+            <button type="button" onClick={() => setFullOutput(!fullOutput)}>
+              {fullOutput ? 'Show preview' : `Show full output (${preview.lines.length + preview.remaining} lines)`}
+            </button>
+            <button type="button" onClick={() => { setFullOutput(true); setTailRequest(n => n + 1); }}>View tail</button>
+          </div>}
+          <div className="fold-output-container">
+            <button type="button" className="fold-copy-output" aria-label="Copy output" title="Copy output"
+              onClick={() => void copy(output, 'output')}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <rect x="8" y="8" width="12" height="13" rx="2" />
+                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+              </svg>
+            </button>
+            <pre ref={outputRef} className="fold-body fold-body-code" tabIndex={0} aria-label="Output">
+              {fullOutput ? output : preview.lines.join('\n') + (preview.remaining > 0 ? `\n... +${preview.remaining} more lines` : '')}
+            </pre>
           </div>
-          <pre ref={outputRef} className="fold-body fold-body-code" tabIndex={0} aria-label="Output">
-            {fullOutput ? output : preview.lines.join('\n') + (preview.remaining > 0 ? `\n... +${preview.remaining} more lines` : '')}
-          </pre>
         </>}
         {copyStatus && <div className="fold-copy-status" role="status">{copyStatus}</div>}
       </>}

@@ -159,6 +159,11 @@ test.describe('agent flows via fake provider', () => {
       await header.focus();
       await page.keyboard.press('Enter');
       await expect(card.locator('.fold-body-code')).not.toContainText('<failure-at-tail>');
+      const copyOutput = card.locator('.fold-output-container').getByRole('button', { name: 'Copy output', exact: true });
+      await expect(copyOutput).toBeVisible();
+      await expect(copyOutput).toHaveText('');
+      await copyOutput.click();
+      await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
       await card.getByRole('button', { name: 'View tail', exact: true }).click();
       await expect(card.locator('.fold-body-code')).toHaveText(output);
       await expect.poll(() => card.locator('.fold-body-code').evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
