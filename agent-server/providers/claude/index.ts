@@ -5,6 +5,8 @@ import { SKILL_INVOCATION, SkillCommandFailure, SKILL_COMMAND_ERROR as SCE } fro
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk';
 import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { FILE_TOOL_LOG_TAG, summarizeFileToolData } from '../file-tool-diagnostics';
+import { displayFilePath } from '../display-path';
+import { CLAUDE_FILE_LABEL, readClaudeFileResult } from './file-result';
 import type { Query, Options, SDKMessage, SDKUserMessage, CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { createShelfSdkServer } from './shelf-tools';
 import { isWebFetchTool, WEB_FETCH_TOOL, isBrowserOpenTool, BROWSER_OPEN_TOOL } from '@shared/web-session';
@@ -20,7 +22,7 @@ import { parseSlashPrefix } from '@shared/slash-prefix';
 import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
 import type { AgentPrefs, ProviderModel, NormalizedTask } from '@shared/types';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
-import { stripCwd, resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
+import { resolveSkillsPluginRoot, readUploadedImageAttachments } from '../shared';
 import { inputPromptForDispatch, modelInputPrompt } from '../../input-prompt';
 import { loadProjectedMcpServers } from '../mcp-config';
 import { CLAUDE_CLI_AUTH_OUTCOME, probeClaudeCliAuth } from './auth-status';
@@ -1791,8 +1793,8 @@ function emitClaudeToolUse(
       inflightToolUses.set(block.id, { kind: 'file_edit', filePath: input.file_path, diff, parentId: parentToolUseId });
       send({
         type: 'message', msgId: block.id, msgType: 'fold_diff',
-        label: 'Edit',
-        subtitle: stripCwd(input.file_path, cwd),
+        label: CLAUDE_FILE_LABEL.EDIT,
+        subtitle: displayFilePath(input.file_path, cwd),
         ...parent,
       });
       return;
@@ -1807,8 +1809,8 @@ function emitClaudeToolUse(
       });
       send({
         type: 'message', msgId: block.id, msgType: 'fold_code',
-        label: 'Write',
-        subtitle: stripCwd(input.file_path, cwd),
+        label: CLAUDE_FILE_LABEL.WRITE,
+        subtitle: displayFilePath(input.file_path, cwd),
         ...parent,
       });
       return;
@@ -1821,7 +1823,7 @@ function emitClaudeToolUse(
   });
   send({
     type: 'message', msgId: block.id, msgType: 'fold_code',
-    label: block.name,
+    label: block.name === 'Read' && typeof block.input.file_path === 'string' ? CLAUDE_FILE_LABEL.READ : block.name,
     subtitle: input,
     ...(block.name === 'Bash' ? { execution: { state: ES.RUNNING } } : {}),
     ...parent,
@@ -1836,6 +1838,7 @@ function emitClaudeToolResult(
   content: string,
   isError: boolean,
   cwd: string,
+  structuredResult?: unknown,
 ): void {
   const entry = inflightToolUses.get(toolUseId);
   if (!entry) {
@@ -1868,13 +1871,22 @@ function emitClaudeToolResult(
   // carries no wrapper).
   if (isError) content = stripToolErrorWrapper(content);
   if (entry.kind === 'file_edit') {
+    const result = !isError ? readClaudeFileResult(structuredResult, entry.filePath, !entry.diff) : undefined;
+    if (result?.anomaly) serverLog('warn', FILE_TOOL_LOG_TAG.CLAUDE, 'structured file result fallback', { toolUseId, reason: result.anomaly });
+    if (result && (result.diff || result.content !== undefined)) {
+      const base = { type: 'message' as const, msgId: toolUseId,
+        label: result.label, subtitle: displayFilePath(entry.filePath, cwd), ...parent };
+      if (result.diff) send({ ...base, msgType: 'fold_diff', body: { diff: result.diff } });
+      else send({ ...base, msgType: 'fold_code', body: { content: result.content! } });
+      return;
+    }
     if (entry.diff) {
       // Edit — fold_diff. Success → diff body; failure → errorMessage, no body
       // (renderer skips body on Edit failure anyway; agent typically retries).
       send({
         type: 'message', msgId: toolUseId, msgType: 'fold_diff',
-        label: 'Edit',
-        subtitle: stripCwd(entry.filePath, cwd),
+        label: CLAUDE_FILE_LABEL.EDIT,
+        subtitle: displayFilePath(entry.filePath, cwd),
         ...(isError ? { errorMessage: content } : { body: { diff: entry.diff } }),
         ...parent,
       });
@@ -1883,8 +1895,8 @@ function emitClaudeToolResult(
       // body when we have content (so the user sees what was attempted).
       send({
         type: 'message', msgId: toolUseId, msgType: 'fold_code',
-        label: 'Write',
-        subtitle: stripCwd(entry.filePath, cwd),
+        label: CLAUDE_FILE_LABEL.WRITE,
+        subtitle: displayFilePath(entry.filePath, cwd),
         ...(entry.content !== undefined ? { body: { content: entry.content } } : {}),
         ...(isError ? { errorMessage: content } : {}),
         ...parent,
@@ -1900,7 +1912,7 @@ function emitClaudeToolResult(
     const suppressError = entry.toolName === 'AskUserQuestion';
     send({
       type: 'message', msgId: toolUseId, msgType: 'fold_code',
-      label: entry.toolName,
+      label: entry.toolName === 'Read' ? CLAUDE_FILE_LABEL.READ : entry.toolName,
       subtitle: entry.input,
       ...(entry.toolName === 'Bash' ? { execution: { state: isError ? ES.FAILED : ES.SUCCEEDED } } : {}),
       ...(isError && !suppressError
@@ -2143,7 +2155,11 @@ export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, block
               }
             }
 
-            emitClaudeToolResult(content, toolUseId, contentText, isError, cwd);
+            const resultCount = msg.message.content.filter(b => b.type === 'tool_result').length;
+            if (msg.tool_use_result !== undefined && resultCount !== 1) {
+              serverLog('warn', FILE_TOOL_LOG_TAG.CLAUDE, 'ambiguous structured tool result', { toolUseId, resultCount });
+            }
+            emitClaudeToolResult(content, toolUseId, contentText, isError, cwd, resultCount === 1 ? msg.tool_use_result : undefined);
           }
         }
         // No blockMsgIds clear here — the next assistant message's own

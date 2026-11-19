@@ -284,4 +284,6 @@ Codex add/delete 提供檔案原文，使用 fold_code；一般 update 與帶內
 
 Codex 獨立 path/move_path 顯示值按執行環境 cwd 縮短：專案內相對路徑、專案外原樣；不修改原始資料與 body 內文。工具與命令的內文不做路徑替換。commandActions 可能只列出複合命令的一部分讀取動作，因此 Command 保留完整命令與輸出，不以單一 read action 假裝是純讀檔。
 
-Claude／Copilot 的顯示轉換維持既有行為，先以 debug 診斷取得結構化結果與事件證據；協定或型別支援不等於 runtime 已確認。
+Claude Read／Edit 使用明確檔案標題；Write 開始時不猜新增或覆寫，成功結果的 type:create/update 才決定 Create file／Edit file。僅對單一 tool_result、有效結構與相同原始 filePath 採用 SDK tool_use_result；結果的實際內容優先於輸入預覽。structuredPatch 通過行數與共通 hunk 驗證後使用 fold_diff；無 patch 或 patch 異常時保留結果文字（Edit 保留結果 oldString/newString），異常留診斷。缺結果、配對歧義、路徑不符或工具失敗時維持既有結果／錯誤行為。originalFile:null 不作新增依據，因大檔覆寫也可能沒有原文。獨立路徑顯示採共通 cwd helper，Read 範圍與內文保持原樣。
+
+Copilot 依既有 ACP 轉換，debug 診斷用來核實結構化檔案資訊；只有 shell execute 事件時保留命令，不猜 CRUD。協定、型別與 fixture 測試不等於真實 provider runtime 已確認。

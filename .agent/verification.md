@@ -57,6 +57,8 @@ title: Shelf — 驗證能力與執行入口
 
 Settings → Terminal → Log level 設 Debug，重啟包含目前 agent-server bundle 的 dev runtime。只在自建暫存目錄測試讀取、新增、覆寫、修改、搬移及刪除測試檔；一次操作完成後保留同 session 的 main log。
 
+Claude 結構化檔案結果可用 `npm run test:unit -- agent-server/providers/claude/file-result.test.ts` 驗證 shape guards、配對、失敗 fallback 與實際內容；`npm run test:e2e -- e2e/codex-provider-flow.spec.ts --grep 'Claude structured file results'` 由 fake transport 呼叫真實 Claude translator，驗證標題／card 格式更新、收合與歷史內容。此 E2E 使用 Codex 名稱的測試 tab，證明共通 renderer 流程，不涵蓋 Claude 登入或真實 SDK 事件。
+
 - `claude-file-tool`：tool input 帶 toolUseId、toolName、parentToolUseId 與 path；tool result envelope 帶 sessionId、toolUseIds、resultCount、errors 及 tool_use_result 的形狀、create/update 等 discriminator、originalFile 的 null/missing/string、長度與 patch 數。多個結果 ID 不代表每個 ID 都對應同一份 envelope 資料，須按實際事件確認。
 - `copilot-file-tool`：在 provider/driver 正規化前記錄 ACP toolCallId、sessionId、kind/status、locations、diff 的 oldText/newText 形狀與長度，以及 rawInput/rawOutput 摘要。保留 null 與缺欄位差異；locations/diffs 最多記 20 筆並另記總數。
 - 不記錄檔案內容、命令全文、工具 title、任意欄位或 token。紀錄包含檔案路徑，分享前依資料用途處理。

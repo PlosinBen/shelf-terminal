@@ -172,6 +172,38 @@ function fileCard(page: Page, file: string) {
 }
 
 test.describe('Codex file changes use File Diff display settings', () => {
+  test('Claude structured file results update cards and persist actual content', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    const panel = await openProjectEdit(page);
+    await panel.locator('.default-tab-add', { hasText: 'Add Agent' }).click();
+    const agentRow = panel.locator('.default-tab-row', { has: page.locator('.default-tab-kind-agent') });
+    await agentRow.locator('.default-tab-provider').selectOption(CODEX_PROVIDER);
+    await agentRow.locator('.default-tab-name').fill(OFFICIAL_LABEL);
+    await panel.locator('.project-edit-footer .conn-btn-next').click();
+    await expect(panel).not.toBeVisible();
+    await disconnectAndReconnect(page);
+    await setDiffDisplay(page, 'collapsed');
+    // Fake transport calls the real Claude translator; provider-key routing is unrelated.
+    await sendAgentPrompt(page, FAKE_FILE_CHANGES.CLAUDE);
+    const created = fileCard(page, 'created.txt');
+    const updated = fileCard(page, 'updated.txt');
+    const failed = fileCard(page, 'failed.txt');
+    await expect(created.locator('.fold-label')).toHaveText('Create file');
+    await expect(updated.locator('.fold-label')).toHaveText('Edit file');
+    await expect(failed.locator('.fold-label')).toHaveText('Write');
+    await expect(failed).toContainText('permission denied');
+    await expect(created.locator('pre')).toHaveCount(0);
+    await created.locator('.fold-header').click();
+    await expect(created.locator('pre')).toHaveText('actual content');
+    await updated.locator('.fold-header').click();
+    await expect(updated).toContainText('actual content');
+    await expect(updated).not.toContainText('proposed content');
+    await disconnectAndReconnect(page);
+    await expect(created.locator('.fold-label')).toHaveText('Create file');
+    await created.locator('.fold-header').click();
+    await expect(created.locator('pre')).toHaveText('actual content');
+    await expect(failed).toContainText('permission denied');
+  });
   // A multi-file edit must remain collapsible by file even when a file has
   // several hunks; check the real wire projection and persisted body too.
   test('collapses each file, keeps hunk boundaries and restores all hunks from history', async ({ shelfApp: { page } }) => {

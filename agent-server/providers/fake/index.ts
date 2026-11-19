@@ -408,6 +408,21 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     }
 
     if (Object.values(FAKE_FILE_CHANGES).some(scenario => scenario === step)) {
+      if (step === FAKE_FILE_CHANGES.CLAUDE) {
+        const { processMessage, createBlockMsgIdState } = await import('../claude');
+        const state = createBlockMsgIdState();
+        for (const [file, operation, failed] of [['created.txt', 'create', false], ['updated.txt', 'update', false], ['failed.txt', 'create', true]] as const) {
+          const id = mintId('claude-file');
+          const filePath = `/fixture/project/${file}`;
+          processMessage({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Write',
+            input: { file_path: filePath, content: 'proposed content' } }] } } as any, send, '/fixture/project/', state);
+          processMessage({ type: 'user', tool_use_result: { type: operation, filePath, content: 'actual content',
+            structuredPatch: operation === 'update' ? [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-before', '+actual content'] }] : [] },
+            message: { content: [{ type: 'tool_result', tool_use_id: id, content: failed ? 'permission denied' : 'written', is_error: failed }] },
+          } as any, send, '/fixture/project/', state);
+        }
+        return;
+      }
       if (step === FAKE_FILE_CHANGES.LEGACY) {
         send({ type: 'message', msgId: mintId('legacy-diff'), msgType: 'fold_diff', label: 'Legacy edit',
           subtitle: 'legacy.ts', body: { diff: { oldString: 'legacy before', newString: 'legacy after' } } });

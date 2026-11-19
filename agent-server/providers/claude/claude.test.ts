@@ -23,7 +23,7 @@ it('logs paired Write input and structured result metadata without file content'
       sessionId: 'session', toolUseIds: ['write-diag'], data: expect.objectContaining({ operation: 'create', originalFileShape: 'null' }),
     }));
     expect(JSON.stringify(logger.mock.calls)).not.toContain('private-');
-    expect(out.at(-1)).toMatchObject({ label: 'Write', body: { content: 'private-content' } });
+    expect(out.at(-1)).toMatchObject({ label: 'Create file', body: { content: 'private-content' } });
   } finally { logger.mockRestore(); }
 });
 

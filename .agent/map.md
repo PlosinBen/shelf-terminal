@@ -146,6 +146,7 @@ title: shelf-terminal — Intent → File Index
 | Model/caps cache（泛型 TTL） | `model-cache.ts` | `createModelCache({ttlMs})`：泛型 TTL 儲存，過期即 evict（cache-aside 的被動 store，見 `context/agent-config-flow`） |
 | Session hosting 抽象（兩張 map） | `session-registry.ts` | `createSessionRegistry()`：`sessions: Map<sid, runtimeKey>` + `runtimes: Map<runtimeKey, T>`，`runtimeKeyFor` 決定 isolated（sid）/shared（provider:account）。為 shared 部署預備（isolated milestone 未用） |
 | Claude provider | `providers/claude/index.ts` | `@anthropic-ai/claude-agent-sdk` wrapper：持久 streaming-input session、emit 渲染原語、auth 偵測、app skill live plugin／namespace／digest 檢查與原生 dispatch |
+| Claude 檔案結果 | `providers/claude/file-result.ts` | 驗證結構化 Write／Edit 結果、操作標題與 patch 轉換，異常交 caller 診斷 |
 | Claude 設定套用測試 | `providers/claude/config-apply.test.ts` | live SDK control、effort rebuild／resume、拒絕不回報成功與 init bypass 驗證 |
 | Copilot provider (ACP) | `providers/copilot/index.ts` | `createCopilotBackend`：spawn `copilot --acp`、管理 restore/native config/login，並以 session replacement 實作 `/clear` |
 | Copilot app command 驗證 | `providers/copilot/skill-invocation.ts` | native source discovery、session payload snapshot、純文字 native slash dispatch 與 command 附件拒絕（skills#18） |

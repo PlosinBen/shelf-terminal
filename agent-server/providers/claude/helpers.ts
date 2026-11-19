@@ -5,7 +5,7 @@
 import type { StatusSegment, SendFn } from '../types';
 import { severityFromUtilization, formatResetCountdown } from '../types';
 import type { ProviderModel, NormalizedTask, TaskEventKind } from '@shared/types';
-import { stripCwd } from '../shared';
+import { displayFilePath } from '../display-path';
 import { mdTable, cell } from '../md-table';
 
 const RATE_LIMIT_LABELS: Record<string, string> = {
@@ -382,16 +382,16 @@ export function formatClaudeToolInput(toolName: string, input: Record<string, un
       const range = off != null || lim != null
         ? ` (${off ?? 0}${lim != null ? `..+${lim}` : ''})`
         : '';
-      return stripCwd(fp, cwd) + range;
+      return displayFilePath(fp, cwd) + range;
     }
     case 'Grep': {
       const pattern = String(input.pattern ?? '');
-      const path = input.path ? ` in ${stripCwd(String(input.path), cwd)}` : '';
+      const path = input.path ? ` in ${displayFilePath(String(input.path), cwd)}` : '';
       return pattern + path;
     }
     case 'Glob': {
       const pattern = String(input.pattern ?? '');
-      const path = input.path ? ` in ${stripCwd(String(input.path), cwd)}` : '';
+      const path = input.path ? ` in ${displayFilePath(String(input.path), cwd)}` : '';
       return pattern + path;
     }
     case 'WebFetch':
