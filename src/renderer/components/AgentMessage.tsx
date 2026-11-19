@@ -108,7 +108,9 @@ function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard, summary }
           if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle(); }
         },
       } : {})}>
-      {!summary && <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>}
+      {summary
+        ? <span className="agent-chevron-spacer" aria-hidden="true">&#9654;</span>
+        : <span className={`agent-chevron ${isExpanded ? 'expanded' : ''}`}>&#9654;</span>}
       <span className="fold-label">{label}</span>
       {subtitle && (
         <span className="fold-subtitle" title={subtitle}>{subtitle}</span>

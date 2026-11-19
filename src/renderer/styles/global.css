@@ -3307,7 +3307,8 @@ button {
 
 /* ── Chevron (shared) ── */
 
-.agent-chevron {
+.agent-chevron,
+.agent-chevron-spacer {
   font-size: 10px;
   color: var(--text-muted);
   transition: transform 0.15s;
@@ -3317,6 +3318,10 @@ button {
 
 .agent-chevron.expanded {
   transform: rotate(90deg);
+}
+
+.agent-chevron-spacer {
+  visibility: hidden;
 }
 
 /* ── Fold card (shared by all fold_* variants) ── */

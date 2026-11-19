@@ -275,6 +275,16 @@ test.describe('Codex file changes use File Diff display settings', () => {
     await expect(fileCard(page, 'deleted.ts')).toContainText('deleted content');
     for (const file of ['moved.ts → destination.ts', 'empty.ts']) {
       await expect(fileCard(page, file).locator('.agent-chevron')).toHaveCount(0);
+      const summaryHeader = fileCard(page, file).locator('.fold-header');
+      await expect(summaryHeader).not.toHaveAttribute('role', 'button');
+      const reference = await fileCard(page, 'a.ts').locator('.fold-label').boundingBox();
+      const summaryLabel = await fileCard(page, file).locator('.fold-label').boundingBox();
+      expect(summaryLabel).not.toBeNull();
+      expect(reference).not.toBeNull();
+      expect(Math.abs(summaryLabel!.x - reference!.x)).toBeLessThan(1);
+      const referenceHeader = await fileCard(page, 'a.ts').locator('.fold-header').boundingBox();
+      const summaryBox = await summaryHeader.boundingBox();
+      expect(Math.abs(summaryBox!.height - referenceHeader!.height)).toBeLessThan(1);
       await fileCard(page, file).locator('.fold-header').click();
       await expect(fileCard(page, file).locator('.fold-body')).toHaveCount(0);
     }

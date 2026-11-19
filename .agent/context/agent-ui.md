@@ -280,7 +280,7 @@ Settings → Agent → Display 的 Message spacing (px) 保存為全域 `agentMe
 
 Shelf 定義共通顯示原則，provider 根據原生資料的結構與完整度實作：可靠辨識的操作用 Create file／Read file／Edit file／Delete file／Move file；內容決定 fold_diff、fold_code 或 fold_markdown，不固定操作對 card。無法辨識的資料保留原文 fallback 與診斷，不從空字串猜刪檔或從工具名稱猜新增。Renderer 不認識 provider 工具，沿用既有格式設定，不增加 CRUD config。
 
-Codex add/delete 提供檔案原文，使用 fold_code；一般 update 與帶內容的搬移提供可解析 patch 時使用 fold_diff；純搬移的目的路徑顯示在 subtitle。解析失敗保留原始 Markdown fallback。fold_code 明確空 body 且無 nested children 時只顯示標頭與既有錯誤／狀態區，不提供空展開；缺 body 仍表示 pending，兩者不可混淆。格式改變會自然改用對應的既有展開設定。
+Codex add/delete 提供檔案原文，使用 fold_code；一般 update 與帶內容的搬移提供可解析 patch 時使用 fold_diff；純搬移的目的路徑顯示在 subtitle。解析失敗保留原始 Markdown fallback。fold_code 明確空 body 且無 nested children 時只顯示標頭與既有錯誤／狀態區，不提供空展開；摘要保留箭頭欄位的空位，使標題位置與列高對齊一般卡片，但不顯示箭頭或提供展開互動。缺 body 仍表示 pending，兩者不可混淆。格式改變會自然改用對應的既有展開設定。
 
 Codex 獨立 path/move_path 顯示值按執行環境 cwd 縮短：專案內相對路徑、專案外原樣；不修改原始資料與 body 內文。工具與命令的內文不做路徑替換。commandActions 可能只列出複合命令的一部分讀取動作，因此 Command 保留完整命令與輸出，不以單一 read action 假裝是純讀檔。
 
