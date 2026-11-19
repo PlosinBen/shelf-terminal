@@ -149,6 +149,13 @@ test.describe('agent flows via fake provider', () => {
       await header.click();
       await expect(card.locator('.fold-body-code')).toBeVisible();
       await expect(card.locator('.fold-command-text')).toHaveText(command);
+      await header.hover();
+      const hoverBackground = await header.evaluate(el => getComputedStyle(el).backgroundColor);
+      const bodyBackground = await card.locator('.fold-body-code').evaluate(el => getComputedStyle(el).backgroundColor);
+      expect(hoverBackground).not.toBe(bodyBackground);
+      await page.mouse.move(0, 0);
+      const idleBackground = await header.evaluate(el => getComputedStyle(el).backgroundColor);
+      expect(hoverBackground).not.toBe(idleBackground);
       const expectCopyAligned = async () => {
         for (const block of await card.locator('.fold-body-container').all()) {
           const offset = await block.evaluate(el => {

@@ -3338,7 +3338,7 @@ button {
 }
 
 .fold-header:hover {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 50%, transparent);
 }
 
 .fold-label {
