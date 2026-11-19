@@ -172,6 +172,33 @@ function fileCard(page: Page, file: string) {
 }
 
 test.describe('Codex file changes use File Diff display settings', () => {
+  test('Copilot structured file cards keep relative paths and content through history', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    const panel = await openProjectEdit(page);
+    await panel.locator('.default-tab-add', { hasText: 'Add Agent' }).click();
+    const agentRow = panel.locator('.default-tab-row', { has: page.locator('.default-tab-kind-agent') });
+    await agentRow.locator('.default-tab-provider').selectOption(CODEX_PROVIDER);
+    await agentRow.locator('.default-tab-name').fill(OFFICIAL_LABEL);
+    await panel.locator('.project-edit-footer .conn-btn-next').click();
+    await expect(panel).not.toBeVisible();
+    await disconnectAndReconnect(page);
+    await setDiffDisplay(page, 'collapsed');
+    // Fake transport exercises real ACP metadata carry + translator.
+    await sendAgentPrompt(page, FAKE_FILE_CHANGES.COPILOT);
+    const read = fileCard(page, 'read.txt');
+    const edit = fileCard(page, 'edit.txt');
+    await expect(read.locator('.fold-label')).toHaveText('Read file');
+    await expect(edit.locator('.fold-label')).toHaveText('Edit file');
+    await read.locator('.fold-header').click();
+    await expect(read.locator('.fold-body-code')).toHaveText('/fixture/project/read.txt content');
+    await edit.locator('.fold-header').click();
+    await expect(edit).toContainText('after');
+    await disconnectAndReconnect(page);
+    await expect(read.locator('.fold-label')).toHaveText('Read file');
+    await expect(edit.locator('.fold-label')).toHaveText('Edit file');
+    await read.locator('.fold-header').click();
+    await expect(read.locator('.fold-body-code')).toHaveText('/fixture/project/read.txt content');
+  });
   test('Claude structured file results update cards and persist actual content', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     const panel = await openProjectEdit(page);

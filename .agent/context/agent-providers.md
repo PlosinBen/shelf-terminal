@@ -223,7 +223,7 @@ Shelf 不提供 Project Secret Variables；Project.envPlain 是明碼設定，�
 
 **Root cause**：ACP 的 `tool_call`（初次）`title` **必填**,但 `tool_call_update`（帶 status/結果的後續）是 **partial update** —— `title` optional,未給即「不變」。而 Shelf wire 的 `message` 是 **full upsert-by-msgId**(renderer `agentTabStore.upsertById` 依 `msgId=toolCallId` **整個覆蓋** card)。所以帶結果卻沒 title 的 update 一旦 translate 落到 `label:'Tool'` fallback,就把初次的好標題蓋掉。
 
-**Fix / note**：在 **agent-server 的 ACP 層**還原 partial 語意(provider 封裝 provider 語意,renderer 維持 dumb full-replace)——`translate.ts` 的 `createToolMetaCarry()` 每個 turn 建一次,記住每個 `toolCallId` 最後看到的 title,對後續 update 重新注入;`client.ts drivePromptTurn` 在 `translateSessionUpdate` 前先過這個 carry。**不要**改成讓 renderer store 做 partial merge —— 那會把 ACP 語意洩漏進 renderer、且動到所有 provider/訊息型別的 upsert。
+**Fix / note**：在 agent-server 的 ACP 層還原 partial 語意，renderer 維持 full-replace。Session router 持有 `createToolMetaCarry()`，按 toolCallId 保存 title、kind 與 locations，轉換前先補回省略的欄位；locations 的明確空陣列或 null 會清除舊值。Terminal update 補齊後移除該工具紀錄，session reset/forget 清除 router。不要讓 renderer store 做 partial merge，以免 ACP 語意洩漏到共通 renderer。
 
 ## agent-providers#20 — ACP 工具卡片:`kind` → 短 label(粉紅工具名)、`title` → subtitle(灰色描述),對齊 claude 的 label/subtitle 語意  ·  [Decision]
 
@@ -236,7 +236,7 @@ Shelf 不提供 Project Secret Variables；Project.envPlain 是明碼設定，�
 **Do not change casually because**：(a) 別把 `title` 放回 `label`——會回到「一片粉紅長句」的難讀狀態。(b) copilot 的 `kind` **不可靠**（它把 search 標成 `other`），所以 `other`/缺一律落 `Tool`,不要假設 kind 一定精準。(c) `kind` 純驅動 label 文字,**不決定** fold_diff/fold_code（那由 `firstDiff(content)` 判）。
 
 ### Gotchas
-- ACP `tool_call_update` 是 **partial**（省略 title/kind = 不變），但 wire `message` 是 full upsert（renderer 依 msgId 整個覆蓋 card）→ 沒 carry 就會把 label/subtitle 清成預設。`createToolMetaCarry()` 每 turn 記住 `toolCallId` 的 title+kind 並回填後續 update（見 `#19`）。
+- ACP `tool_call_update` 是 partial，但 wire `message` 是 full upsert；session router 按 toolCallId carry title、kind 與 locations，避免完成更新遺失標題／路徑（見 `#19`）。有結構化檔案依據的 Read／Edit／Delete／Move 加上 file 名稱；路徑依該 session 的 cwd 縮短，完整規則見 `agent-ui#15`。
 
 **Related**：`agent-server/providers/acp/{translate,client}.ts`、`agent-server/providers/claude/index.ts`（`subtitle` 慣例）、`src/renderer/components/AgentMessage.tsx`（`FoldHeader` label+subtitle）、`contracts/agent-wire-protocol`。
 

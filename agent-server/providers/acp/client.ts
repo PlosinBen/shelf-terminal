@@ -27,6 +27,7 @@ import { serverLog } from '../../server-logger';
 import { EXECUTION_STATE as ES } from '@shared/agent-execution';
 
 interface SessionRouteState {
+  cwd?: string;
   send: SendFn | null;
   promptBase: string;
   seg: number;
@@ -138,7 +139,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
     const namespaced = (msgId: string, streamType?: string): string =>
       msgId === DEFAULT_AGENT_MSG_ID ? `${state.promptBase}:${streamType ?? 'msg'}:${state.seg}` : msgId;
 
-    for (const raw of translateSessionUpdate(carriedUpdate)) {
+    for (const raw of translateSessionUpdate(carriedUpdate, state.cwd)) {
       let wire = raw;
       if (wire.type === 'message') {
         if (wire.msgType === 'fold_code' && wire.execution?.state === ES.UNKNOWN) {
@@ -212,12 +213,12 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
         mcpServers: opts.mcpServers ?? [],
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
-      routeState(res.sessionId);
+      routeState(res.sessionId).cwd = opts.cwd;
       return { sessionId: res.sessionId, newSessionResponse: res };
     },
 
     async load(agent, sessionId, opts) {
-      routeState(sessionId);
+      routeState(sessionId).cwd = opts.cwd;
       hydratingSessions.add(sessionId);
       hydrationStateBySession.delete(sessionId);
       try {
@@ -256,7 +257,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
         cwd: opts.cwd,
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
-      routeState(sessionId);
+      routeState(sessionId).cwd = opts.cwd;
       return { sessionId, resumeSessionResponse: response };
     },
 

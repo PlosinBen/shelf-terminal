@@ -8,6 +8,22 @@ import type { OutgoingMessage } from '../types';
 // Exercises the toolkit runtime path end-to-end (connection + driver + turn)
 // against the in-process mock agent — no stdio, no binary, no credentials.
 describe('acp session driver (connection + new/resume + turn)', () => {
+  it.each(['new', 'load', 'resume'] as const)('uses the %s session execution cwd for file display', async (mode) => {
+    const mock = createMockAcpAgent({ updatesOnPrompt: [
+      { sessionUpdate: 'tool_call', toolCallId: 'read-file', title: 'View', kind: 'read', locations: [{ path: '/remote/project/a.txt' }] },
+      { sessionUpdate: 'tool_call_update', toolCallId: 'read-file', status: 'completed', rawOutput: { content: 'text' } },
+    ] });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { name: 'test', onSessionUpdate: driver.onSessionUpdate });
+    try {
+      const opts = { cwd: '/remote/project' };
+      const session = mode === 'new' ? await driver.startNew(conn.agent, opts)
+        : await driver[mode](conn.agent, 'mock-session', opts);
+      const wire: OutgoingMessage[] = [];
+      await driver.drivePromptTurn(conn.agent, session, 'read', m => wire.push(m));
+      expect(wire.at(-1)).toMatchObject({ label: 'Read file', subtitle: 'a.txt', body: { content: 'text' } });
+    } finally { conn.close(); }
+  });
   it('drives a prompt: forwards stream deltas and a tool card without manufacturing a full reply', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hel' }, messageId: 'm1' },

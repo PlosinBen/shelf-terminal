@@ -55,6 +55,8 @@ title: Shelf — 驗證能力與執行入口
 
 ### Claude／Copilot 檔案工具診斷
 
+Copilot 檔案顯示的 `acp/translate.test.ts`、`acp/client.test.ts` 覆蓋結構化路徑、partial locations、new/load/resume cwd 與保守標題。`npm run test:e2e -- e2e/codex-provider-flow.spec.ts --grep 'Copilot structured file'` 使用 fake transport 呼叫實際 ACP metadata carry／translator，驗證路徑、內容與歷史恢復；不是修改後真實 CLI 的端到端驗證。現有 runtime 證據包括 read locations 與 edit diff，不足以將空字串判為新增或刪除。Claude live 檔案結果尚未驗證，訂閱不可用時以本機 SDK 契約 fixture 為證據邊界；後續恢復服務才可補 live 覆蓋。
+
 Settings → Terminal → Log level 設 Debug，重啟包含目前 agent-server bundle 的 dev runtime。只在自建暫存目錄測試讀取、新增、覆寫、修改、搬移及刪除測試檔；一次操作完成後保留同 session 的 main log。
 
 Claude 結構化檔案結果可用 `npm run test:unit -- agent-server/providers/claude/file-result.test.ts` 驗證 shape guards、配對、失敗 fallback 與實際內容；`npm run test:e2e -- e2e/codex-provider-flow.spec.ts --grep 'Claude structured file results'` 由 fake transport 呼叫真實 Claude translator，驗證標題／card 格式更新、收合與歷史內容。此 E2E 使用 Codex 名稱的測試 tab，證明共通 renderer 流程，不涵蓋 Claude 登入或真實 SDK 事件。

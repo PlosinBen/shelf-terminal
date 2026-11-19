@@ -408,6 +408,24 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     }
 
     if (Object.values(FAKE_FILE_CHANGES).some(scenario => scenario === step)) {
+      if (step === FAKE_FILE_CHANGES.COPILOT) {
+        const { createToolMetaCarry, translateSessionUpdate } = await import('../acp/translate');
+        const carry = createToolMetaCarry();
+        for (const kind of ['read', 'edit'] as const) {
+          const id = mintId('acp-file');
+          const path = `/fixture/project/${kind}.txt`;
+          for (const update of [
+            { sessionUpdate: 'tool_call' as const, toolCallId: id, title: kind === 'read' ? 'View' : 'apply_patch', kind,
+              locations: [{ path }] },
+            { sessionUpdate: 'tool_call_update' as const, toolCallId: id, status: 'completed' as const,
+              ...(kind === 'read' ? { rawOutput: { content: '/fixture/project/read.txt content' } }
+                : { content: [{ type: 'diff' as const, path, oldText: 'before', newText: 'after' }] }) },
+          ]) {
+            for (const message of translateSessionUpdate(carry(update), '/fixture/project')) send(message);
+          }
+        }
+        return;
+      }
       if (step === FAKE_FILE_CHANGES.CLAUDE) {
         const { processMessage, createBlockMsgIdState } = await import('../claude');
         const state = createBlockMsgIdState();

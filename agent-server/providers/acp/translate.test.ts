@@ -3,6 +3,45 @@ import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import { translateSessionUpdate, createToolMetaCarry, contentBlockToText, renderPlan } from './translate';
 
 describe('translateSessionUpdate', () => {
+  it('keeps a file location through partial completion and shortens only its display', () => {
+    const carry = createToolMetaCarry();
+    const initial = carry({ sessionUpdate: 'tool_call', toolCallId: 'file-read', title: 'View', kind: 'read',
+      locations: [{ path: '/repo/a.txt' }] });
+    const completed = carry({ sessionUpdate: 'tool_call_update', toolCallId: 'file-read', status: 'completed',
+      rawOutput: { content: '/repo/a.txt content' } });
+    expect(translateSessionUpdate(initial, '/repo')[0]).toMatchObject({ label: 'Read file', subtitle: 'a.txt' });
+    expect(translateSessionUpdate(completed, '/repo')[0]).toMatchObject({ label: 'Read file', subtitle: 'a.txt', body: { content: '/repo/a.txt content' } });
+    expect(initial).toMatchObject({ locations: [{ path: '/repo/a.txt' }] });
+  });
+
+  it.each([['', 'value'], ['value', '']])('does not infer create/delete from empty diff text', (oldText, newText) => {
+    expect(translateSessionUpdate({ sessionUpdate: 'tool_call', toolCallId: 'edit', title: 'apply_patch', kind: 'edit',
+      content: [{ type: 'diff', path: '/repo/a.txt', oldText, newText }] }, '/repo')[0]).toMatchObject({
+      label: 'Edit file', subtitle: 'a.txt', body: { diff: { oldString: oldText, newString: newText } },
+    });
+  });
+
+  it.each([[], null])('honors explicit cleared locations %j instead of retaining a stale file target', (locations) => {
+    const carry = createToolMetaCarry();
+    carry({ sessionUpdate: 'tool_call', toolCallId: 'clear', title: 'View', kind: 'read', locations: [{ path: '/repo/a.txt' }] });
+    const cleared = carry({ sessionUpdate: 'tool_call_update', toolCallId: 'clear', locations, status: 'completed' });
+    expect(translateSessionUpdate(cleared, '/repo')[0]).toMatchObject({ label: 'Read', subtitle: 'View' });
+  });
+
+  it.each([
+    ['/repo-other/a.txt', '/repo', '/repo-other/a.txt'],
+    ['C:\\repo\\a.txt', 'C:\\repo', 'a.txt'],
+  ])('formats structured path %s using the execution environment', (path, cwd, subtitle) => {
+    expect(translateSessionUpdate({ sessionUpdate: 'tool_call', toolCallId: 'path', title: 'View', kind: 'read',
+      locations: [{ path }] }, cwd)[0]).toMatchObject({ label: 'Read file', subtitle });
+  });
+
+  it('keeps search classification and unstructured command text intact', () => {
+    expect(translateSessionUpdate({ sessionUpdate: 'tool_call', toolCallId: 'find', title: 'Finding files', kind: 'read',
+      locations: [{ path: '/repo/a.txt' }] }, '/repo')[0]).toMatchObject({ label: 'Find', subtitle: 'a.txt' });
+    expect(translateSessionUpdate({ sessionUpdate: 'tool_call', toolCallId: 'shell', title: 'rm /repo/a.txt', kind: 'execute' }, '/repo')[0])
+      .toMatchObject({ label: 'Execute', subtitle: 'rm /repo/a.txt' });
+  });
   it('maps agent_message_chunk → stream(text)', () => {
     const u: SessionUpdate = { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' }, messageId: 'm1' };
     expect(translateSessionUpdate(u)).toEqual([{ type: 'stream', msgId: 'm1', streamType: 'text', content: 'hello' }]);
@@ -41,7 +80,7 @@ describe('translateSessionUpdate', () => {
     };
     expect(translateSessionUpdate(u)).toEqual([{
       // subtitle = the diff's file path (not the title), matching claude's Edit card.
-      type: 'message', msgId: 't1', msgType: 'fold_diff', label: 'Edit', subtitle: '/x/file.ts',
+      type: 'message', msgId: 't1', msgType: 'fold_diff', label: 'Edit file', subtitle: '/x/file.ts',
       body: { diff: { oldString: 'a', newString: 'b' } },
     }]);
   });
@@ -51,7 +90,7 @@ describe('translateSessionUpdate', () => {
       sessionUpdate: 'tool_call', toolCallId: 'e1', title: 'apply_patch', kind: 'edit', status: 'completed',
       content: [{ type: 'diff', path: '/repo/src/x.php', oldText: 'a', newText: 'b' }],
     };
-    expect(translateSessionUpdate(u)[0]).toMatchObject({ msgType: 'fold_diff', label: 'Edit', subtitle: '/repo/src/x.php' });
+    expect(translateSessionUpdate(u)[0]).toMatchObject({ msgType: 'fold_diff', label: 'Edit file', subtitle: '/repo/src/x.php' });
   });
 
   it('uses ACP `locations[0].path` as subtitle when present (over the title)', () => {
@@ -60,7 +99,7 @@ describe('translateSessionUpdate', () => {
       locations: [{ path: '/repo/a.go' }],
       content: [{ type: 'content', content: { type: 'text', text: 'ok' } }],
     } as unknown as SessionUpdate;
-    expect(translateSessionUpdate(u)[0]).toMatchObject({ msgType: 'fold_code', label: 'Edit', subtitle: '/repo/a.go' });
+    expect(translateSessionUpdate(u)[0]).toMatchObject({ msgType: 'fold_code', label: 'Edit file', subtitle: '/repo/a.go' });
   });
 
   it('maps a non-diff tool_call → fold_code with concatenated text content', () => {

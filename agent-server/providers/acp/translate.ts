@@ -21,6 +21,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import type { OutgoingMessage } from '../types';
 import { severityFromUtilization } from '../types';
+import { displayFilePath } from '../display-path';
 
 /**
  * Fallback msgId for streamed assistant text when the agent omits `messageId`.
@@ -128,7 +129,7 @@ function errorFor(status: ToolCallStatus | null | undefined): string | undefined
 }
 
 /**
- * Carry a tool call's title + kind forward across its updates, for ONE turn.
+ * Carry a tool call's title, kind and file locations across partial updates.
  *
  * ACP tool-call updates are PARTIAL: only the initial `tool_call` carries a
  * REQUIRED `title`; a `tool_call_update` (status/content change) usually omits
@@ -136,13 +137,13 @@ function errorFor(status: ToolCallStatus | null | undefined): string | undefined
  * the renderer REPLACES the card by msgId — so a title/kind-less update would
  * clobber the card back to defaults. Resolve ACP's partial semantics HERE (the
  * provider owns provider semantics; the renderer stays a dumb full-replace):
- * remember the last-seen title + kind per `toolCallId` and re-inject them into
+ * remember the last-seen title + kind + locations per `toolCallId` and re-inject them into
  * later updates. A session router owns one carry: terminal updates are enriched
  * before their entry is evicted, and dropping the router clears all remaining
  * entries on session reset/forget.
  */
 export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate {
-  const metaByToolCall = new Map<string, { title?: string; kind?: ToolKind }>();
+  const metaByToolCall = new Map<string, { title?: string; kind?: ToolKind; locations?: Extract<SessionUpdate, { sessionUpdate: 'tool_call_update' }>['locations'] }>();
   return (update) => {
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
       return update;
@@ -150,10 +151,12 @@ export function createToolMetaCarry(): (update: SessionUpdate) => SessionUpdate 
     const prev = metaByToolCall.get(update.toolCallId) ?? {};
     const title = (update.title || prev.title) ?? undefined;
     const kind = (update.kind || prev.kind) ?? undefined;
-    const carried = { ...update, ...(title ? { title } : {}), ...(kind ? { kind } : {}) } as SessionUpdate;
+    const locations = update.locations === undefined ? prev.locations : update.locations;
+    const carried = { ...update, ...(title ? { title } : {}), ...(kind ? { kind } : {}),
+      ...(locations !== undefined ? { locations } : {}) } as SessionUpdate;
     const status = 'status' in update ? update.status : undefined;
     if (status === 'completed' || status === 'failed') metaByToolCall.delete(update.toolCallId);
-    else metaByToolCall.set(update.toolCallId, { title, kind });
+    else metaByToolCall.set(update.toolCallId, { title, kind, locations });
     return carried;
   };
 }
@@ -190,7 +193,7 @@ function toolCallLabel(kind: ToolKind | null | undefined, title: string | undefi
  * stateful client, not rendered here). Tool-call updates should be run through a
  * session-scoped {@link createToolMetaCarry} first so title/kind survive partial updates.
  */
-export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[] {
+export function translateSessionUpdate(update: SessionUpdate, cwd?: string): OutgoingMessage[] {
   switch (update.sessionUpdate) {
     case 'agent_message_chunk': {
       const content = contentBlockToText(update.content);
@@ -227,7 +230,7 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
           || rawOutputToText('rawOutput' in update ? update.rawOutput : undefined);
         return summary ? [{ type: 'message', msgId, msgType: 'reply', content: summary }] : [];
       }
-      const label = toolCallLabel('kind' in update ? update.kind : undefined, title);
+      let label = toolCallLabel('kind' in update ? update.kind : undefined, title);
       const status = 'status' in update ? update.status : undefined;
       const errorMessage = errorFor(status);
       // ACP status applies to the tool invocation; it supplies no portable exit code.
@@ -240,7 +243,10 @@ export function translateSessionUpdate(update: SessionUpdate): OutgoingMessage[]
       // `title` is a generic "apply_patch" — the path is what's useful. Falls back to
       // the title for tools with no file (execute/search) or no locations.
       const filePath = ('locations' in update ? update.locations?.[0]?.path : undefined) || diff?.path;
-      const subtitle = filePath || title;
+      const subtitle = filePath ? displayFilePath(filePath, cwd) : title;
+      // A tool kind alone can also describe non-file data. Only qualify it when
+      // ACP supplies a file location/diff; preserve Find/Search classifications.
+      if (filePath && ['Read', 'Edit', 'Delete', 'Move'].includes(label)) label += ' file';
       if (diff) {
         return [{
           type: 'message', msgId, msgType: 'fold_diff', label,
