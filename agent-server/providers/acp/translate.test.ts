@@ -3,6 +3,14 @@ import type { SessionUpdate } from '@agentclientprotocol/sdk';
 import { translateSessionUpdate, createToolMetaCarry, contentBlockToText, renderPlan } from './translate';
 
 describe('translateSessionUpdate', () => {
+  it('keeps a descriptive tool title in the header after partial completion', () => {
+    const carry = createToolMetaCarry();
+    carry({ sessionUpdate: 'tool_call', toolCallId: 'todo', title: '查詢現有待辦', kind: 'other' });
+    expect(translateSessionUpdate(carry({ sessionUpdate: 'tool_call_update', toolCallId: 'todo', status: 'completed',
+      rawOutput: { content: '4 row(s) returned' } }))[0]).toMatchObject({
+      label: 'Tool', subtitle: '查詢現有待辦', details: '', body: { content: '4 row(s) returned' },
+    });
+  });
   it('keeps the executable command separate from the description across partial completion', () => {
     const carry = createToolMetaCarry();
     carry({ sessionUpdate: 'tool_call', toolCallId: 'cmd', title: '建立目錄', kind: 'execute',
@@ -145,6 +153,7 @@ describe('translateSessionUpdate', () => {
     const u: SessionUpdate = { sessionUpdate: 'tool_call', toolCallId: 'r1', title: 'View', kind: 'read', status: 'completed' };
     expect(translateSessionUpdate(u)).toEqual([{
       type: 'message', msgId: 'r1', msgType: 'fold_code', label: 'Read', subtitle: 'View', body: { content: '' },
+      details: '',
     }]);
   });
 
@@ -247,6 +256,7 @@ describe('createToolMetaCarry — title/kind survive partial tool_call_update', 
     // label = carried kind ('Search'), subtitle = carried title ('Grep') — not clobbered.
     expect(translateSessionUpdate(carry(finish))).toEqual([{
       type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Search', subtitle: 'Grep',
+      details: '',
       body: { content: 'result' },
     }]);
   });

@@ -45,7 +45,7 @@ describe('acp session driver (connection + new/resume + turn)', () => {
     expect(wire).toEqual([
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'Hel' },
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'lo' },
-      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read', body: { content: '' } },
+      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read', details: '', body: { content: '' } },
     ]);
   });
 

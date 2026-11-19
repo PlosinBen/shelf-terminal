@@ -186,6 +186,14 @@ test.describe('Codex file changes use File Diff display settings', () => {
     const card = (description: string) => page.locator('.agent-msg-fold:visible')
       .filter({ has: page.locator('.fold-subtitle', { hasText: description }) });
     const empty = card('建立目錄');
+    const tool = card('查詢現有待辦');
+    await tool.locator('.fold-header').click();
+    await expect(tool.locator('.fold-header')).toContainText('查詢現有待辦');
+    await expect(tool.locator('.fold-command-text')).toHaveCount(0);
+    await expect(tool.locator('.fold-body-code')).toHaveText('4 row(s) returned');
+    await expect(tool.getByRole('button', { name: 'Copy details', exact: true })).toHaveCount(0);
+    await tool.getByRole('button', { name: 'Copy output', exact: true }).click();
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('4 row(s) returned');
     await expect(empty.locator('.fold-label')).toHaveText('Command');
     await empty.locator('.fold-header').click();
     await expect(empty.locator('.fold-header')).toContainText('建立目錄');
@@ -207,6 +215,10 @@ test.describe('Codex file changes use File Diff display settings', () => {
     await failed.locator('.fold-header').click();
     await expect(failed.locator('.fold-error-banner')).toBeVisible();
     await disconnectAndReconnect(page);
+    await tool.locator('.fold-header').click();
+    await expect(tool.locator('.fold-header')).toContainText('查詢現有待辦');
+    await expect(tool.locator('.fold-command-text')).toHaveCount(0);
+    await expect(tool.locator('.fold-body-code')).toHaveText('4 row(s) returned');
     await empty.locator('.fold-header').click();
     await expect(empty.locator('.fold-command-text')).toHaveText('mkdir "a b"');
     await expect(empty.locator('.fold-body-code')).toHaveCount(0);

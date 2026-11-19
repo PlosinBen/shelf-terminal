@@ -412,6 +412,12 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
         const { createToolMetaCarry, translateSessionUpdate } = await import('../acp/translate');
         const { normalizeCopilotCommandOutput } = await import('../copilot/command-output');
         const carry = createToolMetaCarry();
+        const descriptionId = mintId('acp-description');
+        for (const update of [
+          { sessionUpdate: 'tool_call' as const, toolCallId: descriptionId, title: '查詢現有待辦', kind: 'other' as const },
+          { sessionUpdate: 'tool_call_update' as const, toolCallId: descriptionId, status: 'completed' as const,
+            rawOutput: { content: '4 row(s) returned' } },
+        ]) for (const message of translateSessionUpdate(carry(update))) send(message);
         for (const [title, command, content, status] of [
           ['建立目錄', 'mkdir "a b"', '\n<shellId: 14 completed with exit code 0>', 'completed'],
           ['讀取位置', 'pwd', '/fixture/project\n<shellId: 14 completed with exit code 0>', 'completed'],

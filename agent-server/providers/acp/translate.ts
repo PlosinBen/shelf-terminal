@@ -276,7 +276,9 @@ export function translateSessionUpdate(update: SessionUpdate, cwd?: string): Out
       const settled = status === 'completed';
       return [{
         type: 'message', msgId, msgType: 'fold_code', label,
-        ...(details !== undefined ? { details } : {}),
+        // Without a structured file path, subtitle is ACP's human description,
+        // not copyable code. Explicit empty details keeps that text in the header.
+        ...(details !== undefined || (!filePath && title !== undefined) ? { details: details ?? '' } : {}),
         ...(execution ? { execution } : {}),
         ...(subtitle ? { subtitle } : {}),
         ...(errorMessage ? { errorMessage } : {}),
