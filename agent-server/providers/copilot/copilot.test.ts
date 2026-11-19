@@ -18,6 +18,7 @@ import * as mcpConfig from '../mcp-config';
 import { createShelfMcpLifecycle, ShelfMcpStartupError } from '../../shelf-mcp-lifecycle';
 import { SHELF_MCP_FAILURE, SHELF_MCP_STATE } from '@shared/shelf-mcp';
 import { FILE_TOOL_LOG_TAG } from '../file-tool-diagnostics';
+import { COPILOT_COMPLETION_LOG_TAG } from './completion-diagnostics';
 
 it('observes original ACP diff nulls and tool IDs before rendering normalization', async () => {
   const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
@@ -33,6 +34,13 @@ it('observes original ACP diff nulls and tool IDs before rendering normalization
     expect(trace[0][3]).toMatchObject({ sessionId: 'mock-session', toolCallId: 'file-diag', kind: 'edit',
       diffs: [{ paths: { path: '/repo/new' }, oldTextShape: 'null', newTextLength: 15 }] });
     expect(JSON.stringify(trace)).not.toContain('private-');
+    expect(log).toHaveBeenCalledWith('debug', COPILOT_COMPLETION_LOG_TAG, 'ACP tool identity', expect.objectContaining({
+      sessionId: 'mock-session', toolCallId: 'file-diag', titleLength: 13,
+    }));
+    expect(log).toHaveBeenCalledWith('debug', COPILOT_COMPLETION_LOG_TAG, 'gate observed tool', expect.objectContaining({
+      toolCallId: 'file-diag', titleMatched: false, tracked: false, status: 'completed',
+    }));
+    expect(JSON.stringify(log.mock.calls.filter(call => call[1] === COPILOT_COMPLETION_LOG_TAG))).not.toContain('private-');
   } finally { backend.dispose(); log.mockRestore(); }
 });
 

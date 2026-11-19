@@ -34,6 +34,7 @@ import { openAcpConnection, spawnAgentStdio, type AcpConnection, type Permission
 import { createSessionDriver, type AcpSession } from '../acp/client';
 import { COPILOT_TASK_COMPLETE_TOOL_TITLE } from '../acp/translate';
 import { FILE_TOOL_LOG_TAG, summarizeAcpFileTool } from '../file-tool-diagnostics';
+import { COPILOT_COMPLETION_LOG_TAG, summarizeCompletionIdentity } from './completion-diagnostics';
 import { createPermissionBridge } from '../acp/permission';
 import { mapSessionCapabilities, currentSelections, configOptionIdForCategory } from '../acp/capabilities';
 import { toAcpMcpServers } from '../acp/mcp';
@@ -228,6 +229,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       }),
       resolve: (outcome) => {
         if (gate.settled) return;
+        serverLog('debug', COPILOT_COMPLETION_LOG_TAG, 'gate settled', { sessionId, outcome, trackedToolCount: gate.toolCallIds.size });
         gate.settled = true;
         if (gate.timeout) clearTimeout(gate.timeout);
         resolvePromise(outcome);
@@ -250,6 +252,12 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     if ('title' in update && update.title === COPILOT_TASK_COMPLETE_TOOL_TITLE) {
       gate.toolCallIds.add(update.toolCallId);
     }
+    serverLog('debug', COPILOT_COMPLETION_LOG_TAG, 'gate observed tool', {
+      sessionId: notification.sessionId, toolCallId: update.toolCallId,
+      titleMatched: 'title' in update && update.title === COPILOT_TASK_COMPLETE_TOOL_TITLE,
+      tracked: gate.toolCallIds.has(update.toolCallId), gateSettled: gate.settled,
+      status: 'status' in update ? update.status : undefined,
+    });
     if (gate.toolCallIds.has(update.toolCallId) && 'status' in update && update.status === 'completed') {
       gate.resolve('task_complete');
     }
@@ -614,6 +622,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         // Exclude high-volume text chunks; never copy content or tool payloads.
         const update = notification.update;
         if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+          serverLog('debug', COPILOT_COMPLETION_LOG_TAG, 'ACP tool identity', {
+            sessionId: notification.sessionId, ...summarizeCompletionIdentity(update),
+          });
           serverLog('debug', FILE_TOOL_LOG_TAG.COPILOT, 'ACP tool event', {
             sessionId: notification.sessionId, ...summarizeAcpFileTool(update),
           });
@@ -950,6 +961,10 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             && sessionModes?.currentModeId === COPILOT_AUTOPILOT_MODE_ID
             && !isAdvertisedSlashCommand
           ) {
+            serverLog('debug', COPILOT_COMPLETION_LOG_TAG, 'waiting for task completion', {
+              sessionId: s.sessionId, stopReason, mode: sessionModes.currentModeId,
+              gateSettled: autopilotCompletion.settled, trackedToolCount: autopilotCompletion.toolCallIds.size,
+            });
             const outcome = await autopilotCompletion.promise;
             if (outcome === 'connection_closed') {
               throw new Error('Copilot connection closed before task_complete');
