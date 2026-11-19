@@ -137,18 +137,35 @@ test.describe('agent flows via fake provider', () => {
       await openAgentTab(page);
       const command = '/bin/zsh -lc \'printf "first; line"\nfalse\'';
       const output = Array.from({ length: 45 }, (_, i) => `line ${i + 1}`).join('\n') + '\n<failure-at-tail>';
-      const sendCard = async (failed: boolean) => app.evaluate(({ BrowserWindow }, { channel, command, output, failed }) => {
+      const sendCard = async (failed: boolean, content = output) => app.evaluate(({ BrowserWindow }, { channel, command, output, failed }) => {
         BrowserWindow.getAllWindows()[0].webContents.send(channel, (globalThis as any).__commandReadingTab, {
           type: 'fold_code', msgId: 'command-reading', label: 'Command', subtitle: command,
           body: { content: output }, ...(failed ? { errorMessage: 'Command failed with exit code 1' } : {}),
         });
-      }, { channel: IPC.AGENT_MESSAGE, command, output, failed });
-      await sendCard(false);
+      }, { channel: IPC.AGENT_MESSAGE, command, output: content, failed });
+      await sendCard(false, 'alpha\nkeep');
       const card = page.locator('.agent-msg-fold').filter({ has: page.locator('.fold-label', { hasText: 'Command' }) });
       const header = card.locator('.fold-header');
       await header.click();
       await expect(card.locator('.fold-body-code')).toBeVisible();
       await expect(card.locator('.fold-command-text')).toHaveText(command);
+      const colors = await card.evaluate(el => {
+        const style = getComputedStyle(el);
+        return { muted: style.getPropertyValue('--text-muted').trim(), text: style.getPropertyValue('--text').trim() };
+      });
+      const resolvedColor = async (value: string) => page.evaluate(value => {
+        const el = document.createElement('span');
+        el.style.color = value;
+        document.body.append(el);
+        const color = getComputedStyle(el).color;
+        el.remove();
+        return color;
+      }, value);
+      await expect(card.locator('.fold-command-text')).toHaveCSS('color', await resolvedColor(colors.muted));
+      await expect(card.locator('.fold-body-code')).toHaveCSS('color', await resolvedColor(colors.text));
+      const detailsBox = await card.locator('.fold-command-text').boundingBox();
+      const outputBox = await card.locator('.fold-body-code').boundingBox();
+      expect(outputBox!.y - detailsBox!.y - detailsBox!.height).toBeCloseTo(12, 0);
       await expect(header.locator('.fold-subtitle')).toHaveCount(0);
       await expect(card.getByRole('button', { name: /^(Show|Hide) details$/ })).toHaveCount(0);
       await header.click();
@@ -156,6 +173,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(card.locator('.fold-command-text')).toHaveCount(0);
       await sendCard(true);
       await expect(card.locator('.fold-body-code')).toBeVisible();
+      await expect(card.locator('.fold-reading-controls')).toHaveCSS('margin-top', '12px');
       await header.click();
       await expect(card.locator('.fold-body-code')).toHaveCount(0);
       await expect(card.locator('.fold-error-banner')).toBeVisible();

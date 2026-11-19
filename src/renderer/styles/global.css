@@ -3406,6 +3406,11 @@ button {
   padding-right: 40px;
 }
 
+.fold-body-container + .fold-body-container,
+.fold-body-container + .fold-reading-controls {
+  margin-top: 12px;
+}
+
 .fold-copy-button {
   position: absolute;
   top: 4px;
@@ -3489,6 +3494,10 @@ button {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.fold-command-text {
+  color: var(--text-muted);
 }
 
 .fold-body-markdown {
