@@ -148,7 +148,12 @@ test.describe('agent flows via fake provider', () => {
       const header = card.locator('.fold-header');
       await header.click();
       await expect(card.locator('.fold-body-code')).toBeVisible();
+      await expect(card.locator('.fold-command-text')).toHaveText(command);
+      await expect(header.locator('.fold-subtitle')).toHaveCount(0);
+      await expect(card.getByRole('button', { name: /^(Show|Hide) details$/ })).toHaveCount(0);
       await header.click();
+      await expect(header.locator('.fold-subtitle')).toHaveText(command);
+      await expect(card.locator('.fold-command-text')).toHaveCount(0);
       await sendCard(true);
       await expect(card.locator('.fold-body-code')).toBeVisible();
       await header.click();
@@ -159,7 +164,7 @@ test.describe('agent flows via fake provider', () => {
       await header.focus();
       await page.keyboard.press('Enter');
       await expect(card.locator('.fold-body-code')).not.toContainText('<failure-at-tail>');
-      const copyOutput = card.locator('.fold-output-container').getByRole('button', { name: 'Copy output', exact: true });
+      const copyOutput = card.locator('.fold-body-container').getByRole('button', { name: 'Copy output', exact: true });
       await expect(copyOutput).toBeVisible();
       await expect(copyOutput).toHaveText('');
       await copyOutput.click();
@@ -173,9 +178,11 @@ test.describe('agent flows via fake provider', () => {
       await expect(card.locator('.fold-body-code')).not.toContainText('<failure-at-tail>');
       await card.getByRole('button', { name: 'Show full output (46 lines)', exact: true }).click();
       await expect(card.locator('.fold-body-code')).toHaveText(output);
-      await card.getByRole('button', { name: 'Show details', exact: true }).click();
       await expect(card.locator('.fold-command-text')).toHaveText(command);
-      await card.getByRole('button', { name: 'Copy details', exact: true }).click();
+      const copyDetails = card.locator('.fold-body-container').getByRole('button', { name: 'Copy details', exact: true });
+      await expect(copyDetails).toHaveText('');
+      await copyDetails.focus();
+      await page.keyboard.press('Enter');
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(command);
       await expect(card.locator('.fold-body-code')).toBeVisible();
       // Copy errors must be visible without losing the received content.

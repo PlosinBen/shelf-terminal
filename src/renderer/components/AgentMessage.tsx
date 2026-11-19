@@ -119,6 +119,16 @@ function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard, summary }
   );
 }
 
+function FoldCopyButton({ target, onCopy }: { target: 'details' | 'output'; onCopy: () => void }) {
+  const label = `Copy ${target}`;
+  return <button type="button" className="fold-copy-button" aria-label={label} title={label} onClick={onCopy}>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="8" y="8" width="12" height="13" rx="2" />
+      <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+    </svg>
+  </button>;
+}
+
 /** Raw output controls are provider-independent. UI choices live for this mount;
  * remounting a failed card reveals its output again (agent-ui#5). */
 function CodeFold({ message, settingMode, nested }: {
@@ -137,7 +147,6 @@ function CodeFold({ message, settingMode, nested }: {
   // An explicit empty body is settled, unlike an absent (pending) body.
   const summary = message.body?.content === '' && !nested?.length;
   const isExpanded = !summary && (expansion.choice ?? (hasError || settingMode === 'expanded'));
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [fullOutput, setFullOutput] = useState(false);
   const [tailRequest, setTailRequest] = useState(0);
   const [copyStatus, setCopyStatus] = useState('');
@@ -158,7 +167,7 @@ function CodeFold({ message, settingMode, nested }: {
   };
   return (
     <div className="agent-msg agent-msg-fold">
-      <FoldHeader label={message.label} subtitle={message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
+      <FoldHeader label={message.label} subtitle={isExpanded ? undefined : message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
         onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
       {message.execution && message.execution.state !== ES.SUCCEEDED && <div className="fold-execution" data-state={message.execution.state}>
         {EXECUTION_LABEL[message.execution.state]}
@@ -166,15 +175,10 @@ function CodeFold({ message, settingMode, nested }: {
       </div>}
       {message.errorMessage && <div className="fold-error-banner">{message.errorMessage}</div>}
       {isExpanded && <>
-        {message.subtitle && <>
-          <div className="fold-reading-controls">
-            <button type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>
-              {detailsOpen ? 'Hide details' : 'Show details'}
-            </button>
-            <button type="button" onClick={() => void copy(message.subtitle!, 'details')}>Copy details</button>
-          </div>
-          {detailsOpen && <pre className="fold-body fold-command-text">{message.subtitle}</pre>}
-        </>}
+        {message.subtitle && <div className="fold-body-container">
+          <FoldCopyButton target="details" onCopy={() => void copy(message.subtitle!, 'details')} />
+          <pre className="fold-body fold-command-text" tabIndex={0} aria-label="Details">{message.subtitle}</pre>
+        </div>}
         {nested && nested.length > 0 && <div className="agent-subagent-nested">
           {nested.map(child => <AgentMessage key={child.id} message={child} />)}
         </div>}
@@ -185,14 +189,8 @@ function CodeFold({ message, settingMode, nested }: {
             </button>
             <button type="button" onClick={() => { setFullOutput(true); setTailRequest(n => n + 1); }}>View tail</button>
           </div>}
-          <div className="fold-output-container">
-            <button type="button" className="fold-copy-output" aria-label="Copy output" title="Copy output"
-              onClick={() => void copy(output, 'output')}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                <rect x="8" y="8" width="12" height="13" rx="2" />
-                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
-              </svg>
-            </button>
+          <div className="fold-body-container">
+            <FoldCopyButton target="output" onCopy={() => void copy(output, 'output')} />
             <pre ref={outputRef} className="fold-body fold-body-code" tabIndex={0} aria-label="Output">
               {fullOutput ? output : preview.lines.join('\n') + (preview.remaining > 0 ? `\n... +${preview.remaining} more lines` : '')}
             </pre>

@@ -3398,15 +3398,15 @@ button {
   font-style: italic;
 }
 
-.fold-output-container {
+.fold-body-container {
   position: relative;
 }
 
-.fold-output-container .fold-body-code {
+.fold-body-container .fold-body {
   padding-right: 40px;
 }
 
-.fold-copy-output {
+.fold-copy-button {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -3422,7 +3422,7 @@ button {
   cursor: pointer;
 }
 
-.fold-copy-output:hover {
+.fold-copy-button:hover {
   background: var(--surface);
   color: var(--text);
 }
@@ -3450,7 +3450,8 @@ button {
 
 .fold-header[role="button"]:focus-visible,
 .fold-reading-controls button:focus-visible,
-.fold-copy-output:focus-visible,
+.fold-copy-button:focus-visible,
+.fold-command-text:focus-visible,
 .fold-body-code:focus-visible {
   outline: 2px solid var(--text-muted);
   outline-offset: 2px;

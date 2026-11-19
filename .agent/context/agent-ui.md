@@ -148,10 +148,10 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 - **`fold_code` vs `fold_markdown` 區分**：markdown 是否解析。`fold_code` 用 `<pre>` 不解析（shell stdout、raw output 含 `*` `#` 不會誤判）；`fold_markdown` 解析 markdown（slash 結果、MCP rich text、想顯示 code 包 ```lang fence）— **不另開 `fold_json`**
 - **`FoldBase` interface 共享** label / subtitle / errorMessage，避免四個 fold 重複定義
 - **`errorMessage` 保持可見**：`fold_code` 每次 mount 首次失敗自動展開，之後可手動收合；重複失敗 snapshot 不覆寫使用者選擇。紅色 banner 在 body 外，因此收合仍可見。其他 fold 保留強制 expanded。重新掛載／history reload 的失敗 code 卡重新展開，不持久化展開偏好。
-- **`fold_code` 閱讀控制**：預設預覽 30 行，可顯示全部已收到的輸出、捲至尾端及複製全部內容；沿用限高捲動區。完整 subtitle 以 Details 展開／複製，保留換行、引號與既有 redaction；不解析 command 或補讀重導向檔案。控制只依渲染原語，不判斷工具名稱。沒有輸出的空 body 不顯示空白輸出框。複製失敗顯示回饋並記錄 msgId／target，不記錄文字內容。
+- **`fold_code` 閱讀控制**：預設預覽 30 行，可顯示全部已收到的輸出、捲至尾端及複製全部內容；沿用限高捲動區。卡片展開時直接顯示完整 subtitle 並隱藏標題列的重複 subtitle，收合時恢復單行預覽；不再提供第二層 Show／Hide details。保留換行、引號與既有 redaction；不解析 command 或補讀重導向檔案。控制只依渲染原語，不判斷工具名稱。沒有輸出的空 body 不顯示空白輸出框。複製失敗顯示回饋並記錄 msgId／target，不記錄文字內容。
 - **`fold_code.execution` 可選狀態**：狀態與 exit code 不從 body／錯誤文字推測。succeeded 是正常結果，不顯示成功 badge 或 exit 0，但 metadata 照常保存供狀態對帳與歷史恢復；其他狀態提示在收合區外，失敗收合後仍可見。failed／declined／interrupted／unknown 首次出現時採與失敗相同的展開策略。已確認 terminal 不被晚到 running／partial output 改寫；衝突 terminal 留診斷，unknown 可被後到的確定結果補正。idle、exit snapshot、reload 對有 metadata 的未完成卡片標結果未知，即使已有輸出；不宣稱程序已停止。無 metadata 的舊卡維持舊邏輯。
 - **Provider 證據範圍**：Codex commandExecution 的 inProgress／failed／declined 直接映射；completed 只有明確 exit 0 才 succeeded，非零為 failed，缺 exit code 為 unknown。矛盾或未知原始欄位留警告。ACP execute-kind 依標準 tool status（pending／in_progress／completed／failed）映射；Claude Bash 依 tool_use／tool_result.is_error 映射。後兩者表示工具呼叫結果，不代表背景程序已結束，也不解析文字取得 exit code。其他工具維持無 metadata；目前沒有 provider 將 turn 取消直接映成 interrupted。
-- **輸出複製入口**：fold_code 的 Copy output 使用內容容器右上角圖示，不占獨立控制列；按鈕在 pre 外並保留鍵盤焦點、tooltip 與複製回饋。即使目前只顯示預覽，仍複製完整原始 output。Copy details 與長輸出控制分開處理。
+- **輸出複製入口**：fold_code 的完整 subtitle 與 output 各使用內容容器右上角複製圖示，不占獨立控制列；按鈕在 pre 外並保留鍵盤焦點、tooltip 與複製回饋。即使目前只顯示預覽，仍複製完整原始 output。兩個複製入口分別使用 Copy details／Copy output 的可存取名稱；長輸出預覽控制仍獨立。
 - **不做 hidden** — `collapsed` 留 header 在 timeline 事後 trace；hidden 違反「不在意但回頭要找得到」原則
 - **Plan 抽出獨立 event channel**：plan 是 state update（替換語意，當前 plan = X），不該擠進 timeline；error 不像 plan 抽出是因為它兩層都該進 timeline（差別只在來源層級）
 - **Streaming flag 留在 `WithMsgId` 最外層** — 是 lifecycle metadata 跟 msgId 同類，不是 content 屬性。實際只有 `reply` / `fold_text` 會用，其他 type 不設

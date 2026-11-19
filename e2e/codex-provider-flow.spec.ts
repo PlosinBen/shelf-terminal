@@ -168,7 +168,7 @@ async function setDiffDisplay(page: Page, mode: 'collapsed' | 'expanded') {
 }
 
 function fileCard(page: Page, file: string) {
-  return page.locator('.agent-msg-fold:visible').filter({ has: page.locator('.fold-subtitle').filter({ hasText: new RegExp(`^${file.replaceAll('.', '\\.')}$`) }) }).last();
+  return page.locator('.agent-msg-fold:visible').filter({ has: page.locator('.fold-subtitle, .fold-command-text').filter({ hasText: new RegExp(`^${file.replaceAll('.', '\\.')}$`) }) }).last();
 }
 
 test.describe('Codex file changes use File Diff display settings', () => {
@@ -194,14 +194,14 @@ test.describe('Codex file changes use File Diff display settings', () => {
     await expect(failed).toContainText('permission denied');
     await expect(created.locator('pre')).toHaveCount(0);
     await created.locator('.fold-header').click();
-    await expect(created.locator('pre')).toHaveText('actual content');
+    await expect(created.locator('.fold-body-code')).toHaveText('actual content');
     await updated.locator('.fold-header').click();
     await expect(updated).toContainText('actual content');
     await expect(updated).not.toContainText('proposed content');
     await disconnectAndReconnect(page);
     await expect(created.locator('.fold-label')).toHaveText('Create file');
     await created.locator('.fold-header').click();
-    await expect(created.locator('pre')).toHaveText('actual content');
+    await expect(created.locator('.fold-body-code')).toHaveText('actual content');
     await expect(failed).toContainText('permission denied');
   });
   // A multi-file edit must remain collapsible by file even when a file has
@@ -269,7 +269,7 @@ test.describe('Codex file changes use File Diff display settings', () => {
     await expect(fileCard(page, 'added.md').locator('.fold-label')).toHaveText('Create file');
     await expect(fileCard(page, 'added.md').locator('pre')).toHaveCount(0);
     await fileCard(page, 'added.md').locator('.fold-header').click();
-    await expect(fileCard(page, 'added.md').locator('pre')).toHaveText('```\noriginal added content\n```\n');
+    await expect(fileCard(page, 'added.md').locator('.fold-body-code')).toHaveText('```\noriginal added content\n```\n');
     await expect(fileCard(page, 'deleted.ts').locator('.fold-label')).toHaveText('Delete file');
     await fileCard(page, 'deleted.ts').locator('.fold-header').click();
     await expect(fileCard(page, 'deleted.ts')).toContainText('deleted content');
