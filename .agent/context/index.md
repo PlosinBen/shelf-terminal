@@ -17,7 +17,7 @@ Decisions + gotchas grouped by topic. Cited from code as `<topic>#N`.
 | PM agent | [pm-agent](pm-agent.md) | Telegram 遙控、away/active、雙層 prompt、rolling note |
 | agent 核心架構 | [agent-core](agent-core.md) | provider SDK、tab state、持久化、send queue |
 | agent 事件不靜默丟棄 | [agent-observability](agent-observability.md) | 每個事件都要留痕(renderer/logger)、default/else 守門、orphan tool card 兩方向 fail-loud |
-| Claude/Copilot provider 差異 | [agent-providers](agent-providers.md) | 行為一致差異封裝、登入、model registry、permission |
+| Claude/Copilot/Codex provider 差異 | [agent-providers](agent-providers.md) | 行為差異封裝、登入、model registry、permission、Codex moderation/display 限制 |
 | agent UI 渲染 | [agent-ui](agent-ui.md) | plan panel、status bar、picker、event/store、渲染原語 |
 | execution / content / slash / config 流 | [agent-config-flow](agent-config-flow.md) | executionId control、session content、slash dispatch、applyConfigEdit |
 | 背景任務 | [background-tasks](background-tasks.md) | task_event lane、streaming session、auto-resume |

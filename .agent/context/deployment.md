@@ -133,7 +133,7 @@ related:
 
 **Symptom：** Codex remote deployment 在檔案檢查階段失敗，即使 CLI、code-mode host、ripgrep 與 sandbox resources 都已備妥。
 
-**Root cause：** 部署清單若要求 pinned native package 未提供的 resource，deploy 會在 provider 啟動前失敗。目前釘選的 Codex 0.163.0 Linux x64 與 arm64 native packages 均不含 `codex-resources/zsh/bin/zsh`，因此不能把它列為必需檔。
+**Root cause：** 部署清單若要求 pinned native package 未提供的 resource，deploy 會在 provider 啟動前失敗。目前釘選的 Codex 0.171.0 Linux x64 與 arm64 native packages 均不含 `codex-resources/zsh/bin/zsh`，因此不能把它列為必需檔。
 
 **Fix / note：** 清單仍要求 package 實際提供的 CLI、code-mode host、ripgrep 與 sandbox resources，移除不存在的 zsh 路徑。升級 Codex pin 時，先檢查各 target 的 npm tarball 內容及 executable mode，再同步調整 manifest；deploy layout regression test 檢查兩者一致。
 

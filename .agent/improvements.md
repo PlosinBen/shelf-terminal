@@ -24,3 +24,11 @@ title: Shelf — 待評估改善項目
 - 影響：失敗後可能缺少定位資訊，或 agent 需要再次重現才能取得；實際影響範圍仍待執行確認。
 - 建議落點：驗證 harness／artifact 保存；先在隔離測試環境製造可控失敗，檢查 trace、截圖與 log，再依缺口選必要修改。若需改 fixture／測試，依 repo worktree 規則進行。
 - 再檢視條件：修改 Playwright／fixture／證據流程，或需要依賴 E2E artifact 定位失敗時。
+
+## IMP-3 — Codex 回答的 moderation/display 尚未處理
+
+- 狀態：接受現況、暫不實作；保留回檢。完整呈現機制不作為升版前置條件。
+- 問題與證據：[Codex translator](../agent-server/providers/codex/app-server-translate.ts) 直接轉送回答文字，未消費上游 moderation/display；觸發範圍及實際影響尚未驗證。現行決策、契約邊界與來源見 [agent-providers#57](context/agent-providers.md)。
+- 影響：若收到指定回答的隱藏、替代或封鎖指示，Shelf 仍沿用原文字呈現；不代表工具授權或既有錯誤處理失效。
+- 建議落點：Codex provider 的訊息轉換與診斷；先以無害 fixture 確認適用語意與缺口，再評估最小處理。若實作，須覆蓋串流、完成、持久化與重開，不先引入完整 Chat 介面。
+- 再檢視條件：後續 Codex 升版、修改回答或歷史處理；收到實際 moderation/display payload、相關呈現問題，或上游明確第三方責任／契約變更。回檢不等於自動授權實作，也不因普通對話測試通過而結案。

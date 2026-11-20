@@ -91,7 +91,7 @@ export const COPILOT_CLI_VERSION = '1.0.103';
  * Keep package.json dependencies exact; companion tests guard the declared
  * specifiers and installed versions against accidental range drift.
  */
-export const CODEX_CLI_VERSION = '0.163.0';
+export const CODEX_CLI_VERSION = '0.171.0';
 export const ACP_SDK_VERSION = '2.8.0';
 
 /** Codex ships one Linux package per CPU architecture (no musl support in Shelf). */

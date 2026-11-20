@@ -640,7 +640,7 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Decision**：Codex 完整 `fileChange` snapshot 的一般 update（無 move）解析成每檔一張 `fold_diff`，同檔各 hunk 保留行陣列與兩側起始行號，卡片內分段呈現。沿用 File Diff display 設定，不新增 display type，也不改普通 Markdown 設定。舊字串 diff 與歷史保持相容。Failed／declined 沿用既有 errorMessage 與錯誤呈現，不額外切換成 Markdown。
 
-**Identity／lifecycle**：Pinned Codex 0.163.0 的正式 started／completed clone 相同 changes，並沿用 item ID；逐檔 ID 由獨立 namespace 與 `[itemId, rawPath]` 的 SHA-256 決定，不依陣列位置或狀態。重複通知與重排因此 upsert 同一張卡片，fallback 與 diff 也共用 ID。既有 `item/updated` 相容入口只接受完整且成員不變的 snapshot；正式部分 patch 事件 `item/fileChange/patchUpdated` 不在此路徑處理。升級若改變 snapshot membership，須重新查證生命週期。
+**Identity／lifecycle**：Pinned Codex 0.171.0 的正式 started／completed 使用相同 changes，並沿用 item ID；逐檔 ID 由獨立 namespace 與 `[itemId, rawPath]` 的 SHA-256 決定，不依陣列位置或狀態。重複通知與重排因此 upsert 同一張卡片，fallback 與 diff 也共用 ID。既有 `item/updated` 相容入口只接受完整且成員不變的 snapshot；正式部分 patch 事件 `item/fileChange/patchUpdated` 不在此路徑處理。升級若改變 snapshot membership，須重新查證生命週期。
 
 **Fallback／diagnostics**：Add、delete、move、CRLF、EOF marker 與不合法 unified patch 逐檔保留原始內容為 Markdown；整檔解析失敗不得只輸出成功的部分 hunk。Code fence 長度超過原文最長 backtick run，保留空白。缺 path／非物件 entry 以 item + index 的異常 namespace 保留原始 JSON；重複 path 合併保留所有 entries；空／非法 changes 顯示明確說明。預期範圍外格式記 debug，畸形資料記 warn，包含遮罩後的 item/path/index/reason，不寫 patch 全文。
 
@@ -663,3 +663,17 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Reason**：SDK 2.x 的預設入口只接受 stable schema，會拒絕既有處理分支涵蓋的 `plan_update`／`plan_removed` 通知。只改 TypeScript cast 不能改變 runtime validation；使用完整的 v1 unstable 入口可保留既有通知接收範圍，不需切換 draft v2。
 
 **Do not change casually because**：SDK 的 stable／unstable apps 不可混用於同一條 in-process connection。升版時需核對型別及實際 schema，並以 production connection 的通知接收測試確認；`/unstable` 不保證 draft payload 永遠不變。Transport 接收成功也不代表所有 draft plan 格式已完整映射成 UI。
+
+## agent-providers#57 — Codex 回答的 moderation/display 尚未映射  ·  [Decision]
+
+**Decision**：Shelf 的 Codex provider 維持既有文字串流與回答完成處理，尚未消費 `agentMessage.moderation.display` 或 `turn/moderationMetadata`。不把完整的 Chat 呈現機制列為 Codex 升版前置條件；此限制保留追蹤，不代表顯示處理已完成。既有錯誤、拒絕與工具授權流程仍各自生效。
+
+**Reason**：上游將單則最終回答的 moderation/display 與原文一起傳遞，並用於歷史恢復；version 1 包含 show/hide/block。公開資料未明文要求第三方重建 Chat 的求助資訊與 trusted contacts 介面。官方 Codex TUI 及維護中的 Codex ACP adapter 存在未消費此欄位的文字呈現路徑，可作為範圍取捨參考，但不是忽略限制的正確性保證。
+
+**Known limitation**：目前 translator 直接讀取 delta 與 item.text，未依 display 隱藏、替換或標註回答，也沒有專用診斷或回歸測試。若實際收到相關指示，Shelf 不會按該指示調整呈現。尚未確認模型、登入方式與後端的觸發範圍；一般對話未觀察到欄位不能證明永遠不會收到。整輪 experimental 通知與單則回答欄位是不同路徑，不能以未訂閱前者推論後者不存在。
+
+**Do not change casually because**：這是接受尚未處理資訊的現況，不是上游保證安全忽略、也不是已確認的上游 bug。若實際收到 hide/block、restricted 或無法解讀的 display，應重新評估受影響訊息的處理，不能以其他客戶端也未處理作為繼續忽略的充分理由。需要實作時，驗證須涵蓋串流、完成替換、歷史持久化與重新開啟；不得只修最終畫面而漏掉其他呈現路徑。
+
+**Revisit**：後續 Codex 升版或修改訊息／歷史轉換時回檢；實際收到相關 payload、使用者回報呈現問題，或上游明確第三方責任／改變契約時立即重評。待評估方案由 [改善清單 IMP-3](../improvements.md) 追蹤。
+
+**Sources**：[上游歷史呈現資訊](https://github.com/openai/codex/pull/60172)、[version 1 與無效指示處理](https://github.com/openai/codex/pull/60904)、[整輪通知邊界](https://github.com/openai/codex/pull/25710)、[Codex ACP adapter](https://github.com/agentclientprotocol/codex-acp/blob/ad09e0ead18511a65a0761cac832aa3087219b10/src/CodexEventHandler.ts)。
