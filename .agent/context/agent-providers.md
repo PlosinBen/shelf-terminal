@@ -685,4 +685,12 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 
 **Reason**：CLI 可在最後 result 之後、成功退出前才回報磁碟滿或配額不足。此時 turn 已關閉，依一般 turn routing 會遺失警告。`transcript` 表示恢復可能缺少對話，`global_config` 只表示 Claude 設定未保存；兩者必須分開描述。未知原因或 lost 類型保留通用保存失敗提示，沒有 UI sink 時仍留下 error log。
 
-**Boundary**：這是保存失敗的通知處理，不保證 CLI 能恢復未寫入資料，也不把收到的回覆視為推論失敗。SDK 未升版時以新版事件 fixture 驗證 adapter；fake-provider E2E 不證明真實磁碟滿或 quota 情境。
+**Boundary**：這是保存失敗的通知處理，不保證 CLI 能恢復未寫入資料，也不把收到的回覆視為推論失敗。事件 fixture 與 fake-provider E2E 驗證 adapter 通知路徑，不證明真實磁碟滿或 quota 情境。
+
+## agent-providers#59 — Claude 停止與恢復 ID 的相容邊界 · [Decision]
+
+**Decision**：Claude 持久 streaming-input query 省略 `perTaskStopAffordance`。停止前景時，背景 agent 由 SDK 中斷；背景 shell 仍由其個別 `stopTask` 控制。Shelf 背景面板排除 local_agent/subagent，對話卡片未提供同等停止入口，因此不能宣告所有背景 agent 都可個別停止。若要讓背景 agent 在前景停止後繼續執行，須先補齊該操作入口。
+
+**Resume identity**：恢復使用一般 SDK 訊息的 `session_id`，在前景 result 收尾時保存至 context；明確 `/clear` 先清除保存的舊 ID。`conversation_reset.new_conversation_id` 不直接作為 `options.resume`：SDK 0.3.329 的完整 `/clear` 序列中，它與後續 init/result 的 session_id 不同。Shelf 的顯示歷史與 provider context 各有生命週期，不因此事件自動刪除 IDB 歷史。
+
+**Boundary**：上述停止語意的 runtime 證據涵蓋 general-purpose local_agent（fork subagent 關閉）與 local_bash，使用真實 SDK/native CLI 配本機模擬推論；不代表 workflow、fork subagent、one-shot 或全部平台。完整 `/clear` 的 SDK 序列已觀察，但含模型歷史的恢復、Plan mode clear-context、fresh_session/onboarding 與任意中途退出未完整驗證。後續涉及這些路徑時先取得事件序列，不把 conversation ID 與 resume session ID 視為同義。

@@ -29,7 +29,7 @@ export const NODE_VERSION = 'v20.18.1';
  * package.json, so we pin it here; a unit test asserts it equals the installed
  * dependency's version, so bumping the dep without updating this fails loudly.
  */
-export const CLAUDE_SDK_VERSION = '0.3.159';
+export const CLAUDE_SDK_VERSION = '0.3.329';
 
 function assertGlibc(t: RuntimeTarget): void {
   if (t.libc !== 'glibc') {
