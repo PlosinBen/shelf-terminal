@@ -125,6 +125,8 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 **Do not change casually because**：不要將 conversation 改回 SDK transport。升 CLI 時同步更新 runtime pin，確認遠端套件可下載並執行部署後的版本檢查；SDK 不必跟著無條件升級，但它對新 binary 的 quota 相容性仍須驗證。
 
+**Alpine 處置**：Copilot arm64-musl 的啟動失敗是既有問題，接受暫緩處理，不作主要功能升版的前置條件。這不表示已驗證可用，也不取消其他 provider 的 Alpine 路徑；回檢條件見 [IMP-4](../improvements.md#imp-4--copilot-在-alpine-arm64-的-standalone-cli-無法啟動對話)。
+
 **Related**：`deployment#4`、`agent-providers#13`、`agent-providers#26`、`src/main/agent/agent-runtime-versions.ts`、`agent-server/providers/copilot/helpers.ts`。
 
 ## agent-providers#10 — Copilot 互動式登入靠 CLI `copilot login` device flow，不靠 SDK、不自刻 client_id  ·  [Decision]

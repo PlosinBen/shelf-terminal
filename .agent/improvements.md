@@ -32,3 +32,11 @@ title: Shelf — 待評估改善項目
 - 影響：若收到指定回答的隱藏、替代或封鎖指示，Shelf 仍沿用原文字呈現；不代表工具授權或既有錯誤處理失效。
 - 建議落點：Codex provider 的訊息轉換與診斷；先以無害 fixture 確認適用語意與缺口，再評估最小處理。若實作，須覆蓋串流、完成、持久化與重開，不先引入完整 Chat 介面。
 - 再檢視條件：後續 Codex 升版、修改回答或歷史處理；收到實際 moderation/display payload、相關呈現問題，或上游明確第三方責任／契約變更。回檢不等於自動授權實作，也不因普通對話測試通過而結案。
+
+## IMP-4 — Copilot 在 Alpine arm64 的 standalone CLI 無法啟動對話
+
+- 狀態：使用者同意暫緩；保留既有問題，不作本輪 SDK 升版與主要功能交付的阻擋。
+- 問題與證據：CLI1.0.103 與1.0.114 的 linuxmusl-arm64 standalone 都在 native bootstrap 失敗，`--version` 成功不足以證明可用。Debugger 捕捉到 cli-native.node 初始化查找 Node-API symbol 回 null；ELF GNU hash 無法查到所需 API。同一份解出的 CLI 由系統 Node 啟動，提供 Bash 後，隔離 ACP 模型 fixture 的停止／恢復通過。現況邊界見 [agent-providers#9](context/agent-providers.md)。
+- 影響：已重現於 Alpine arm64 的 Copilot 對話，非本次升版新增的已知回歸；不外推至所有 musl 架構，也不代表 Claude 的 Alpine 路徑或整個 Shelf 不支援 Alpine。
+- 建議落點：優先驗證上游修復的 standalone artifact。未採用解包後改系統 Node 啟動的 workaround，也不配送手動改寫 ELF 的 binary；暫存 GNU hash 重建實驗未得到可用修復。
+- 再檢視條件：上游發布相關修復、有實際 Alpine 使用需求，或準備調整 musl 支援範圍時。重新驗證須包含 ACP initialize、新對話、工具執行與停止後恢復，不只執行版本指令。
