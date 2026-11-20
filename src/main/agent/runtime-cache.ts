@@ -113,7 +113,7 @@ export async function ensureNodeCached(
   target: RuntimeTarget,
   deps: CacheDeps = defaultDeps,
 ): Promise<string> {
-  const archive = nodeArchiveName(target); // node-v20.18.1-linux-<arch>
+  const archive = nodeArchiveName(target); // node-<pinned version>-linux-<arch>
   const dest = cachedNodeBin(userData, targetId(target), archive);
   if (fs.existsSync(dest)) return dest;
 

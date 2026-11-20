@@ -73,9 +73,9 @@ related:
 
 **Decision**：agent-server(esbuild bundle)要一個 Node 直譯,各連線型別的 Node 來源不同:
 
-- **local**：跑 **Electron 自帶的 Node** —— `spawn(process.execPath, [index.mjs], { env: { ELECTRON_RUN_AS_NODE: '1' } })`(純函式 `localNodeExec()`)。**不吃系統 node**,版本釘死在 Electron 內嵌 node(現行 Electron 41 → Node 22)。
-- **glibc remote(ssh/docker/wsl)**：`ensureNodeCached` 從 nodejs.org 下載 **pin 死的官方 node(`NODE_VERSION`,現 `v20.18.1`)**、sha256 驗證後 ship 過去。**不吃遠端 node**。
-- **musl remote(Alpine 等)**：nodejs.org **沒有官方 musl build 可下載**,故 fallback 吃**遠端自備的 node**,gate `MIN_REMOTE_NODE_MAJOR`(現 20);缺或太舊則 fail-loud throw。
+- **local**：跑 **Electron 自帶的 Node** —— `spawn(process.execPath, [index.mjs], { env: { ELECTRON_RUN_AS_NODE: '1' } })`(純函式 `localNodeExec()`)。**不吃系統 node**，Node 版本隨 Electron 發行版決定。
+- **glibc remote(ssh/docker/wsl)**：`ensureNodeCached` 從 nodejs.org 下載 **pin 死的官方 node(`NODE_VERSION`，現 `v24.22.3`)**、sha256 驗證後 ship 過去。**不吃遠端 node**。遠端部署目錄以 app version 分隔；相同 app version 已完成的部署不因修改 runtime pin 自動重送，正式配送依新 app version 建立部署。
+- **musl remote(Alpine 等)**：nodejs.org **沒有官方 musl build 可下載**，故使用**遠端自備的 node**。`REMOTE_NODE_RANGE` 為 `^20.19.0 || >=22.12.0`，只接受完整穩定版版本字串；缺少、無法解析或不符範圍時 fail-loud throw，錯誤包含所需範圍。這是 Copilot SDK engines 條件，不能只以 esbuild 的 node20 語法 target 或 major 判斷；版本 gate 通過也不保證 provider native binary 在該平台可運作。
 
 **Reason**：
 - local 用 Electron node 讓一般使用者(尤其 Windows)**零安裝**、且版本由我們控制(避免賭使用者系統 node 版本)。`ELECTRON_RUN_AS_NODE` 讓 app binary 退化成純 Node,**stdio JSON-line 契約完全不變**,是最低風險 drop-in(不改 `wrapProcess`)。agent-server bundle 是純 JS(esbuild external 只有 node builtins,不含 node-pty 等 native module),故拿 Electron node 跑**無 native ABI 衝突**。

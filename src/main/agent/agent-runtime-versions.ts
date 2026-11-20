@@ -19,8 +19,8 @@
 
 import { type RuntimeTarget, targetId, UnsupportedTargetError } from './runtime-target';
 
-/** Aligned with esbuild `target: node20` and validated by the R1 spike. */
-export const NODE_VERSION = 'v20.18.1';
+/** Official Node 24 runtime; satisfies provider SDK engines (deployment#4). */
+export const NODE_VERSION = 'v24.22.3';
 
 /**
  * Claude CLI companion version to download — MUST match the
@@ -37,7 +37,7 @@ function assertGlibc(t: RuntimeTarget): void {
   }
 }
 
-/** Directory name inside the Node tarball (and our cache), e.g. `node-v20.18.1-linux-x64`. */
+/** Directory name inside the Node tarball (and our cache), e.g. `node-v24.22.3-linux-x64`. */
 export function nodeArchiveName(t: RuntimeTarget, version: string = NODE_VERSION): string {
   assertGlibc(t);
   return `node-${version}-linux-${t.arch}`;

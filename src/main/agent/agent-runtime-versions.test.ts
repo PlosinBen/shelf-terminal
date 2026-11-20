@@ -14,15 +14,16 @@ import {
   copilotTarballUrl,
   codexNativeTarballUrl,
 } from './agent-runtime-versions';
-import { UnsupportedTargetError, type RuntimeTarget } from './runtime-target';
+import { isRemoteNodeSupported, UnsupportedTargetError, type RuntimeTarget } from './runtime-target';
 
 const X64_GLIBC: RuntimeTarget = { arch: 'x64', libc: 'glibc' };
 const ARM64_GLIBC: RuntimeTarget = { arch: 'arm64', libc: 'glibc' };
 const X64_MUSL: RuntimeTarget = { arch: 'x64', libc: 'musl' };
 
 describe('NODE_VERSION', () => {
-  it('is a pinned v20.x (aligned with esbuild node20 target)', () => {
-    expect(NODE_VERSION).toMatch(/^v20\.\d+\.\d+$/);
+  it('pins the validated Node 24 runtime within the SDK-supported range', () => {
+    expect(NODE_VERSION).toBe('v24.22.3');
+    expect(isRemoteNodeSupported(NODE_VERSION)).toBe(true);
   });
 });
 

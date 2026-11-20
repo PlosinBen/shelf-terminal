@@ -47,7 +47,7 @@ import {
   detectTargetFromProbe,
   targetId,
   isRemoteNodeSupported,
-  MIN_REMOTE_NODE_MAJOR,
+  REMOTE_NODE_RANGE,
   TARGET_PROBE_CMD,
 } from './runtime-target';
 import { CLAUDE_SDK_VERSION, COPILOT_CLI_VERSION, CODEX_CLI_VERSION } from './agent-runtime-versions';
@@ -699,11 +699,11 @@ async function deploySelfContained(
     const ver = (await ops.exec('node --version 2>/dev/null || true')).trim();
     if (!ver) {
       throw new Error(
-        `Remote (${targetId(target)}) has no node on PATH. Install Node >= ${MIN_REMOTE_NODE_MAJOR}, or use a glibc remote (we ship Node there).`,
+        `Remote (${targetId(target)}) has no node on PATH. Install Node ${REMOTE_NODE_RANGE}, or use a glibc remote (we ship Node there).`,
       );
     }
     if (!isRemoteNodeSupported(ver)) {
-      throw new Error(`Remote node ${ver} is too old (${targetId(target)} uses the remote's node; needs >= ${MIN_REMOTE_NODE_MAJOR}).`);
+      throw new Error(`Remote node ${ver} is unsupported (${targetId(target)} uses the remote's node; needs ${REMOTE_NODE_RANGE}).`);
     }
     nodeBin = 'node';
   } else {

@@ -36,8 +36,9 @@ export function targetId(t: RuntimeTarget): string {
 /** All four (arch × libc) combos are supported (see file header). */
 export const SUPPORTED_TARGETS: readonly string[] = ['x64-glibc', 'arm64-glibc', 'x64-musl', 'arm64-musl'];
 
-/** Minimum remote Node major for musl targets (we run agent-server on it). */
-export const MIN_REMOTE_NODE_MAJOR = 20; // aligned with esbuild `target: node20`
+/** Copilot SDK engines, not just the bundle's syntax target (deployment#4). */
+const REMOTE_NODE_FLOORS = { legacy: [20, 19, 0], current: [22, 12, 0] } as const;
+export const REMOTE_NODE_RANGE = `^${REMOTE_NODE_FLOORS.legacy.join('.')} || >=${REMOTE_NODE_FLOORS.current.join('.')}`;
 
 /** Thrown when a remote's arch/libc cannot be determined or isn't supported. */
 export class UnsupportedTargetError extends Error {
@@ -101,11 +102,17 @@ export function parseNodeMajor(versionStr: string): number | null {
 }
 
 /**
- * Whether a remote's `node --version` meets our minimum (musl path, where we
- * run agent-server on the remote's own node). Too-old node would crash the
- * esbuild-node20 bundle with a cryptic SyntaxError (build-packaging#6).
+ * Whether a remote's stable `node --version` satisfies the SDK engines (musl
+ * path). An esbuild syntax target alone does not guarantee runtime API support.
  */
 export function isRemoteNodeSupported(versionStr: string): boolean {
-  const major = parseNodeMajor(versionStr);
-  return major !== null && major >= MIN_REMOTE_NODE_MAJOR;
+  const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(versionStr.trim());
+  if (!match) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  if (![major, minor, patch].every(Number.isSafeInteger)) return false;
+  const [legacyMajor, legacyMinor] = REMOTE_NODE_FLOORS.legacy;
+  const [currentMajor, currentMinor] = REMOTE_NODE_FLOORS.current;
+  return (major === legacyMajor && minor >= legacyMinor)
+    || major > currentMajor
+    || (major === currentMajor && minor >= currentMinor);
 }

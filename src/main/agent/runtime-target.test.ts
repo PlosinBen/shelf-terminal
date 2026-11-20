@@ -8,7 +8,6 @@ import {
   SUPPORTED_TARGETS,
   parseNodeMajor,
   isRemoteNodeSupported,
-  MIN_REMOTE_NODE_MAJOR,
 } from './runtime-target';
 
 describe('parseArch', () => {
@@ -80,10 +79,10 @@ describe('remote node version (musl path)', () => {
     expect(parseNodeMajor('22.3.0')).toBe(22);
     expect(parseNodeMajor('garbage')).toBeNull();
   });
-  it('accepts node >= the minimum, rejects older / unparseable', () => {
-    expect(isRemoteNodeSupported(`v${MIN_REMOTE_NODE_MAJOR}.0.0`)).toBe(true);
-    expect(isRemoteNodeSupported('v22.1.0')).toBe(true);
-    expect(isRemoteNodeSupported('v18.20.0')).toBe(false);
-    expect(isRemoteNodeSupported('')).toBe(false);
+  it.each(['v20.19.0', 'v20.20.1', 'v22.12.0', '22.12.1', 'v23.0.0', ' v24.22.3\n'])('accepts SDK-compatible stable Node %s', (version) => {
+    expect(isRemoteNodeSupported(version)).toBe(true);
+  });
+  it.each(['v18.20.0', 'v20.18.1', 'v21.7.3', 'v22.0.0', 'v22.11.9', '', 'garbage v24.0.0', 'v24.0', 'v24.0.0-rc.1', 'v24.0.0\nnoise'])('rejects unsupported or malformed Node %s', (version) => {
+    expect(isRemoteNodeSupported(version)).toBe(false);
   });
 });
