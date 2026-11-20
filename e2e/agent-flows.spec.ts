@@ -697,6 +697,20 @@ test.describe('agent flows via fake provider', () => {
   });
 
   test.describe('permission', () => {
+    test.use({ homeProjectDirectories: false });
+    test('restricted permission defaults to deny and allows only explicit once approval', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'permission:restricted');
+      const panel = page.locator('.agent-permission:visible');
+      await expect(panel.locator('.agent-perm-option.selected')).toContainText('Deny');
+      await expect(panel.getByText('Allow for session', { exact: true })).toHaveCount(0);
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.agent-messages:visible')).toContainText('permission denied: Write');
+      await sendAgentPrompt(page, 'permission:restricted');
+      await panel.getByText('Allow once', { exact: true }).click();
+      await expect(page.locator('.agent-messages:visible')).toContainText('permission allowed: Write');
+    });
     test('Allow once → tool runs, success system message', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);

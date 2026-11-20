@@ -231,6 +231,11 @@ Execution-scoped tool-permission prompt. Does NOT enter the content queue — th
 | `toolUseId` | `string` |
 | `toolName` | `string` |
 | `input` | `Record<string, unknown>` |
+| `constraints` | Optional `PermissionPromptConstraints` from `src/shared/permission-controls.ts`: `{ defaultToDeny?: boolean; allowSession?: boolean }` |
+
+`defaultToDeny: true` selects Deny when the prompt opens; Enter alone therefore denies. `allowSession: false` removes Allow for session. Missing constraints preserve the normal Allow once / Allow for session / Deny choices and initial Allow once selection. Each toolUseId mounts a fresh selection state.
+
+Claude maps `canUseTool.defaultToNo` and `suppressAlwaysAllowRule` into these rendering constraints. Its callback also rejects a session-scoped answer when session approval is forbidden, logs the tool identifiers, and returns deny without adding an allow rule. Hiding an option alone is not enforcement. Explicit once approval remains available; existing bypass and separately gated Shelf tools retain their existing paths.
 
 ## error — `type: 'error'`
 

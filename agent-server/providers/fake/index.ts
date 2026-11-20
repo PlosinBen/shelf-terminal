@@ -551,9 +551,10 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     }
 
     if (step.startsWith('permission:')) {
-      const toolName = step.slice('permission:'.length);
+      const restricted = step === 'permission:restricted';
+      const toolName = restricted ? 'Write' : step.slice('permission:'.length);
       const toolUseId = mintId('t');
-      send({ type: 'permission_request', toolUseId, toolName, input: {} });
+      send({ type: 'permission_request', toolUseId, toolName, input: {}, ...(restricted ? { constraints: { defaultToDeny: true, allowSession: false } } : {}) });
       const { allow, message } = await new Promise<{ allow: boolean; message?: string }>((resolve) => {
         pendingPermissions.set(toolUseId, {
           resolve: (allow, message) => resolve({ allow, message }),

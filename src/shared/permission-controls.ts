@@ -1,3 +1,9 @@
+/** Per-request presentation constraints; provider adapters retain enforcement. */
+export interface PermissionPromptConstraints {
+  defaultToDeny?: boolean;
+  allowSession?: boolean;
+}
+
 export const PERMISSION_CONTROL_STRATEGIES = {
   SHELF: 'shelf',
   NATIVE: 'native',

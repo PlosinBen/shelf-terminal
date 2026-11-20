@@ -122,6 +122,7 @@ export function bindAgentStoreSubscriptions(): () => void {
       toolUseId: r.toolUseId,
       toolName: r.toolName,
       input: r.input ?? {},
+      constraints: r.constraints,
     });
   });
 

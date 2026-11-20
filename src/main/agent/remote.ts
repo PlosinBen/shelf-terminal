@@ -352,7 +352,7 @@ export function createRemoteBackend(
       const executionId = `e-${randomUUID().slice(0, 8)}`;
 
       const userCallback = opts?.canUseTool;
-      const permissionHandler: PermissionHandler = (toolUseId, toolName, input) => {
+      const permissionHandler: PermissionHandler = (toolUseId, toolName, input, constraints) => {
         // Fire-and-forget — resolve_permission round-trips back to the
         // dispatcher which delivers the canUseTool answer asynchronously.
         (async () => {
@@ -360,7 +360,7 @@ export function createRemoteBackend(
             proc.sendLine({ type: 'resolve_permission', sid: sessionId, toolUseId, allow: true });
             return;
           }
-          const result = await userCallback(toolUseId, toolName, input);
+          const result = await userCallback(toolUseId, toolName, input, constraints);
           proc.sendLine({
             type: 'resolve_permission',
             sid: sessionId,

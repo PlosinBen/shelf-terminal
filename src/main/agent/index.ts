@@ -1,3 +1,4 @@
+import type { PermissionPromptConstraints } from '@shared/permission-controls';
 import { buildSkillCommandMenu } from './skill-command-menu';
 import { readSkillCommandCatalog } from '../skill-commands';
 import { withSkillsMutation } from '../skills-mutation';
@@ -652,9 +653,9 @@ async function executeMessage(tabId: string, session: SessionInstance, input: Ag
   send(IPC.AGENT_STATUS, tabId, { state: 'streaming' });
   notifyObservers(tabId, { type: 'status', payload: { state: 'streaming' } });
 
-  const canUseTool = async (toolUseId: string, toolName: string, input: Record<string, unknown>) => {
-    send(IPC.AGENT_PERMISSION_REQUEST, tabId, { toolUseId, toolName, input });
-    notifyObservers(tabId, { type: 'permission_request', toolUseId, toolName, input });
+  const canUseTool = async (toolUseId: string, toolName: string, input: Record<string, unknown>, constraints?: PermissionPromptConstraints) => {
+    send(IPC.AGENT_PERMISSION_REQUEST, tabId, { toolUseId, toolName, input, constraints });
+    notifyObservers(tabId, { type: 'permission_request', toolUseId, toolName, input, constraints });
     return new Promise<PermissionResult>((resolve) => {
       session.pendingPermissions.set(toolUseId, resolve);
     });

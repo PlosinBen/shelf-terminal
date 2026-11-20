@@ -1,3 +1,4 @@
+import type { PermissionPromptConstraints } from '@shared/permission-controls';
 import type { SkillCommandMenu, SkillCommandMenuEntry } from '@shared/skill-invocation';
 import { EXECUTION_STATE as ES, isExecutionPending, reconcileExecution } from '@shared/agent-execution';
 import { parseShelfCommandPrefix } from '@shared/skill-commands';
@@ -55,6 +56,7 @@ export interface Capabilities {
 }
 
 export interface PendingPermission {
+  constraints?: PermissionPromptConstraints;
   toolUseId: string;
   toolName: string;
   input: Record<string, unknown>;

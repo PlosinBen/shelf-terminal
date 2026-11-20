@@ -430,13 +430,25 @@ export function createClaudeBackend(): ServerBackend {
       return { behavior: 'allow', updatedInput: input };
     }
 
-    activeSend()?.({ type: 'permission_request', toolUseId, toolName, input });
+    // Optional SDK hints are supported before the dependency upgrade as well.
+    const hints = canUseOpts as typeof canUseOpts & {
+      defaultToNo?: boolean; suppressAlwaysAllowRule?: boolean;
+    };
+    const constraints = {
+      ...(hints.defaultToNo === true ? { defaultToDeny: true } : {}),
+      ...(hints.suppressAlwaysAllowRule === true ? { allowSession: false } : {}),
+    };
+    activeSend()?.({ type: 'permission_request', toolUseId, toolName, input, constraints });
     const result = await new Promise<PermissionResult>((resolve) => {
       pendingPermissions.set(toolUseId, resolve);
     });
     if (result.behavior === 'allow') {
       const allow: any = { behavior: 'allow' as const, updatedInput: input };
       if (result.scope === 'session') {
+        if (constraints.allowSession === false) {
+          serverLog('warn', 'claude', 'Rejected forbidden session permission grant', { toolUseId, toolName });
+          return { behavior: 'deny', message: 'This request does not permit session-wide approval. Request permission again for a single use.' };
+        }
         // SDK self-records the rule; future invocations of the same tool skip canUseTool entirely.
         allow.updatedPermissions = [{
           type: 'addRules',

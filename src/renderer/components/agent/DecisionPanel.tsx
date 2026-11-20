@@ -44,15 +44,20 @@ export function DecisionPanel({ tabId }: Props) {
   const permissionMode = tab?.actualPermissionMode ?? 'default';
 
   if (pendingPermission) {
+    const options = [
+      { value: 'once', label: 'Allow once', kind: 'allow' as const },
+      ...(pendingPermission.constraints?.allowSession === false ? [] : [
+        { value: 'session', label: 'Allow for session', kind: 'allow' as const },
+      ]),
+      { value: 'deny', label: 'Deny', kind: 'deny' as const },
+    ];
     return (
       <SelectionPanel
+        key={pendingPermission.toolUseId}
         title={<>Allow <strong>{pendingPermission.toolName}</strong>?</>}
         description={<pre>{JSON.stringify(pendingPermission.input, null, 2)}</pre>}
-        options={[
-          { value: 'once',    label: 'Allow once',        kind: 'allow' },
-          { value: 'session', label: 'Allow for session', kind: 'allow' },
-          { value: 'deny',    label: 'Deny',              kind: 'deny'  },
-        ]}
+        options={options}
+        initialSelected={pendingPermission.constraints?.defaultToDeny ? options.length - 1 : 0}
         onSelect={(value) => {
           const allow = value === 'once' || value === 'session';
           const scope = value === 'session' ? 'session' : value === 'once' ? 'once' : undefined;

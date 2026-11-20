@@ -104,12 +104,12 @@ describe('createExecutionDispatcher', () => {
     const genA = d.registerExecution('e-aaaa', permA);
     const genB = d.registerExecution('e-bbbb', permB);
 
-    d.feed({ type: 'permission_request', toolUseId: 'tool-1', toolName: 'Bash', input: { command: 'ls' }, executionId: 'e-aaaa' });
+    d.feed({ type: 'permission_request', toolUseId: 'tool-1', toolName: 'Bash', input: { command: 'ls' }, constraints: { defaultToDeny: true, allowSession: false }, executionId: 'e-aaaa' });
     d.feed({ type: 'permission_request', toolUseId: 'tool-2', toolName: 'Read', input: { file_path: '/etc' }, executionId: 'e-bbbb' });
 
     // Each execution's handler only saw its own permission request
-    expect(permA).toHaveBeenCalledExactlyOnceWith('tool-1', 'Bash', { command: 'ls' });
-    expect(permB).toHaveBeenCalledExactlyOnceWith('tool-2', 'Read', { file_path: '/etc' });
+    expect(permA).toHaveBeenCalledExactlyOnceWith('tool-1', 'Bash', { command: 'ls' }, { defaultToDeny: true, allowSession: false });
+    expect(permB).toHaveBeenCalledExactlyOnceWith('tool-2', 'Read', { file_path: '/etc' }, undefined);
 
     // Permission requests don't appear in the event queue — close executions and
     // verify queue is empty (just the idle event we send below)

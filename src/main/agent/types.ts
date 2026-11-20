@@ -1,3 +1,4 @@
+import type { PermissionPromptConstraints } from '@shared/permission-controls';
 import type { SkillInvocation, SkillValidationRequest, SkillValidationResult } from '@shared/skill-invocation';
 import type { AgentMessage, AgentPrefs, AuthMethod, ProviderModel } from '@shared/types';
 import type { AgentInputRequest } from '@shared/agent-input';
@@ -98,7 +99,7 @@ export type PermissionScope = 'once' | 'session';
 export type PermissionResult =
   | { behavior: 'allow'; scope?: PermissionScope }
   | { behavior: 'deny'; message?: string };
-export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>) => Promise<PermissionResult>;
+export type PermissionCallback = (toolUseId: string, toolName: string, input: Record<string, unknown>, constraints?: PermissionPromptConstraints) => Promise<PermissionResult>;
 
 export type AgentBackendRequest = AgentInputRequest & { invocation?: SkillInvocation };
 
@@ -133,7 +134,7 @@ export type AgentEvent =
    * mid-session model/effort/permission change.
    */
   | { type: 'capabilities'; caps: ProviderCapabilities }
-  | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
+  | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown>; constraints?: PermissionPromptConstraints }
   | {
       type: 'picker_request';
       id: string;

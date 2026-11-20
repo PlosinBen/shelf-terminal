@@ -1,3 +1,4 @@
+import type { PermissionPromptConstraints } from '@shared/permission-controls';
 import { SKILL_INVOCATION } from '@shared/skill-invocation';
 import { log } from '@shared/logger';
 import type { AgentQueueItem, TaskEvent } from '@shared/types';
@@ -10,7 +11,7 @@ import { SHELF_MCP } from '@shared/shelf-mcp';
  * queued message flush mid-stream) never cross-contaminate each other's
  * permission flows.
  */
-export type PermissionHandler = (toolUseId: string, toolName: string, input: Record<string, unknown>) => void;
+export type PermissionHandler = (toolUseId: string, toolName: string, input: Record<string, unknown>, constraints?: PermissionPromptConstraints) => void;
 
 /**
  * Pure event dispatcher — no I/O. Routes raw parsed events from agent-server
@@ -262,7 +263,7 @@ export function createExecutionDispatcher(
     // Permission requests don't go on the event queue; they fire a per-execution
     // callback that initiates the canUseTool roundtrip.
     if (m.type === 'permission_request') {
-      execution.permissionHandler(m.toolUseId, m.toolName, m.input ?? {});
+      execution.permissionHandler(m.toolUseId, m.toolName, m.input ?? {}, m.constraints);
       return;
     }
 

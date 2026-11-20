@@ -237,7 +237,8 @@ Provider asks the renderer to show a multi-question interactive form (Claude `As
 
 Separate from picker (`agent-ui#3` — the "Allow/Deny/Allow and remember" strings are app-owned, the resolve shape differs).
 
-- request: `OutgoingMessage` `{ type: 'permission_request', toolUseId, toolName, input }` → `AgentEvent` of the same shape → `IPC.AGENT_PERMISSION_REQUEST`.
+- request: `OutgoingMessage` `{ type: 'permission_request', toolUseId, toolName, input, constraints? }` → `AgentEvent` of the same shape → `IPC.AGENT_PERMISSION_REQUEST`.
+- Optional per-request constraints are forwarded through the execution handler, permission callback and IPC without changing scope. See `contracts/agent-wire-protocol` permission_request for selection and provider enforcement rules.
 - answer: `IPC.AGENT_RESOLVE_PERMISSION` `{ tabId, toolUseId, allow, scope? }`. Note the wire form is richer than the IPC form: in `remote.ts` the `canUseTool` callback result becomes `sendLine({ type: 'resolve_permission', toolUseId, allow: behavior === 'allow', message: deny ? message : undefined, scope: allow ? scope : undefined })`. `scope` is `'once' | 'session'`.
 
 ## app_tool (app-tool bridge)

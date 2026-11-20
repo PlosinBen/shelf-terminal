@@ -1,3 +1,4 @@
+import type { PermissionPromptConstraints } from '@shared/permission-controls';
 import { SKILL_INVOCATION, type SkillInvocation, type SkillValidationRequest } from '@shared/skill-invocation';
 import type { AgentDiff } from '@shared/agent-diff';
 import type { AgentInitRecovery } from '@shared/agent-init-recovery';
@@ -160,7 +161,7 @@ export type OutgoingMessage = WireEnvelope & (
   // features copilot-device-login.
   | { type: 'auth_login_prompt'; provider: string; verificationUri: string; userCode: string; prefilledUri: string }
   | { type: 'auth_login_done'; provider: string; ok: boolean; cancelled?: boolean; error?: string }
-  | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown> }
+  | { type: 'permission_request'; toolUseId: string; toolName: string; input: Record<string, unknown>; constraints?: PermissionPromptConstraints }
   /**
    * Multi-question interactive form. Provider asks renderer to display a
    * picker and resolve with index-aligned answers (or cancellation).

@@ -142,3 +142,36 @@ it('initializes bypass before creating the first SDK session', async () => {
   expect(sessions[0].options.permissionMode).toBe('default');
   await expect(sessions[0].options.canUseTool('Read', {}, { toolUseID: 'read' })).resolves.toMatchObject({ behavior: 'allow' });
 });
+
+
+it('forwards restrictive permission hints and rejects a forbidden session grant', async () => {
+  const out: OutgoingMessage[] = [];
+  await backend.query({ prompt: 'first', cwd: '/tmp' }, m => out.push(m));
+  const answer = sessions[0].options.canUseTool('Write', {}, {
+    toolUseID: 'restricted', defaultToNo: true, suppressAlwaysAllowRule: true,
+  });
+  expect(out.at(-1)).toMatchObject({
+    type: 'permission_request', constraints: { defaultToDeny: true, allowSession: false },
+  });
+  backend.resolvePermission!('restricted', true, undefined, 'session');
+  await expect(answer).resolves.toMatchObject({ behavior: 'deny' });
+});
+
+it('allows an explicit once grant under restrictive hints', async () => {
+  await warm();
+  const answer = sessions[0].options.canUseTool('Write', {}, {
+    toolUseID: 'once', defaultToNo: true, suppressAlwaysAllowRule: true,
+  });
+  backend.resolvePermission!('once', true, undefined, 'once');
+  await expect(answer).resolves.toEqual({ behavior: 'allow', updatedInput: {} });
+});
+
+
+it('retains session approval when the SDK does not forbid it', async () => {
+  await warm();
+  const answer = sessions[0].options.canUseTool('Write', {}, { toolUseID: 'session' });
+  backend.resolvePermission!('session', true, undefined, 'session');
+  await expect(answer).resolves.toMatchObject({ behavior: 'allow', updatedPermissions: [
+    { type: 'addRules', destination: 'session', behavior: 'allow', rules: [{ toolName: 'Write' }] },
+  ] });
+});
