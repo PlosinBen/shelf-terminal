@@ -12,7 +12,9 @@ import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
-import { FAKE_SESSION_WRITES_LOST, FAKE_TEST_ENV, FAKE_RETIRED_MODEL, FAKE_FILE_CHANGES } from './test-env';
+import { FAKE_SESSION_WRITES_LOST, FAKE_TEST_ENV, FAKE_RETIRED_MODEL, FAKE_FILE_CHANGES, FAKE_ACP_PLAN_PREFIX } from './test-env';
+import { createPlanAccumulator } from '../acp/translate';
+import type { SessionUpdate } from '@agentclientprotocol/sdk/unstable';
 import { translateCodexAppServerNotification } from '../codex/app-server-translate';
 import { SHELF_MCP, SHELF_MCP_STATE, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import type { AgentPrefs } from '@shared/types';
@@ -220,6 +222,7 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
   // refreshAccountStatus emits an account-credit status (executionId-less), mirroring
   // how copilot fetches premium-request credit at turn end. Consumed once.
   let emitCreditNext = false;
+  const accumulateAcpPlan = createPlanAccumulator();
   const lateTimers = new Set<ReturnType<typeof setTimeout>>();
 
   function nativePermissionCapabilities(confirmedPrefs: import('@shared/types').AgentPrefs = {}): ProviderCapabilities {
@@ -703,6 +706,11 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
     // PlanPanel (tab.currentPlan), NOT the timeline and NOT the background-tasks
     // panel — lets an E2E assert the plan/todo surface renders independently of
     // background tasks. See agent-ui#5 (plan side-channel) / #69.
+    if (step.startsWith(FAKE_ACP_PLAN_PREFIX)) {
+      const update = JSON.parse(step.slice(FAKE_ACP_PLAN_PREFIX.length)) as SessionUpdate;
+      for (const message of accumulateAcpPlan(update) ?? []) send(message);
+      return;
+    }
     if (step.startsWith('plan:')) {
       send({ type: 'plan', content: step.slice('plan:'.length) });
       return;

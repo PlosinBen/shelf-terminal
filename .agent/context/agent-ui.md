@@ -19,7 +19,7 @@ related:
 **Decision**：AgentView 在 input 上方有個固定 panel，顯示當前 plan/todos 狀態。Backend 透過獨立 `AgentEvent::plan` event + `AGENT_PLAN` IPC channel 覆蓋式更新（不進 timeline；見 `agent-ui#5`）。Replace-semantics（每次直接覆蓋整段內容），content 為空字串時 panel 隱藏。
 
 **各 provider 接法不同**：
-- **Copilot（ACP）**：ACP `plan` / `plan_update` SessionUpdate → 共用 toolkit `translate.ts` 的 `renderPlan(entries)` 組 markdown checklist → `{type:'plan'}` 渲染原語
+- **Copilot（ACP）**：標準 `plan.entries` 轉成 checklist；draft `plan_update` 依 `plan.type` 讀取 `plan.entries` 或 `plan.content`，不讀取可選的檔案 `path`。Session driver 按 `planId` 保存完整替換內容，按首次出現順序以空行合併成現有 `{type:'plan'}` snapshot；`plan_removed` 只刪除指定 ID，重複或未知 ID 的移除為冪等操作，所有內容為空時隱藏面板。無 ID 的標準 plan 使用獨立槽位，避免 draft 刪除誤清標準計畫。狀態跨 prompt 保留、session 間隔離、forget 時清除；load replay 只累積計畫狀態，後續計畫事件再發完整 snapshot，仍不重播 timeline。這是現有單面板的相容投影，不提供多計畫選擇器或檔案開啟功能，也不新增 capability 宣告。
 - **Codex（app-server）**：建立與恢復 thread 時明確設定 `tools.update_plan.enabled=true`，讓模型可使用原生 checklist 工具（上游預設關閉；不修改使用者 config.toml，也不切換 collaboration mode）。`turn/plan/updated` 的 `plan: [{step,status}]` 轉成 checklist snapshot（pending／inProgress／completed → `[ ]`／`[~]`／`[x]`）；空陣列清空 panel，explanation 不作為待辦。Plan mode 的 `plan` item 文字仍走同一個 `{type:'plan'}` snapshot，但不能取代獨立的待辦更新通知。Malformed snapshot 留診斷並拒絕整份更新，避免部分套用或誤清空；renderer 不感知 transport。
 - **Claude**（SDK 0.2.x）：攔截 `TodoWrite` tool_use，把 `todos` 陣列轉 markdown checkbox
 - **Claude**（SDK 0.3.142+ 起）：`TodoWrite` 被 `TaskCreate / TaskUpdate / TaskGet / TaskList` 取代，是 delta-by-id 不是 snapshot。Provider 內維護 `tasks: Map<taskId, TaskRecord>` 鏡射 SDK task store，每次 Task* 事件處理完都呼叫 `renderPlan()` 整份重發 `{type:'plan', content:md}` — 對 renderer 維持 snapshot 介面不變

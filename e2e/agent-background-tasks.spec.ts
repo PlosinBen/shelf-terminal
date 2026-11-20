@@ -1,5 +1,7 @@
 import { test, expect, openAgentTab, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
+import { FAKE_ACP_PLAN_PREFIX } from '../agent-server/providers/fake/test-env';
+import type { SessionUpdate } from '@agentclientprotocol/sdk/unstable';
 
 /**
  * Background-tasks panel — end-to-end over the fake provider (SHELF_TEST_MODE=1).
@@ -186,6 +188,28 @@ test.describe('background tasks panel via fake provider', () => {
 
 test.describe('plan/todo vs background tasks — distinct surfaces', () => {
   test.use({ homeProjectDirectories: false });
+
+  test('ACP draft plans replace by ID and removals preserve other plans before hiding the panel', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await openAgentTab(page);
+    const send = (update: SessionUpdate) => sendAgentPrompt(page, FAKE_ACP_PLAN_PREFIX + JSON.stringify(update));
+    const panel = page.locator('.agent-plan-panel');
+    const body = panel.locator('.agent-plan-body');
+    await send({ sessionUpdate: 'plan_update', plan: { type: 'items', planId: 'a', entries: [
+      { content: 'Inspect', priority: 'high', status: 'in_progress' },
+    ] } });
+    await expect(body).toHaveText('- [~] Inspect');
+    await send({ sessionUpdate: 'plan_update', plan: { type: 'markdown', planId: 'b', content: 'Verify output' } });
+    await expect(body).toHaveText('- [~] Inspect\n\nVerify output');
+    await send({ sessionUpdate: 'plan_update', plan: { type: 'items', planId: 'a', entries: [
+      { content: 'Inspect', priority: 'high', status: 'completed' },
+    ] } });
+    await expect(body).toHaveText('- [x] Inspect\n\nVerify output');
+    await send({ sessionUpdate: 'plan_removed', planId: 'a' });
+    await expect(body).toHaveText('Verify output');
+    await send({ sessionUpdate: 'plan_removed', planId: 'b' });
+    await expect(panel).toHaveCount(0);
+  });
 
   test('plan snapshots replace progress and an empty snapshot hides the panel', async ({ shelfApp: { page } }) => {
     await setupProject(page);

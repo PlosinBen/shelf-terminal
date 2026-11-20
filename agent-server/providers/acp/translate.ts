@@ -188,12 +188,35 @@ function toolCallLabel(kind: ToolKind | null | undefined, title: string | undefi
   return toolKindLabel(kind);
 }
 
+/** Session-owned projection of draft plan IDs onto Shelf's single snapshot panel.
+ * Keep legacy plans separately because they have no ID that a draft removal can target.
+ * See agent-ui#1. Repeated removals are idempotent snapshots.
+ */
+export function createPlanAccumulator() {
+  const plans = new Map<string | null, string>();
+  return (update: SessionUpdate): OutgoingMessage[] | undefined => {
+    switch (update.sessionUpdate) {
+      case 'plan':
+        plans.set(null, renderPlan(update.entries));
+        break;
+      case 'plan_update':
+        plans.set(update.plan.planId, update.plan.type === 'items' ? renderPlan(update.plan.entries) : update.plan.content);
+        break;
+      case 'plan_removed':
+        plans.delete(update.planId);
+        break;
+      default:
+        return undefined;
+    }
+    return [{ type: 'plan', content: [...plans.values()].filter(Boolean).join('\n\n') }];
+  };
+}
+
 /**
- * Map ONE ACP `SessionUpdate` to zero or more Shelf wire messages (WITHOUT a
- * executionId — the send wrapper stamps that). Returns `[]` for updates that are not
- * timeline render primitives (capabilities/mode/config/usage are consumed by the
- * stateful client, not rendered here). Tool-call updates should be run through a
- * session-scoped {@link createToolMetaCarry} first so title/kind survive partial updates.
+ * Map ONE ACP update to Shelf wire messages without an executionId.
+ * Session callers must use createPlanAccumulator for plan snapshots and
+ * createToolMetaCarry for partial tool metadata before this stateless fallback.
+ * Metadata-only updates are consumed by the client and return no render primitives.
  */
 export function translateSessionUpdate(update: SessionUpdate, cwd?: string): OutgoingMessage[] {
   switch (update.sessionUpdate) {
@@ -210,8 +233,9 @@ export function translateSessionUpdate(update: SessionUpdate, cwd?: string): Out
     case 'plan':
       return [{ type: 'plan', content: renderPlan(update.entries) }];
     case 'plan_update':
-      // PlanUpdate carries a full replacement list of entries too.
-      return [{ type: 'plan', content: renderPlan((update as { entries?: PlanEntry[] }).entries ?? []) }];
+      return [{ type: 'plan', content: update.plan.type === 'items' ? renderPlan(update.plan.entries) : update.plan.content }];
+    case 'plan_removed':
+      return [{ type: 'plan', content: '' }];
     case 'tool_call':
     case 'tool_call_update': {
       // label = short `kind` name (pink, scannable); subtitle = the descriptive
@@ -304,7 +328,6 @@ export function translateSessionUpdate(update: SessionUpdate, cwd?: string): Out
     case 'current_mode_update':
     case 'config_option_update':
     case 'session_info_update':
-    case 'plan_removed':
     default:
       return [];
   }

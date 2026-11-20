@@ -9,6 +9,7 @@ export const FAKE_TEST_ENV = {
 } as const;
 
 export const FAKE_RETIRED_MODEL = 'fake-retired-model';
+export const FAKE_ACP_PLAN_PREFIX = 'acp_plan:';
 
 export const FAKE_FILE_CHANGES = {
   COPILOT_COMMAND: 'file_changes:copilot-command',

@@ -21,7 +21,7 @@ import {
 } from '@agentclientprotocol/sdk/unstable';
 import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage, SendFn } from '../types';
-import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
+import { translateSessionUpdate, createPlanAccumulator, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';
 import { readUploadedImageAttachments } from '../shared';
 import { serverLog } from '../../server-logger';
 import { EXECUTION_STATE as ES } from '@shared/agent-execution';
@@ -34,6 +34,7 @@ interface SessionRouteState {
   streamedSinceTool: boolean;
   thoughtStarted: Set<string>;
   carryToolMeta: ReturnType<typeof createToolMetaCarry>;
+  accumulatePlan: ReturnType<typeof createPlanAccumulator>;
 }
 
 interface HydrationState {
@@ -127,6 +128,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
         streamedSinceTool: false,
         thoughtStarted: new Set<string>(),
         carryToolMeta: createToolMetaCarry(),
+        accumulatePlan: createPlanAccumulator(),
       };
       routeBySession.set(sessionId, state);
     }
@@ -139,7 +141,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
     const namespaced = (msgId: string, streamType?: string): string =>
       msgId === DEFAULT_AGENT_MSG_ID ? `${state.promptBase}:${streamType ?? 'msg'}:${state.seg}` : msgId;
 
-    for (const raw of translateSessionUpdate(carriedUpdate, state.cwd)) {
+    for (const raw of state.accumulatePlan(carriedUpdate) ?? translateSessionUpdate(carriedUpdate, state.cwd)) {
       let wire = raw;
       if (wire.type === 'message') {
         if (wire.msgType === 'fold_code' && wire.execution?.state === ES.UNKNOWN) {
@@ -199,7 +201,10 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
           configOptions: n.update.configOptions,
         });
       }
-      if (hydratingSessions.has(n.sessionId)) return;
+      if (hydratingSessions.has(n.sessionId)) {
+        routeState(n.sessionId).accumulatePlan(n.update);
+        return;
+      }
       routeUpdate(n.sessionId, n.update);
     },
 

@@ -8,6 +8,51 @@ import type { OutgoingMessage } from '../types';
 // Exercises the toolkit runtime path end-to-end (connection + driver + turn)
 // against the in-process mock agent — no stdio, no binary, no credentials.
 describe('acp session driver (connection + new/resume + turn)', () => {
+  it('retains hydrated plan IDs without replaying the timeline', async () => {
+    const mock = createMockAcpAgent({ updatesOnLoadSession: [
+      { sessionUpdate: 'plan_update', plan: { type: 'markdown', planId: 'a', content: 'Loaded A' } },
+      { sessionUpdate: 'plan_update', plan: { type: 'markdown', planId: 'b', content: 'Loaded B' } },
+    ], updatesOnPrompt: [{ sessionUpdate: 'plan_removed', planId: 'a' }] });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { name: 'test', onSessionUpdate: driver.onSessionUpdate });
+    try {
+      const session = await driver.load(conn.agent, 'mock-session', { cwd: '/tmp' });
+      const wire: OutgoingMessage[] = [];
+      await driver.drivePromptTurn(conn.agent, session, 'next', m => wire.push(m));
+      expect(wire).toEqual([{ type: 'plan', content: 'Loaded B' }]);
+    } finally { conn.close(); }
+  });
+  it('replaces plans by ID across turns, isolates sessions, and forgets removed session state', async () => {
+    const mock = createMockAcpAgent({ updatesOnPrompt: [] });
+    const driver = createSessionDriver();
+    const conn = openAcpConnection(mock, { name: 'test', onSessionUpdate: driver.onSessionUpdate });
+    const wire: OutgoingMessage[] = [];
+    const other: OutgoingMessage[] = [];
+    const update = (sessionId: string, value: SessionUpdate) => driver.onSessionUpdate({ sessionId, update: value });
+    const plan = (planId: string, content: string): SessionUpdate => ({ sessionUpdate: 'plan_update', plan: { type: 'markdown', planId, content } });
+    try {
+      const session = await driver.startNew(conn.agent, { cwd: '/tmp' });
+      await driver.drivePromptTurn(conn.agent, session, 'first', m => wire.push(m));
+      update(session.sessionId, plan('a', 'Inspect'));
+      update(session.sessionId, plan('b', 'Verify'));
+      await driver.drivePromptTurn(conn.agent, session, 'next', m => wire.push(m));
+      update(session.sessionId, plan('a', 'Inspected'));
+      expect(wire.at(-1)).toEqual({ type: 'plan', content: 'Inspected\n\nVerify' });
+      await driver.drivePromptTurn(conn.agent, { sessionId: 'other' }, 'other', m => other.push(m));
+      update('other', plan('a', 'Isolated'));
+      update(session.sessionId, { sessionUpdate: 'plan_removed', planId: 'a' });
+      expect(wire.at(-1)).toEqual({ type: 'plan', content: 'Verify' });
+      update(session.sessionId, { sessionUpdate: 'plan_removed', planId: 'missing' });
+      expect(wire.at(-1)).toEqual({ type: 'plan', content: 'Verify' });
+      update(session.sessionId, { sessionUpdate: 'plan_removed', planId: 'b' });
+      expect(wire.at(-1)).toEqual({ type: 'plan', content: '' });
+      expect(other.at(-1)).toEqual({ type: 'plan', content: 'Isolated' });
+      driver.forget('other');
+      await driver.drivePromptTurn(conn.agent, { sessionId: 'other' }, 'fresh', m => other.push(m));
+      update('other', plan('b', 'Fresh'));
+      expect(other.at(-1)).toEqual({ type: 'plan', content: 'Fresh' });
+    } finally { conn.close(); }
+  });
   it.each(['new', 'load', 'resume'] as const)('uses the %s session execution cwd for file display', async (mode) => {
     const mock = createMockAcpAgent({ updatesOnPrompt: [
       { sessionUpdate: 'tool_call', toolCallId: 'read-file', title: 'View', kind: 'read', locations: [{ path: '/remote/project/a.txt' }] },

@@ -1,8 +1,32 @@
 import { describe, it, expect } from 'vitest';
 import type { SessionUpdate } from '@agentclientprotocol/sdk/unstable';
-import { translateSessionUpdate, createToolMetaCarry, contentBlockToText, renderPlan } from './translate';
+import { translateSessionUpdate, createPlanAccumulator, createToolMetaCarry, contentBlockToText, renderPlan } from './translate';
 
 describe('translateSessionUpdate', () => {
+  it('keeps legacy snapshots independent of draft IDs and accepts empty replacement content', () => {
+    const accumulate = createPlanAccumulator();
+    accumulate({ sessionUpdate: 'plan', entries: [{ content: 'Legacy', status: 'pending', priority: 'low' }] });
+    accumulate({ sessionUpdate: 'plan_update', plan: { type: 'markdown', planId: 'a', content: 'Draft' } });
+    expect(accumulate({ sessionUpdate: 'plan_removed', planId: 'a' }))
+      .toEqual([{ type: 'plan', content: '- [ ] Legacy' }]);
+    expect(accumulate({ sessionUpdate: 'plan', entries: [] })).toEqual([{ type: 'plan', content: '' }]);
+    accumulate({ sessionUpdate: 'plan_update', plan: { type: 'markdown', planId: 'a', content: 'Draft' } });
+    expect(accumulate({ sessionUpdate: 'plan_update', plan: { type: 'items', planId: 'a', entries: [] } }))
+      .toEqual([{ type: 'plan', content: '' }]);
+  });
+  it('renders nested draft items and markdown content without reading the optional file', () => {
+    expect(translateSessionUpdate({ sessionUpdate: 'plan_update', plan: {
+      type: 'items', planId: 'a', entries: [{ content: 'Inspect', status: 'in_progress', priority: 'high' }],
+    } })).toEqual([{ type: 'plan', content: '- [~] Inspect' }]);
+    expect(translateSessionUpdate({ sessionUpdate: 'plan_update', plan: {
+      type: 'markdown', planId: 'a', content: '# Verify', path: '/missing/plan.md',
+    } })).toEqual([{ type: 'plan', content: '# Verify' }]);
+  });
+
+  it('clears the panel on removal of its last draft plan', () => {
+    expect(translateSessionUpdate({ sessionUpdate: 'plan_removed', planId: 'a' }))
+      .toEqual([{ type: 'plan', content: '' }]);
+  });
   it('keeps a descriptive tool title in the header after partial completion', () => {
     const carry = createToolMetaCarry();
     carry({ sessionUpdate: 'tool_call', toolCallId: 'todo', title: '查詢現有待辦', kind: 'other' });
