@@ -12,7 +12,7 @@ import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 import { PERMISSION_CONTROL_STRATEGIES } from '@shared/permission-controls';
 import { mdTable } from '../md-table';
 import { callMain } from '../../app-tool-client';
-import { FAKE_TEST_ENV, FAKE_RETIRED_MODEL, FAKE_FILE_CHANGES } from './test-env';
+import { FAKE_SESSION_WRITES_LOST, FAKE_TEST_ENV, FAKE_RETIRED_MODEL, FAKE_FILE_CHANGES } from './test-env';
 import { translateCodexAppServerNotification } from '../codex/app-server-translate';
 import { SHELF_MCP, SHELF_MCP_STATE, parseShelfMcpStatus } from '@shared/shelf-mcp';
 import type { AgentPrefs } from '@shared/types';
@@ -893,6 +893,17 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
             ])}`;
         send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content });
         send({ type: 'status', state: 'idle' });
+        return;
+      }
+
+      if (input.prompt === FAKE_SESSION_WRITES_LOST) {
+        send({ type: 'message', msgId: mintId('m'), msgType: 'reply', content: 'Completed response before save failure.' });
+        send({ type: 'status', state: 'idle' });
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const { reportSessionWritesLost } = await import('../claude');
+        reportSessionWritesLost({ type: 'system', subtype: 'session_writes_lost', session_id: 'fixture-current',
+          error_code: 'ENOSPC', lost: ['transcript'], transcript_session_ids: ['fixture-earlier'],
+        }, send);
         return;
       }
 

@@ -1,3 +1,4 @@
+import { FAKE_SESSION_WRITES_LOST } from '../agent-server/providers/fake/test-env';
 import { test, expect, openAgentTab, readActiveTerminalText, sendAgentPrompt } from './helpers';
 import type { Page } from '@playwright/test';
 import fs from 'node:fs';
@@ -693,6 +694,19 @@ test.describe('agent flows via fake provider', () => {
       await sendAgentPrompt(page, 'text:label-source');
       await expect(page.locator('.agent-msg-reply:visible').last().locator('.agent-msg-label'))
         .toHaveCount(0);
+    });
+  });
+
+  test.describe('session persistence', () => {
+    test.use({ homeProjectDirectories: false });
+    test('shows a late save failure while retaining the completed response and idle state', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, FAKE_SESSION_WRITES_LOST);
+      const messages = page.locator('.agent-messages:visible');
+      await expect(messages).toContainText('Resuming may miss part of the conversation');
+      await expect(messages).toContainText('Completed response before save failure.');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
     });
   });
 

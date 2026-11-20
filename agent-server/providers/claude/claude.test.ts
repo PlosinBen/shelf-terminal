@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { processMessage, createBlockMsgIdState, createClaudeBackend, isCompactBoundary } from './index';
+import { reportSessionWritesLost, processMessage, createBlockMsgIdState, createClaudeBackend, isCompactBoundary } from './index';
 import { mergeClaudeModels, rateLimitInfoToSegment, formatClaudeToolInput, extractToolResultText, askUserQuestionToPrompts, buildAskUserQuestionAnswerJson, parseTaskCreateOutput, parseTaskListOutput, reconcileTasks, renderPlan, shouldAdoptResolvedModel, stripToolErrorWrapper, normalizeTaskMessage, isForegroundBashTaskStart, isSubagentTaskStart, pickSessionTasksDir } from './helpers';
 import type { OutgoingMessage } from '../types';
 import type { ProviderModel, NormalizedTask } from '@shared/types';
@@ -1129,5 +1129,38 @@ describe('isCompactBoundary — /compact completion detection', () => {
     expect(isCompactBoundary({ type: 'system', subtype: 'init' } as any)).toBe(false);
     expect(isCompactBoundary({ type: 'assistant', message: { content: [] } } as any)).toBe(false);
     expect(isCompactBoundary({ type: 'result', subtype: 'success' } as any)).toBe(false);
+  });
+});
+
+
+describe('session persistence diagnostics', () => {
+  it.each([
+    { lost: ['global_config'], code: 'EDQUOT', text: 'configuration changes were not saved' },
+    { lost: ['transcript', 'global_config'], code: 'ENOSPC', text: 'Resuming may miss part of the conversation' },
+    { lost: ['future_kind'], code: 'EIO', text: 'Some session data could not be saved' },
+  ])('reports $lost without changing execution status', ({ lost, code, text }) => {
+    const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+    try {
+      const out: OutgoingMessage[] = [];
+      expect(reportSessionWritesLost({ type: 'system', subtype: 'session_writes_lost',
+        error_code: code, lost, session_id: 'current', transcript_session_ids: ['older'],
+      }, m => out.push(m))).toBe(true);
+      expect(out).toEqual([{ type: 'error', error: expect.stringContaining(text) }]);
+      if (!lost.includes('transcript')) expect(JSON.stringify(out)).not.toContain('Resuming may miss');
+      expect(log).toHaveBeenCalledWith('error', 'claude', 'Session persistence failed', {
+        sessionId: 'current', errorCode: code, lost, transcriptSessionIds: ['older'], hasOutputSink: true,
+      });
+    } finally { log.mockRestore(); }
+  });
+
+  it('logs even without an output sink and reports malformed known notifications', () => {
+    const log = vi.spyOn(serverLogger, 'serverLog').mockImplementation(() => {});
+    try {
+      expect(reportSessionWritesLost({ type: 'system', subtype: 'session_writes_lost' })).toBe(true);
+      expect(log).toHaveBeenCalledWith('error', 'claude', 'Session persistence failed', expect.objectContaining({
+        errorCode: 'unknown', lost: [], hasOutputSink: false,
+      }));
+      expect(reportSessionWritesLost({ type: 'system', subtype: 'init' })).toBe(false);
+    } finally { log.mockRestore(); }
   });
 });

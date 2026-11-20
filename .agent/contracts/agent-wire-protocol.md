@@ -246,6 +246,8 @@ Session-scoped transport/business error. It MUST NOT carry `executionId`; main l
 | `type` | `'error'` |
 | `error` | `string` |
 
+Claude 的 `session_writes_lost` 也使用此 session-scoped error：只通知保存問題，不附 executionId、不更改已完成回覆或 idle。訊息依 transcript/config 遺失分開描述；詳細 session IDs 與錯誤碼走 logger。
+
 ## auth_required — `type: 'auth_required'`
 
 Execution-scoped signal that the remote lost credentials. Forwarded to `IPC.AGENT_AUTH_REQUIRED`.

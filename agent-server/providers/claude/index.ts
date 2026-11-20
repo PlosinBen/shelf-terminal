@@ -914,6 +914,8 @@ export function createClaudeBackend(): ServerBackend {
   }
 
   function handleSdkMessage(msg: SDKMessage) {
+    // Persistence failures arrive after result, outside any active turn (agent-providers#58).
+    if (reportSessionWritesLost(msg, activeSend() ?? undefined)) return;
     const any = msg as any;
     if (typeof any.session_id === 'string' && any.session_id) lastSessionId = any.session_id;
     if (isClaudeAuthFailure(msg)) authFailureLatched = true;
@@ -1938,6 +1940,32 @@ function emitClaudeToolResult(
 // Accumulate rate-limit buckets across events so we can always send the full
 // set to the UI.  Key = bucket label (e.g. '5h', '7d').
 const rateLimitBuckets = new Map<string, StatusSegment>();
+
+/** Session-level persistence diagnostics must bypass turn attribution. */
+export function reportSessionWritesLost(message: unknown, send?: SendFn): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const msg = message as Record<string, unknown>;
+  if (msg.type !== 'system' || msg.subtype !== 'session_writes_lost') return false;
+  const strings = (value: unknown): string[] => Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string') : [];
+  const lost = strings(msg.lost);
+  const errorCode = typeof msg.error_code === 'string' ? msg.error_code : 'unknown';
+  const sessionId = typeof msg.session_id === 'string' ? msg.session_id : undefined;
+  const transcriptSessionIds = strings(msg.transcript_session_ids);
+  serverLog('error', 'claude', 'Session persistence failed', {
+    sessionId, errorCode, lost, transcriptSessionIds, hasOutputSink: !!send,
+  });
+  const reason = errorCode === 'ENOSPC' ? 'The disk is full.'
+    : errorCode === 'EDQUOT' ? 'The disk quota was exceeded.' : 'A storage error occurred.';
+  const details = [
+    ...(lost.includes('transcript') ? ['Conversation history was not fully saved. Resuming may miss part of the conversation.'] : []),
+    ...(lost.includes('global_config') ? ['Claude configuration changes were not saved.'] : []),
+    ...(lost.length === 0 || lost.some(kind => kind !== 'transcript' && kind !== 'global_config')
+      ? ['Some session data could not be saved.'] : []),
+  ];
+  send?.({ type: 'error', error: `Claude could not fully save session data. ${reason} ${details.join(' ')} Responses already received remain valid.` });
+  return true;
+}
 
 export function processMessage(msg: SDKMessage, send: SendFn, cwd: string, blockMsgIds: BlockMsgIdState, contentSend?: SendFn) {
   // DISPLAY content (reply / fold_* / stream / tool result) goes via `content`;

@@ -677,3 +677,12 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Revisit**：後續 Codex 升版或修改訊息／歷史轉換時回檢；實際收到相關 payload、使用者回報呈現問題，或上游明確第三方責任／改變契約時立即重評。待評估方案由 [改善清單 IMP-3](../improvements.md) 追蹤。
 
 **Sources**：[上游歷史呈現資訊](https://github.com/openai/codex/pull/60172)、[version 1 與無效指示處理](https://github.com/openai/codex/pull/60904)、[整輪通知邊界](https://github.com/openai/codex/pull/25710)、[Codex ACP adapter](https://github.com/agentclientprotocol/codex-acp/blob/ad09e0ead18511a65a0761cac832aa3087219b10/src/CodexEventHandler.ts)。
+
+
+## agent-providers#58 — Claude 保存失敗屬於 session 診斷 · [Decision]
+
+**Decision**：`system/session_writes_lost` 在 turn router 前處理，以 session-scoped `error` 顯示保存失敗；不改已完成回覆、busy/idle 或成功結果。`serverLog` error 記錄目前 session、error code、lost 類型與 transcript_session_ids；目前 session 不必等於遺失 transcript 的 session，不用這則通知覆寫恢復 ID。
+
+**Reason**：CLI 可在最後 result 之後、成功退出前才回報磁碟滿或配額不足。此時 turn 已關閉，依一般 turn routing 會遺失警告。`transcript` 表示恢復可能缺少對話，`global_config` 只表示 Claude 設定未保存；兩者必須分開描述。未知原因或 lost 類型保留通用保存失敗提示，沒有 UI sink 時仍留下 error log。
+
+**Boundary**：這是保存失敗的通知處理，不保證 CLI 能恢復未寫入資料，也不把收到的回覆視為推論失敗。SDK 未升版時以新版事件 fixture 驗證 adapter；fake-provider E2E 不證明真實磁碟滿或 quota 情境。

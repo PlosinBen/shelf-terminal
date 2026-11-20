@@ -20,3 +20,5 @@ export const FAKE_FILE_CHANGES = {
   DECLINED: 'file_changes:declined',
   LEGACY: 'file_changes:legacy',
 } as const;
+
+export const FAKE_SESSION_WRITES_LOST = 'session_writes_lost';

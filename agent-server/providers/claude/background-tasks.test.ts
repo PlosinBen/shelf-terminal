@@ -38,6 +38,7 @@ function controllableQuery(before: any[], after: any[]) {
   const it: any = gen();
   it.supportedModels = async () => [];
   it.supportedCommands = async () => [];
+  it.mcpServerStatus = async () => [];
   it.accountInfo = async () => ({ tokenSource: 'oauth' });
   it.interrupt = async () => {};
   return { it, release };
@@ -66,6 +67,24 @@ describe('claude detached-loop background tasks', () => {
     disposer?.();
     disposer = null;
     sdkQueryMock.mockReset();
+  });
+
+  it('reports transcript loss after the foreground result without changing completion', async () => {
+    const { it, release } = controllableQuery([INIT, FG_REPLY, FG_RESULT], [{
+      type: 'system', subtype: 'session_writes_lost', session_id: 's1',
+      error_code: 'ENOSPC', lost: ['transcript'], transcript_session_ids: ['earlier-session'],
+    }]);
+    sdkQueryMock.mockImplementation(() => it);
+    const sent: OutgoingMessage[] = [];
+    const backend = createClaudeBackend();
+    disposer = () => backend.dispose();
+    await backend.query({ prompt: 'go', cwd: '/tmp' }, m => sent.push(m));
+    const before = sent.length;
+    release();
+    await flush();
+    expect(sent.slice(before)).toContainEqual({ type: 'error', error: expect.stringContaining('Resuming may miss part of the conversation') });
+    expect(sent.filter(m => m.type === 'status' && m.state === 'idle')).toHaveLength(1);
+    expect(sent.some(m => m.type === 'message' && m.msgType === 'reply' && m.content === 'Started in background')).toBe(true);
   });
 
   it('resolves query() at the foreground result while the background is still pending (sendChain unblock)', async () => {
