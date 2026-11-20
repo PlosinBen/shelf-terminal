@@ -115,11 +115,13 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#9 — Copilot ACP 直接使用鎖版的 standalone CLI；SDK 僅負責 account quota  ·  [Decision]
 
-**現況**：Copilot conversation 直接 spawn standalone CLI binary + `--acp`（ACP over stdio）。`@github/copilot` 是 exact direct dependency，平台套件提供真正的 binary；`@github/copilot-sdk` 僅用於獨立的 `account.getQuota`，不參與 conversation transport（見 `agent-providers#26`）。
+**現況**：Copilot conversation 直接 spawn standalone CLI binary + `--acp`（ACP over stdio）。`@github/copilot` 是 exact direct dependency，平台套件提供真正的 binary；`@microsoft/copilot-sdk` 僅用於獨立的 `account.getQuota`，不參與 conversation transport（見 `agent-providers#26`）。SDK 的 `copilotCliVersion` 必須與 CLI pin 相符，測試同時檢查已安裝版本與精確 dependency 宣告；CLI 的 SDK RPC protocol 與 ACP protocol 是不同邊界。
 
 `resolveCopilotBinary()`（`copilot/helpers.ts`）三環境都指向平台套件 `@github/copilot-<platform>-<arch>` 的 standalone binary：dev 來自 node_modules；packaged 來自 extraResources `copilot-cli/@github/copilot-<plat>-<arch>/`；remote deploy 傳送對應平台 binary。`COPILOT_CLI_VERSION` 必須與宣告的 exact dependency、實裝 CLI 版本一致，drift-guard 同時檢查宣告與實裝版本。
 
 **Reason**：CLI 是 Shelf 直接啟動與部署的 runtime，不能只靠 SDK 的版本範圍間接決定。升級時先評估當時最新穩定版，再鎖定通過相容性驗證的確切版本；檢查所有支援平台的套件、ACP lifecycle/native controls、launch flags，以及保留的 SDK quota 路徑。預發版與 floating latest 不進 dependency pin。
+
+**Runtime / packaging boundary**：SDK quota 使用 bundled JS + standalone CLI stdio，不需 SDK optional in-process companions 或 koffi native；packaging 明確排除這些 native assets，standalone CLI 仍從 `@github/copilot-*` 放入 extraResources。若改用 in-process transport，必須重新建立 native 配送與 ABI 驗證。Linux CLI 官方 manifest 宣告使用系統 OpenSSL，需 libssl.so.3／libcrypto.so.3；Shelf 的 arch/libc/Node gate 不檢查這兩個動態載入依賴。musl 套件存在或 `--version` 成功不等於 headless/ACP 可啟動：Alpine arm64 有既有 native bootstrap 的 Node-API symbols／cliParse 或 cliUserArgs 失敗，不能用 version-only deploy test 宣稱對話正常。
 
 **Do not change casually because**：不要將 conversation 改回 SDK transport。升 CLI 時同步更新 runtime pin，確認遠端套件可下載並執行部署後的版本檢查；SDK 不必跟著無條件升級，但它對新 binary 的 quota 相容性仍須驗證。
 
@@ -127,7 +129,7 @@ SDK 0.3.159 **並存**兩種 compact 完成訊號:`status` 形狀(`subtype:'stat
 
 ## agent-providers#10 — Copilot 互動式登入靠 CLI `copilot login` device flow，不靠 SDK、不自刻 client_id  ·  [Decision]
 
-**背景**：Copilot auth 會過期，需要 app 內一鍵重新登入。`@github/copilot-sdk` **不提供互動式帳號登入**：SDK↔CLI 是 headless stdio-RPC（無 TTY，不吐 device URL），唯一帳號 auth RPC `account.login` 只把「已拿到的 `{host,login,token}`」存進 keychain，**不發起** device flow（沒有回 `verification_uri`/`user_code` 的 RPC；會回 URL 的只有 MCP oauth，與帳號無關）。
+**背景**：Copilot auth 會過期，需要 app 內一鍵重新登入。Shelf 的 SDK quota client 使用 headless stdio-RPC 與既有登入，不負責互動式登入；帳號 device flow 由 standalone CLI 的 login 命令處理。
 
 **Decision**：由 agent-server spawn CLI 的 `copilot login`（OAuth device flow）驅動登入。實測（Docker headless）確認：無瀏覽器/無 TTY 下它**印出 `To authenticate, visit <url> and enter code <XXXX-XXXX>` 後持續輪詢**，格式穩定；local（有瀏覽器）時 CLI 還會自動開瀏覽器。所以：
 - **CLI 擁有 OAuth client_id**，我們不碰未公開的 client_id（自刻 device flow 會被迫拿它 → 破裂風險）。
@@ -286,8 +288,8 @@ ACP execute 有有效字串 rawInput.command 時輸出 Command 與獨立 details
 
 ## agent-providers#26 — copilot account credit 走 SDK `account.getQuota`（config-home auth）+ 每 host cache-aside(15min)+ execution-end 觸發,executionId-less status 送渲染  ·  [Decision]
 
-**Decision**：copilot 的 **account-level AI-credit**（premium requests 用量）不走 ACP,改用 `@github/copilot-sdk` 的 `account.getQuota`。封裝在 `agent-server/providers/copilot/credit.ts`:
-- **Fetch**：`new CopilotClient({ connection: RuntimeConnection.forStdio({ path: <shipped copilot bin> }), env: copilotEnv(appId), useLoggedInUser: true })` → `start()` → `rpc.account.getQuota({})` → `stop()`。`normalizeCredit` 取 `quotaSnapshots.premium_interactions` → `StatusSegment`（`premium: used/total (pct%)`,severity 隨剩餘 %;`isUnlimitedEntitlement`/缺欄位 → `null` 不顯示）。
+**Decision**：copilot 的 **account-level AI-credit**（premium requests 用量）不走 ACP，使用 `@microsoft/copilot-sdk` 的 `account.getQuota`。封裝在 `agent-server/providers/copilot/credit.ts`:
+- **Fetch**：`new CopilotClient({ mode: 'coding-agent', runtime: RuntimeConnection.forSpawnedStdio({ path: <shipped copilot bin>, env: copilotEnv(appId) }), github: { useLoggedInUser: true } })` → `start()` → `rpc.account.getQuota({})` → `stop()`。維持明確 stdio transport，不使用 SDK 的 in-process runtime；`mode` 不會啟動對話，quota client 不建立 session。`normalizeCredit` 取 `quotaSnapshots.premium_interactions` → `StatusSegment`（`premium: used/total (pct%)`,severity 隨剩餘 %;`isUnlimitedEntitlement`/缺欄位 → `null` 不顯示）。
 - **Auth = config-home,不碰 token 檔**：`useLoggedInUser:true` + `env.COPILOT_HOME = ~/.shelf/apps/<appId>/copilot`（ACP session 用的同一個 per-app config-home）→ SDK 用 CLI 既有登入態認證,不讀 copilot 私有 token 檔。守住 device-scoped-auth / provider-boundary（`#15`/`#16`）。
 - **Cache-aside**：`refreshCopilotCredit` 打 dispatcher 的 per-host cache（`agent-dispatch.md` 的 `ModelCacheClient`）,**TTL 15min**。key = 單一 `account-credit`（**不帶 appId**:一個 host = 一個 config-home = 一個 user)。沒有 dispatcher cache 時退化用 process-local fallback（仍受 TTL 節流）。任何 error → fail-quiet 不顯示。
 - **觸發 = execution-end**（無開場 fetch,對齊 claude 首輪後才有 status）。`exec.ts` 在 `backend.query` 後 fire-and-forget `backend.refreshAccountStatus?.(cache, send, appId)`（`ServerBackend` 選配 hook）,用 **base send（executionId-less）**。
@@ -448,9 +450,11 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 
 **Fix / note：** ACP driver 的 update router 與 render sink 跟 session 同壽命；所有 ACP renderable updates 一律繼續走同一條 session content sink，所以 late final message 會按到達時序正常顯示。Copilot **Autopilot 的一般任務**額外以 provider-native `task_complete` terminal tool update 作 execution boundary：每個 prompt 都必須在 `session/prompt` 開始前先安裝 completion observer，因為 restored session 可能等到 prompt 已開始才送 authoritative `current_mode_update:'autopilot'`；prompt settlement 時再依當下 mode 決定是否等待。observer 先記住帶 title 的 tool id，後續同 id 的 `status:'completed'` 才 emit idle、完成 reader 並釋放下一則 queued send；`session/prompt` 提前回覆時仍維持 running。ACP 已透過 `available_commands_update` advertise 的 slash command（例如 `/compact`）由 command handler 自己完成，且不會呼叫 Autopilot `task_complete`，因此以該 command 的 prompt settlement 收尾；只看 `/` 前綴但未 advertise 的文字仍視為一般任務。其他 mode 沒有可靠 terminal signal，也以 prompt settlement 收尾並立即清除 observer/watchdog；因此 Copilot tab 即使 visually idle 仍保留 double-ESC stop affordance。
 
-使用者要求取消是獨立的 control-plane boundary：若 Copilot 的 `session/prompt` 仍 active，provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 prompt 回傳 `stopReason:'cancelled'` 才算成功；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。若 prompt response **已先 settlement**，就不存在可等的 cancellation acknowledgement，但 Copilot autopilot 仍可能實質工作；此時先 best-effort `session/cancel`，再關閉 ACP connection 並 kill CLI process，下一輪從 persisted session resume。這是保證 stop 的 force fallback，不改 UI idle 語意。
+使用者要求取消是獨立的 control-plane boundary：若 Copilot 的 `session/prompt` 仍 active，provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 prompt 回傳 `stopReason:'cancelled'`；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。無論 live prompt 或已 settlement，最後都解除 completion gate、forget driver session、關閉 ACP connection 並 kill CLI process，下一輪從 persisted session restore。原因是 CLI 的 cancel 會保留背景 shell，單憑 cancelled 不足以維持 Shelf 的停止效果。已 settlement 路徑沒有 acknowledgement 可等，採 best-effort cancel 後 teardown；活著的 CLI 無法送出 termination signal 時不得回報 stop 成功。此處涵蓋 CLI 管理的 attached shell，不承諾終止 detached 外部程序；不改 UI idle 語意。
 
 Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` 暫存，terminal translate 後立即 evict；reset/forget 清空。driver 不保存 `textByMsg`，文字 delta 的累積與持久化只由 renderer 負責。`activeExecutionSend` 僅供當下 tool permission round-trip，不是一般 notification/content sink。
+
+`kill()` 成功只代表 termination signal 已送出，stop 不同步等待 OS process exit；不得把 stop 的返回時點當成所有子程序已消失的證據。需要確認實際退出時，應檢查 PID／exit，並區分 CLI 管理的 attached shell 與 detached 外部程序。
 
 **Do not change casually because：** 不要在 prompt 開始前用 cached mode 決定是否安裝 completion observer；mode update 與第一個 `task_complete` update 都可能在 prompt 內到達，事後補 observer 已經漏訊號。不要恢復 per-prompt update queue、`setImmediate`/短 quiet-period barrier、current/last prompt attribution 或把一般 stopReason 當 content gate。Autopilot completion 必須追蹤 `task_complete` 的 tool id，因 terminal partial update 可能省略 title；slash 例外必須比對 agent advertise 的 command name，不能把任意 slash-like 使用者文字都當 command。所有非等待路徑以及 stop/reconnect/dispose 都必須解除 completion gate，否則 watchdog、execution reader 與 send queue 會永久卡住。30 分鐘 watchdog 只處理上游漏訊號的故障：逾時明確 emit error 後 idle，不是正常完成判斷。active prompt 時不可把 `session/cancel` 已寫入 pipe 當成取消成功；post-prompt 因已無 ack boundary，必須 force-close，不能只送 notification 後假裝已停。
 

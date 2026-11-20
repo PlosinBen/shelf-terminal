@@ -1,6 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { normalizeCredit, refreshCopilotCredit, __resetCreditCacheForTests } from './credit';
+import { normalizeCredit, refreshCopilotCredit, fetchCopilotCredit, __resetCreditCacheForTests } from './credit';
 import type { ModelCacheClient, OutgoingMessage, StatusSegment } from '../types';
+
+const sdk = vi.hoisted(() => {
+  const client = { start: vi.fn(), stop: vi.fn(), rpc: { account: { getQuota: vi.fn() } } };
+  return { client, construct: vi.fn(function () { return client; }), runtime: vi.fn((options: unknown) => options) };
+});
+vi.mock('@microsoft/copilot-sdk', () => ({ CopilotClient: sdk.construct, RuntimeConnection: { forSpawnedStdio: sdk.runtime } }));
+vi.mock('./helpers', () => ({
+  resolveCopilotBinary: () => '/fixture/copilot',
+  copilotEnv: (appId: string) => ({ COPILOT_HOME: `/fixture/${appId}/copilot` }),
+}));
+
+describe('quota SDK transport', () => {
+  beforeEach(() => { vi.clearAllMocks(); sdk.client.start.mockResolvedValue(undefined); sdk.client.stop.mockResolvedValue([]); });
+
+  it('uses the standalone CLI and app config-home with logged-in auth, then stops the transient client', async () => {
+    sdk.client.rpc.account.getQuota.mockResolvedValue(snap());
+    expect(await fetchCopilotCredit('app-one')).toEqual(normalizeCredit(snap()));
+    expect(sdk.construct).toHaveBeenCalledWith({
+      mode: 'coding-agent',
+      runtime: { path: '/fixture/copilot', env: { COPILOT_HOME: '/fixture/app-one/copilot' } },
+      github: { useLoggedInUser: true },
+    });
+    expect(sdk.client.start).toHaveBeenCalledOnce();
+    expect(sdk.client.rpc.account.getQuota).toHaveBeenCalledWith({});
+    expect(sdk.client.stop).toHaveBeenCalledOnce();
+  });
+
+  it('cleans up when quota authentication fails and returns no fabricated quota', async () => {
+    sdk.client.rpc.account.getQuota.mockRejectedValue(new Error('Not authenticated'));
+    expect(await fetchCopilotCredit('app-one')).toBeNull();
+    expect(sdk.client.stop).toHaveBeenCalledOnce();
+  });
+
+  it('does not start a client without an app identity', async () => {
+    expect(await fetchCopilotCredit(undefined)).toBeNull();
+    expect(sdk.construct).not.toHaveBeenCalled();
+  });
+});
 
 function fakeCache() {
   const store = new Map<string, unknown>();

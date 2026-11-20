@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { ChildProcess } from 'node:child_process';
 import { AGENT_INPUT_SOURCE, AGENT_REPLY_REQUIREMENT, createAgentInputMessage } from '@shared/agent-input';
 import * as serverLogger from '../../server-logger';
 import * as os from 'node:os';
@@ -370,7 +371,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     } finally { backend.dispose(); }
   });
 
-  it('confirms stop only when the active ACP prompt returns cancelled', async () => {
+  it.each(['resume', 'load'] as const)('closes the CLI after cancelled and restores the persisted session via %s', async (restoreMethod) => {
     let promptStarted!: () => void;
     const started = new Promise<void>((resolve) => { promptStarted = resolve; });
     let cancelParams: unknown;
@@ -380,7 +381,20 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       onPrompt: () => promptStarted(),
       onCancel: (params) => { cancelParams = params; },
     });
-    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const kill = vi.fn(() => true);
+    const resume = vi.fn();
+    const newSession = vi.fn();
+    const next = createMockAcpAgent({
+      agentCapabilities: restoreMethod === 'resume' ? { sessionCapabilities: { resume: {} } } : { loadSession: true },
+      onResumeSession: resume,
+      onLoadSession: resume,
+      onNewSession: newSession,
+      updatesOnPrompt: [{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'continued' } }],
+    });
+    const openAgent = vi.fn()
+      .mockReturnValueOnce({ target: mock, child: { kill } as unknown as ChildProcess })
+      .mockReturnValue({ target: next });
+    const backend = createCopilotBackend({ openAgent, getShelfMcp: async () => null });
 
     const queryDone = backend.query({ prompt: 'keep working', cwd: '/tmp/project' }, () => {});
     await started;
@@ -388,6 +402,15 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     await queryDone;
 
     expect(cancelParams).toEqual({ sessionId: 'mock-session' });
+    expect(kill).toHaveBeenCalledOnce();
+    const out: OutgoingMessage[] = [];
+    await backend.query({ prompt: 'continue', cwd: '/tmp/project', restoreContext: {
+      sessionId: 'shelf-session', provider: 'copilot', updatedAt: 1, lastSdkSessionId: 'mock-session',
+    } }, message => out.push(message));
+    expect(openAgent).toHaveBeenCalledTimes(2);
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'mock-session' }));
+    expect(newSession).not.toHaveBeenCalled();
+    expect(out).toContainEqual(expect.objectContaining({ type: 'stream', content: 'continued' }));
     backend.dispose();
   });
 
@@ -399,14 +422,27 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       stopReason: 'end_turn',
       onPrompt: () => promptStarted(),
     });
-    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const kill = vi.fn(() => true);
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock, child: { kill } as unknown as ChildProcess }), getShelfMcp: async () => null });
 
     const queryDone = backend.query({ prompt: 'keep working', cwd: '/tmp/project' }, () => {});
     await started;
     await expect(backend.stop()).rejects.toThrow('expected cancelled, received end_turn');
     await queryDone;
-
+    expect(kill).toHaveBeenCalledOnce();
     backend.dispose();
+  });
+
+  it('reports failure when the CLI cannot be terminated instead of confirming stop', async () => {
+    const mock = createMockAcpAgent();
+    const backend = createCopilotBackend({
+      openAgent: () => ({ target: mock, child: { kill: () => false, exitCode: null, signalCode: null } as unknown as ChildProcess }),
+      getShelfMcp: async () => null,
+    });
+    try {
+      await backend.query({ prompt: 'work', cwd: '/tmp/project' }, () => {});
+      await expect(backend.stop()).rejects.toThrow('could not terminate CLI');
+    } finally { backend.dispose(); }
   });
 
   it('still sends session/cancel after the prompt response has settled', async () => {

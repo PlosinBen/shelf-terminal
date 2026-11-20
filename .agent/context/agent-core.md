@@ -18,7 +18,7 @@ related:
 
 **Decision**: Agent tab 直接呼叫 AI provider SDK（不是解析 terminal scrollback）：
 - Claude → `@anthropic-ai/claude-agent-sdk`，spawn bundled `claude` binary
-- Copilot → spawn standalone `copilot` CLI binary + `--acp`（ACP over stdio），不再用 `@github/copilot-sdk`（cutover 後細節見 `agent-providers#9`）
+- Copilot → spawn standalone `copilot` CLI binary + `--acp`（ACP over stdio）；SDK 僅處理獨立 account quota（見 `agent-providers#9`）
 - Codex → spawn pinned `codex app-server`，以 JSON-RPC 驅動 thread/turn、auth、config、MCP/skills 與 account status
 
 兩者都在 `agent-server` bundle 裡執行，透過 stdin/stdout JSON line protocol 跟 main process 通訊。Binary 透過 `electron-builder` 的 `files` + `asarUnpack` 打包進 app（per-platform：claude-agent-sdk-{darwin|linux|win32}-{arch}、copilot-{darwin|linux|win32}-{arch}）。**Windows build 額外 force-install `claude-agent-sdk-linux-x64`**（CI step，因為 WSL agent-server 跑在 Linux）；npm `os` 限制用 `--force --no-save` 繞過。

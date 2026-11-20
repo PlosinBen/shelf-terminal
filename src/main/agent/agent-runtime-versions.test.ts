@@ -93,6 +93,9 @@ describe('COPILOT_CLI_VERSION', () => {
     const pkg = JSON.parse(readFileSync('node_modules/@github/copilot/package.json', 'utf8'));
     expect(root.dependencies['@github/copilot']).toBe(COPILOT_CLI_VERSION);
     expect(COPILOT_CLI_VERSION).toBe(pkg.version);
+    const sdk = JSON.parse(readFileSync('node_modules/@microsoft/copilot-sdk/package.json', 'utf8'));
+    expect(root.dependencies['@microsoft/copilot-sdk']).toBe(sdk.version);
+    expect(sdk.copilotCliVersion).toBe(COPILOT_CLI_VERSION);
   });
 });
 

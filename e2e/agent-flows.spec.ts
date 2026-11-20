@@ -1308,6 +1308,22 @@ test.describe('agent flows via fake provider', () => {
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
   });
 
+  test('Copilot can send another message after stopping a live prompt', async ({ shelfApp: { page } }) => {
+    await setupProject(page);
+    await page.locator('.tab-add').click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+    await expect(page.locator('.agent-view:visible')).toBeVisible({ timeout: 5_000 });
+    await sendAgentPrompt(page, 'delay:10000|text:cancelled-copilot-response');
+    await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
+    await page.locator('.agent-textarea:visible').focus();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+    await sendAgentPrompt(page, 'text:copilot-continued-after-stop');
+    await expect(page.locator('.agent-messages:visible')).toContainText('copilot-continued-after-stop');
+    await expect(page.locator('.agent-msg-reply:visible', { hasText: 'cancelled-copilot-response' })).toHaveCount(0);
+  });
+
   test('Copilot double-Esc stops late work even after the prompt reports idle', async ({ shelfApp: { page } }) => {
     await setupProject(page);
     await page.locator('.tab-add').click({ button: 'right' });

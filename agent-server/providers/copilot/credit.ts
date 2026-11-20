@@ -4,7 +4,7 @@
 // surface it as a status segment. Authenticated purely via config-home
 // (`COPILOT_HOME` + `useLoggedInUser`) — NO token is read or passed, so the
 // device-scoped-auth / provider boundary is preserved (Shelf only hands a PATH).
-import { CopilotClient, RuntimeConnection } from '@github/copilot-sdk';
+import { CopilotClient, RuntimeConnection } from '@microsoft/copilot-sdk';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import { resolveCopilotBinary, copilotEnv } from './helpers';
 import { serverLog } from '../../server-logger';
@@ -50,9 +50,12 @@ export async function fetchCopilotCredit(appId: string | undefined): Promise<Sta
   let client: CopilotClient | undefined;
   try {
     client = new CopilotClient({
-      connection: RuntimeConnection.forStdio({ path: bin }),
-      env: copilotEnv(appId) as Record<string, string | undefined>,
-      useLoggedInUser: true,
+      mode: 'coding-agent',
+      runtime: RuntimeConnection.forSpawnedStdio({
+        path: bin,
+        env: copilotEnv(appId) as Record<string, string | undefined>,
+      }),
+      github: { useLoggedInUser: true },
     });
     await client.start();
     const quota = await client.rpc.account.getQuota({});

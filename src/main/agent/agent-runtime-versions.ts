@@ -84,7 +84,7 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
  * exact direct dependency and remote download version aligned; a unit test
  * guards both declared and installed versions.
  */
-export const COPILOT_CLI_VERSION = '1.0.103';
+export const COPILOT_CLI_VERSION = '1.0.114';
 
 /**
  * Codex app-server CLI and the ACP SDK used by Copilot have independent pins.

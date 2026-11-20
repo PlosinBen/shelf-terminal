@@ -1118,26 +1118,40 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
 
     async stop(): Promise<void> {
       invocationEpoch++;
-      // Cooperative cancel while session/prompt is live; after that response has
-      // already settled, Copilot autopilot may still emit session work. There is
-      // no remaining request whose stopReason can acknowledge cancellation, so
-      // notify first and then tear down the ACP process to guarantee it stopped.
+      // Cancel alone preserves background shells in the pinned CLI. Keep the
+      // live prompt's acknowledgement, then close the process on both paths;
+      // the next turn restores the persisted session (agent-providers#37).
       permissions.cancelAll();
       const promptCompletion = activePromptCompletion;
       const liveConn = conn;
       const liveSession = session;
       const liveChild = child;
       if (!liveConn || !liveSession) throw new Error('copilot cancel failed: no active ACP session');
-      if (!promptCompletion) {
-        activeAutopilotCompletion?.resolve('terminated');
-        try {
+      try {
+        if (promptCompletion) {
           await liveConn.agent.notify(methods.agent.session.cancel, { sessionId: liveSession.sessionId });
-        } catch (err) {
-          serverLog('warn', 'copilot', `post-prompt session/cancel failed; forcing connection close: ${(err as Error)?.message ?? String(err)}`);
+          const stopReason = await promptCompletion;
+          if (stopReason !== 'cancelled') {
+            throw new Error(`copilot cancel failed: expected cancelled, received ${stopReason}`);
+          }
+        } else {
+          try {
+            await liveConn.agent.notify(methods.agent.session.cancel, { sessionId: liveSession.sessionId });
+          } catch (err) {
+            serverLog('warn', 'copilot', `post-prompt session/cancel failed; forcing connection close: ${(err as Error)?.message ?? String(err)}`);
+          }
+        }
+      } finally {
+        activeAutopilotCompletion?.resolve('terminated');
+        driver.forget(liveSession.sessionId);
+        try { liveConn.close(); } catch (err) {
+          serverLog('warn', 'copilot', `ACP close failed during stop (session=${liveSession.sessionId}): ${String(err)}`);
+        }
+        try {
+          if (liveChild && !liveChild.kill() && liveChild.exitCode === null && liveChild.signalCode === null) {
+            throw new Error(`copilot stop failed: could not terminate CLI (session=${liveSession.sessionId})`);
+          }
         } finally {
-          driver.forget(liveSession.sessionId);
-          try { liveConn.close(); } catch { /* best-effort before process kill */ }
-          try { liveChild?.kill(); } catch { /* best-effort; connection is already closed */ }
           if (conn === liveConn) {
             conn = null;
             child = null;
@@ -1147,12 +1161,6 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             sessionCwd = null;
           }
         }
-        return;
-      }
-      await liveConn.agent.notify(methods.agent.session.cancel, { sessionId: liveSession.sessionId });
-      const stopReason = await promptCompletion;
-      if (stopReason !== 'cancelled') {
-        throw new Error(`copilot cancel failed: expected cancelled, received ${stopReason}`);
       }
     },
 
