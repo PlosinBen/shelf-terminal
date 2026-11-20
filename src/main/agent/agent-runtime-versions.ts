@@ -87,13 +87,12 @@ export function claudeTarballUrl(t: RuntimeTarget, version: string): string {
 export const COPILOT_CLI_VERSION = '1.0.103';
 
 /**
- * Codex ACP runtime set. These packages form one tested protocol/runtime unit:
- * the ACP adapter launches the Codex CLI and both speak through the ACP SDK.
- * Keep package.json dependencies exact; the companion test guards both the
- * declared specifiers and installed versions against accidental range drift.
+ * Codex app-server CLI and the ACP SDK used by Copilot have independent pins.
+ * Keep package.json dependencies exact; companion tests guard the declared
+ * specifiers and installed versions against accidental range drift.
  */
 export const CODEX_CLI_VERSION = '0.163.0';
-export const ACP_SDK_VERSION = '1.3.0';
+export const ACP_SDK_VERSION = '2.8.0';
 
 /** Codex ships one Linux package per CPU architecture (no musl support in Shelf). */
 export function codexNativePackageName(arch: 'x64' | 'arm64'): string {

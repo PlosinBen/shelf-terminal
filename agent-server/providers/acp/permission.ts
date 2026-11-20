@@ -10,7 +10,7 @@ import type {
   RequestPermissionResponse,
   PermissionOption,
   PermissionOptionKind,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import type { OutgoingMessage, SendFn } from '../types';
 import type { PermissionHandler } from './connection';
 

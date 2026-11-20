@@ -1,4 +1,4 @@
-import type { SessionUpdate } from '@agentclientprotocol/sdk';
+import type { SessionUpdate } from '@agentclientprotocol/sdk/unstable';
 
 /** Remove only the success trailer corroborated by a structured shell ID. */
 export function normalizeCopilotCommandOutput(update: SessionUpdate): SessionUpdate {

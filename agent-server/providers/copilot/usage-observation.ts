@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SessionNotification } from '@agentclientprotocol/sdk';
+import type { SessionNotification } from '@agentclientprotocol/sdk/unstable';
 import { serverLog } from '../../server-logger';
 
 export const COPILOT_USAGE_UPDATE = 'usage_update';

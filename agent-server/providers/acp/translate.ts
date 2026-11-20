@@ -18,7 +18,7 @@ import type {
   ToolCallContent,
   ToolCallStatus,
   ToolKind,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import type { OutgoingMessage } from '../types';
 import { severityFromUtilization } from '../types';
 import { displayFilePath } from '../display-path';

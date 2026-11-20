@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { client, type SessionUpdate } from '@agentclientprotocol/sdk';
+import { client, PROTOCOL_VERSION, type SessionUpdate } from '@agentclientprotocol/sdk/unstable';
 import { createMockAcpAgent } from './mock-agent';
+import { openAcpConnection } from './connection';
 import { translateSessionUpdate } from './translate';
 import type { OutgoingMessage } from '../types';
 
@@ -8,6 +9,30 @@ import type { OutgoingMessage } from '../types';
 // (initialize → session/new → prompt → session/update stream → stop) and that the
 // pure translate layer maps the streamed updates onto Shelf wire primitives.
 describe('mock ACP agent (runtime SDK integration)', () => {
+  it('preserves draft plan notifications through the production SDK connection', async () => {
+    const updates: SessionUpdate[] = [
+      { sessionUpdate: 'plan_update', plan: {
+        type: 'items', planId: 'plan-1',
+        entries: [{ content: 'Inspect', priority: 'medium', status: 'in_progress' }],
+      } },
+      { sessionUpdate: 'plan_removed', planId: 'plan-1' },
+    ];
+    const received: SessionUpdate[] = [];
+    const conn = openAcpConnection(createMockAcpAgent({ updatesOnPrompt: updates }), {
+      onSessionUpdate: ({ update }) => received.push(update),
+    });
+    try {
+      await conn.initialized;
+      const session = await conn.agent.request('session/new', { cwd: '/tmp/project', mcpServers: [] });
+      await conn.agent.request('session/prompt', {
+        sessionId: session.sessionId, prompt: [{ type: 'text', text: 'plan' }],
+      });
+      expect(received).toEqual(updates);
+    } finally {
+      conn.close();
+    }
+  });
+
   it('drives a full prompt turn and translates the update stream', async () => {
     const updates: SessionUpdate[] = [
       { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello ' }, messageId: 'm1' },
@@ -19,6 +44,7 @@ describe('mock ACP agent (runtime SDK integration)', () => {
 
     const wire: OutgoingMessage[] = [];
     const stopReason = await client({ name: 'test-client' }).connectWith(mock, async (ctx) => {
+      await ctx.request('initialize', { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} });
       const session = await ctx.buildSession('/tmp/project').start();
       expect(session.sessionId).toBe('mock-session');
       const done = session.prompt('hi there');
@@ -34,7 +60,7 @@ describe('mock ACP agent (runtime SDK integration)', () => {
     expect(wire).toEqual([
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'Hello ' },
       { type: 'stream', msgId: 'm1', streamType: 'text', content: 'world' },
-      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read file', body: { content: '' } },
+      { type: 'message', msgId: 't1', msgType: 'fold_code', label: 'Read', subtitle: 'Read file', details: '', body: { content: '' } },
     ]);
   });
 

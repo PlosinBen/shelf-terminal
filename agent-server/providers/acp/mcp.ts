@@ -7,7 +7,7 @@
 // `${VAR}` resolution + validation already happened in `mcp-config.ts`
 // (loadProjectedMcpServers); this is a pure shape transform.
 
-import type { McpServer } from '@agentclientprotocol/sdk';
+import type { McpServer } from '@agentclientprotocol/sdk/unstable';
 import type { McpServersFile } from '@shared/mcp';
 
 /** Map an env/header record to ACP's `[{ name, value }]` list form. */

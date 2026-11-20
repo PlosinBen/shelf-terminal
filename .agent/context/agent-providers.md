@@ -655,3 +655,11 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Reason**：Claude Agent SDK 0.3.159 內建的 JSON Schema 轉換器與外部 Zod 4.6.7 的內部表示不相容，tools/list 會遺失字串 minLength/maxLength；同一 schema 經專案 MCP SDK 可完整保留。實際輸入驗證仍會拒絕非法值，但模型看到的規格也必須正確。使用已安裝的 MCP SDK 將修正限於 Claude 工具註冊邊界，避免全專案降級 Zod 或修改套件內部欄位。
 
 **Verification**：smoke 使用產品 factory 與真實 in-memory MCP transport，比對所有工具的 input schema，驗證缺省／空字串／錯誤型別不會送往 main，以及合法輸入的操作映射。跨 adapter 契約測試只 mock Claude query 與 main RPC，Claude／HTTP 工具均透過實際 transport 驗證。這些測試不包含真實模型或 CLI 啟動。
+
+## agent-providers#56 — ACP v1 的 draft 事件使用一致的 SDK 入口  ·  [Decision]
+
+**Decision**：ACP transport、Copilot adapter、相關型別與 in-process mock 統一從 `@agentclientprotocol/sdk/unstable` 匯入。使用的協定仍是 ACP v1；SDK 版本由 dependency 與 ACP_SDK_VERSION 一起釘選。
+
+**Reason**：SDK 2.x 的預設入口只接受 stable schema，會拒絕既有處理分支涵蓋的 `plan_update`／`plan_removed` 通知。只改 TypeScript cast 不能改變 runtime validation；使用完整的 v1 unstable 入口可保留既有通知接收範圍，不需切換 draft v2。
+
+**Do not change casually because**：SDK 的 stable／unstable apps 不可混用於同一條 in-process connection。升版時需核對型別及實際 schema，並以 production connection 的通知接收測試確認；`/unstable` 不保證 draft payload 永遠不變。Transport 接收成功也不代表所有 draft plan 格式已完整映射成 UI。

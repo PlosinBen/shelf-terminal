@@ -6,6 +6,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
+// Keep runtime validation aligned with draft v1 event types; agent-providers#56.
 import {
   client,
   ndJsonStream,
@@ -17,7 +18,7 @@ import {
   type SessionNotification,
   type ClientRequestHandlersByMethod,
   type InitializeResponse,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 
 /** Handle over a live ACP connection. `agent` drives agent-side methods. */
 export interface AcpConnection {

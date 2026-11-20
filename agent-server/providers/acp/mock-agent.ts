@@ -19,7 +19,7 @@ import {
   type SessionModeState,
   type SessionConfigOption,
   type AvailableCommand,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 
 export interface MockAgentScript {
   /** Capabilities returned by initialize (default mirrors pinned Copilot's legacy resume signal). */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { PermissionOption, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type { PermissionOption, RequestPermissionResponse } from '@agentclientprotocol/sdk/unstable';
 import { createMockAcpAgent } from './mock-agent';
 import { openAcpConnection } from './connection';
 import { createSessionDriver } from './client';

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { SessionConfigOption, SessionModeState, AvailableCommand } from '@agentclientprotocol/sdk';
+import type { SessionConfigOption, SessionModeState, AvailableCommand } from '@agentclientprotocol/sdk/unstable';
 import { mapSessionCapabilities, currentSelections, mapSessionCapabilitiesWithCurrent, configOptionIdForCategory } from './capabilities';
 
 const configOptions: SessionConfigOption[] = [

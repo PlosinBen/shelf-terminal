@@ -12,7 +12,7 @@ import type {
   SessionConfigSelectOption,
   SessionConfigSelectGroup,
   AvailableCommand,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import type { ProviderCapabilities, CycleOption } from '../types';
 import { SHELF_PERMISSION_CONTROL } from '@shared/permission-controls';
 

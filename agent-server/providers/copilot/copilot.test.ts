@@ -9,7 +9,7 @@ import type {
   SessionUpdate,
   SessionConfigOption,
   SessionModeState,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import { createMockAcpAgent } from '../acp/mock-agent';
 import { COPILOT_AUTOPILOT_MODE_ID, COPILOT_PLAN_LOG_TAG, createCopilotBackend } from './index';
 import { COPILOT_ACP_CANCELLATION_NOTICE } from './helpers';

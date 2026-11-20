@@ -23,7 +23,7 @@ import {
   type SessionNotification,
   type StopReason,
   type AvailableCommand,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import type { AgentPrefs } from '@shared/types';
 import { PERMISSION_CONTROL_STRATEGIES, type PermissionControlCapabilities } from '@shared/permission-controls';

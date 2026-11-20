@@ -18,7 +18,7 @@ import {
   type McpServer,
   type AvailableCommand,
   type SessionConfigOption,
-} from '@agentclientprotocol/sdk';
+} from '@agentclientprotocol/sdk/unstable';
 import type { AgentAttachment } from '@shared/types';
 import type { OutgoingMessage, SendFn } from '../types';
 import { translateSessionUpdate, createToolMetaCarry, imageContentBlocks, DEFAULT_AGENT_MSG_ID } from './translate';

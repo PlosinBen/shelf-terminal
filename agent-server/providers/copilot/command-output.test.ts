@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { SessionUpdate } from '@agentclientprotocol/sdk';
+import type { SessionUpdate } from '@agentclientprotocol/sdk/unstable';
 import { normalizeCopilotCommandOutput } from './command-output';
 
 const event = (content: string, shellId: unknown = '14', status = 'completed'): SessionUpdate => ({
