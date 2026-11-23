@@ -219,6 +219,12 @@ test.describe('agent flows via fake provider', () => {
       await expect(copyOutput.locator('svg rect')).toHaveCount(1);
       await card.getByRole('button', { name: 'View tail', exact: true }).click();
       await expect(card.locator('.fold-body-code')).toHaveText(output);
+      const outputStyle = await card.locator('.fold-body-code').evaluate(el => {
+        const style = getComputedStyle(el);
+        return { overflows: el.scrollHeight > el.clientHeight, scrollbar: style.scrollbarColor, background: style.backgroundColor };
+      });
+      expect(outputStyle.overflows).toBe(true);
+      expect(outputStyle.scrollbar.startsWith(outputStyle.background + ' ')).toBe(false);
       await expect.poll(() => card.locator('.fold-body-code').evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
       await card.getByRole('button', { name: 'Copy output', exact: true }).click();
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
