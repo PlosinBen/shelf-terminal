@@ -250,6 +250,36 @@ describe('main projects repository', () => {
     expect(repository.getAll().map(p => p.id)).toEqual(['a', 'second']);
   });
 
+  it('preserves orphan records when the staged Agent history no longer matches', async () => {
+    const orphan = { ...project('child', 'gone'), agentViews: { session: { provider: 'claude', prefs: {} } } };
+    const config = persistence([project('main'), orphan]);
+    const repo = readyRepository(config.value, () => 'replacement');
+    await expect(repo.reconcileWorktrees(repo.getAll(), [], [], () => true, [{ id: orphan.id, sessionIds: [] }]))
+      .rejects.toThrow('Agent sessions changed');
+    expect(config.save).not.toHaveBeenCalled();
+    expect(repo.get(orphan.id)).toEqual(orphan);
+  });
+
+  it('saves all staged orphan removals and discoveries together before any cleanup', async () => {
+    const config = persistence([project('main'), project('x', 'gone'), project('y', 'gone')]);
+    const cleaner = cleanup();
+    const repo = readyRepository(config.value, () => 'replacement', cleaner.value);
+    const staged = ['x', 'y'].map(id => ({ id, sessionIds: [] }));
+    const args = [repo.getAll(), [], [createInput({ parentProjectId: 'main', cwd: '/repo/x' })], () => true, staged] as const;
+    config.save.mockResolvedValueOnce({ ok: false, error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' } });
+    await expect(repo.reconcileWorktrees(...args)).rejects.toThrow('disk full');
+    expect(repo.getAll().map(p => p.id)).toEqual(['main', 'x', 'y']);
+    await repo.retryCleanup('x');
+    expect(cleaner.run).not.toHaveBeenCalled();
+    config.save.mockClear();
+    await repo.reconcileWorktrees(...args);
+    expect(config.save).toHaveBeenCalledOnce();
+    expect(repo.getAll().map(p => p.id)).toEqual(['main', 'replacement']);
+    for (const orphan of staged) await repo.retryCleanup(orphan.id);
+    expect(cleaner.run.mock.calls.flat()).toEqual(['x', 'y']);
+    expect(config.save).toHaveBeenCalledOnce();
+  });
+
   it('moves whole worktree groups and skips same-group reorder', async () => {
     const initial = [project('a'), project('a-child', 'a'), project('b')];
     const config = persistence(initial);

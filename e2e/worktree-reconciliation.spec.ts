@@ -93,6 +93,37 @@ test.describe('worktree reconciliation', () => {
     await expect(page.locator('.sidebar-item')).toHaveCount(0);
   });
 
+  test('explicit rescan cleans confirmed orphan registrations and rediscovers live checkouts', async () => {
+    const [main] = await page.evaluate(() => window.shelfApi.project.getAll());
+    await app.close();
+    const old = { ...main, id: 'orphan', parentProjectId: 'removed', cwd: fs.realpathSync(child), agentViews: {} };
+    const second = { ...old, id: 'unregistered', cwd: path.join(root, 'absent') };
+    const configPath = path.join(userData, 'projects.json');
+    fs.writeFileSync(configPath, JSON.stringify({ schemaVersion: 4, projects: [main, old, second] }));
+    for (const { id } of [old, second]) fs.mkdirSync(path.join(userData, 'projects', id), { recursive: true });
+    const before = git(base, 'worktree', 'list', '--porcelain');
+    await launch();
+    await connectMain();
+    const warning = page.getByRole('button', { name: 'Worktree scan failed' });
+    await warning.click();
+    await app.evaluate(({ dialog }) => {
+      let attempts = 0;
+      dialog.showMessageBox = async () => ({ response: ++attempts === 1 ? 1 : 0, checkboxChecked: false });
+    });
+    const rescan = page.getByRole('button', { name: 'Rescan project worktrees' }).first();
+    await rescan.click();
+    await expect(rescan).toBeEnabled();
+    expect((await page.evaluate(() => window.shelfApi.project.getAll())).map(project => project.id)).toContain(old.id);
+    await rescan.click();
+    await expect(warning).toHaveCount(0);
+    const saved = JSON.parse(fs.readFileSync(configPath, 'utf8')).projects;
+    expect(saved).toHaveLength(2);
+    expect(saved[1]).toMatchObject({ parentProjectId: main.id, cwd: old.cwd });
+    expect(saved[1].id).not.toBe(old.id);
+    for (const { id } of [old, second]) expect(fs.existsSync(path.join(userData, 'projects', id))).toBe(false);
+    expect(git(base, 'worktree', 'list', '--porcelain')).toBe(before);
+  });
+
   test('explains duplicate main projects and preserves existing worktrees on rescan', async () => {
     const [main] = await page.evaluate(() => window.shelfApi.project.getAll());
     const other = { ...main, id: 'other-main', agentViews: {} };

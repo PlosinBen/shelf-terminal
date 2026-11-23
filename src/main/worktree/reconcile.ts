@@ -7,7 +7,7 @@ import { WorktreeProbe } from '../connector/worktree-probe';
 import { getProjectsRepository } from '../projects/repository-provider';
 import { buildWorktreeChildConfig } from '@shared/worktree-child-config';
 import { isWorktreeUnavailable, WorktreeAvailability, WorktreeScanOutcome, type WorktreeIdentity, type WorktreeScanResult } from '@shared/worktree';
-import type { Project, ProjectCreateInput } from '@shared/projects';
+import type { Project, ProjectCreateInput, StagedOrphan } from '@shared/projects';
 import { log } from '@shared/logger';
 import { scanWorktrees } from './scan';
 import { mapWorktrees } from './mapping';
@@ -24,21 +24,24 @@ export function setWorktreeLifecycle(projectId: string, active: boolean): void {
   if (active) activeLifecycle.add(id); else activeLifecycle.delete(id);
 }
 
-export function reconcileWorktrees(projectId: string): Promise<WorktreeScanResult> {
+export function reconcileWorktrees(projectId: string, stagedOrphans?: readonly StagedOrphan[]): Promise<WorktreeScanResult> {
   const repo = getProjectsRepository();
   const source = repo.get(projectId);
   if (!source) return Promise.reject(new Error(`Unknown project: ${projectId}`));
   const id = source.parentProjectId ?? source.id;
   const running = inFlight.get(id);
-  if (running) return running;
-  const task = run(id).catch(error => {
+  if (running) {
+    if (stagedOrphans?.length) return Promise.reject(new Error('Another worktree scan is running. Rescan after it completes.'));
+    return running;
+  }
+  const task = run(id, stagedOrphans).catch(error => {
     log.error('worktree', `scan failed mainProjectId=${id}: ${String(error)}`);
     throw error;
   }).finally(() => inFlight.delete(id));
   inFlight.set(id, task);
   return task;
 }
-async function run(id: string): Promise<WorktreeScanResult> {
+async function run(id: string, stagedOrphans?: readonly StagedOrphan[]): Promise<WorktreeScanResult> {
   const repo = getProjectsRepository();
   const baseline = repo.getAll();
   const main = repo.get(id);
@@ -55,6 +58,7 @@ async function run(id: string): Promise<WorktreeScanResult> {
   if (!isCurrent() || !sameWorktreeBaseline(repo.getAll(), baseline)) return { outcome: WorktreeScanOutcome.STALE };
   if (!snapshot) {
     if (children.length) throw new Error('Main project is no longer a Git repository');
+    if (stagedOrphans?.length) throw new Error('Cannot complete orphan cleanup without a Git worktree scan. Rescan from a Git project.');
     return { outcome: WorktreeScanOutcome.SKIPPED };
   }
   const identities = new Map<string, WorktreeIdentity | null>();
@@ -69,12 +73,14 @@ async function run(id: string): Promise<WorktreeScanResult> {
     ...buildWorktreeChildConfig(main, { cwd: candidate.path, worktreeBranch: candidate.branch, baseBranch: snapshot.branch ?? undefined }),
     worktreeState: { availability: WorktreeAvailability.VALID, identity: candidate.identity },
   }));
-  const projects = await repo.reconcileWorktrees(baseline, mapping.updates, additions, isCurrent);
+  const projects = await repo.reconcileWorktrees(baseline, mapping.updates, additions, isCurrent, stagedOrphans);
   if (!projects) {
     log.debug('worktree', `discarded stale scan mainProjectId=${id}`);
     return { outcome: WorktreeScanOutcome.STALE };
   }
-  return { outcome: WorktreeScanOutcome.APPLIED, projects };
+  const orphanCleanup = [];
+  for (const { id } of stagedOrphans ?? []) orphanCleanup.push({ id, result: await repo.retryCleanup(id) });
+  return { outcome: WorktreeScanOutcome.APPLIED, projects, ...(orphanCleanup.length ? { orphanCleanup } : {}) };
 }
 
 export async function inspectWorktreeSource(projectId: string): Promise<import('@shared/worktree').WorktreeSource> {

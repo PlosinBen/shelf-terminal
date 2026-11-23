@@ -115,7 +115,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
   },
   worktree: {
     source: (projectId: string) => ipcRenderer.invoke(IPC.WORKTREE_SOURCE, projectId),
-    reconcile: (projectId: string) => ipcRenderer.invoke(IPC.WORKTREE_RECONCILE, projectId),
+    reconcile: (projectId: string, stagedOrphans?: readonly import('../shared/projects').StagedOrphan[]) => ipcRenderer.invoke(IPC.WORKTREE_RECONCILE, projectId, stagedOrphans),
     lifecycle: (projectId: string, active: boolean) => ipcRenderer.invoke(IPC.WORKTREE_LIFECYCLE, projectId, active),
     // renderer→main: lock + ff-only merge-back step (finish/abandon themselves
     // are user-initiated in the renderer — #lifecycle).

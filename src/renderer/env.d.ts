@@ -81,7 +81,7 @@ interface ShelfApi {
   };
   worktree: {
     source: (projectId: string) => Promise<import('../shared/worktree').WorktreeSource>;
-    reconcile: (projectId: string) => Promise<import('../shared/worktree').WorktreeScanResult>;
+    reconcile: (projectId: string, stagedOrphans?: readonly import('../shared/projects').StagedOrphan[]) => Promise<import('../shared/worktree').WorktreeScanResult>;
     lifecycle: (projectId: string, active: boolean) => Promise<void>;
     finishMergeBack: (payload: { connection: import('../shared/types').Connection; featureCwd: string; baseCwd: string; baseBranch: string; featureBranch: string; sourceCommit?: string }) => Promise<import('../shared/types').FinishMergeBackResult>;
     onProposeCreate: (callback: (payload: import('../shared/worktree-child-config').WorktreeCreateProposal) => void) => () => void;

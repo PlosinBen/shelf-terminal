@@ -81,3 +81,19 @@ export function projectRemovalTargets<T extends Pick<Project, 'id' | 'parentProj
   }
   return projects.filter(project => ids.has(project.id));
 }
+
+export interface StagedOrphan {
+  readonly id: ProjectId;
+  readonly sessionIds: readonly string[];
+}
+
+export function orphanProjects<T extends Pick<Project, 'id' | 'parentProjectId'>>(projects: readonly T[]): T[] {
+  const ids = new Set(projects.map(project => project.id));
+  return projects.filter(project => project.parentProjectId !== null && !ids.has(project.parentProjectId));
+}
+
+export function orphanCleanupScope(projects: readonly Project[]): StagedOrphan[] {
+  return orphanProjects(projects).map(project => ({
+    id: project.id, sessionIds: Object.keys(project.agentViews).sort(),
+  })).sort((left, right) => left.id.localeCompare(right.id));
+}

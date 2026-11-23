@@ -1,4 +1,4 @@
-import { projectRemovalTargets } from '@shared/projects';
+import { orphanCleanupScope, orphanProjects, projectRemovalTargets } from '@shared/projects';
 import { isWorktreeUnavailable, WorktreeScanOutcome } from '@shared/worktree';
 import { clearValidatedWorktreeDirectories, setWorktreeScan, getProjectSliceSnapshot, setEditingProjectById } from './store';
 import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
@@ -138,15 +138,16 @@ async function recoverProjectCleanup(projectId: string, initial: import('@shared
       console.error(`[project-cleanup] prompt failed projectId=${projectId}`, error);
       return false;
     });
-    if (!retry) return;
+    if (!retry) return false;
     const recovered = await runProjectOperation('cleanup', () => projectCoordinator.retryCleanup(projectId));
-    if (recovered.status === 'cancelled') return;
+    if (recovered.status === 'cancelled') return false;
     result = recovered.value;
   }
+  return true;
 }
 
 const scanRequests = new Map<string, Promise<void>>();
-function scanProjectWorktrees(projectId: string): Promise<void> {
+function scanProjectWorktrees(projectId: string, explicitRescan = false): Promise<void> {
   const project = getProjectById(projectId);
   if (!project) return Promise.resolve();
   const mainId = project.parentProjectId ?? project.id;
@@ -165,18 +166,51 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
       void cleanupAgentViews(child.id, Object.keys(child.agentViews), settled);
     }
   };
+  const orphans = explicitRescan ? orphanProjects(getProjectViews()) : [];
+  const applyScan = async () => {
+    const staged = orphans.length ? orphanCleanupScope(getProjectViews()) : [];
+    if (orphans.length) {
+      if (staged.length !== orphans.length || staged.some(entry => !orphans.some(project => project.id === entry.id))) {
+        throw new Error('Orphan project list changed. Rescan to review again.');
+      }
+      const names = orphans.map(project => project.cwd).join('\n');
+      const confirmed = await window.shelfApi.dialog.confirm('Remove orphan Shelf projects?',
+        `These projects have no registered parent. Remove their Shelf data, including notes and conversation history? Git worktrees and branches will be kept.\n\n${names}`, 'Remove and rescan');
+      if (!confirmed) return;
+    }
+    const views = orphans.length ? orphanProjects(getProjectViews()) : [];
+    const tabs = views.flatMap(project => project.tabs);
+    if (views.length && !await prepareDelegationClose(tabs.filter(tab => tab.type === 'agent').map(tab => tab.id))) return;
+    if (orphans.length) {
+      for (const entry of staged) await queueAgentHistoryCleanup(entry.id, entry.sessionIds);
+    }
+    const result = await window.shelfApi.worktree.reconcile(projectId, orphans.length ? staged : undefined);
+    if (result.outcome === WorktreeScanOutcome.APPLIED) {
+      await projectCoordinator.refresh();
+      clearValidatedWorktreeDirectories(mainId);
+      if (result.orphanCleanup?.length) {
+        await Promise.all(tabs.map(teardownTab));
+        for (const entry of staged) {
+          for (const sessionId of entry.sessionIds) await completeAgentHistoryCleanup(sessionId);
+        }
+        const pending = [];
+        for (const entry of result.orphanCleanup) {
+          if (!await recoverProjectCleanup(entry.id, entry.result)) pending.push(entry.id);
+        }
+        if (pending.length) throw new Error(`Project changes saved; Shelf data cleanup remains for: ${pending.join(', ')}`);
+      }
+      await applyAvailability();
+    }
+    if (result.outcome === WorktreeScanOutcome.STALE) debugLog('worktree', `stale scan mainProjectId=${mainId}`);
+    setWorktreeScan(mainId, { running: false, error: result.outcome === WorktreeScanOutcome.STALE ? getProjectSliceSnapshot().worktreeScans[mainId]?.error ?? null : null });
+  };
+  const lockedIds = orphans.map(project => project.id).sort();
+  const runLocked = (index: number): Promise<void> => index < lockedIds.length
+    ? queueProjectUpdate(lockedIds[index], () => runLocked(index + 1))
+    : applyScan();
   const request = (async () => {
     try {
-      const result = await window.shelfApi.worktree.reconcile(projectId);
-      if (result.outcome === WorktreeScanOutcome.APPLIED) {
-        // Read the newest canonical state, rather than publishing an IPC result
-        // that may predate a concurrent user edit or removal.
-        await projectCoordinator.refresh();
-        clearValidatedWorktreeDirectories(mainId);
-        await applyAvailability();
-      }
-      if (result.outcome === WorktreeScanOutcome.STALE) debugLog('worktree', `stale scan mainProjectId=${mainId}`);
-      setWorktreeScan(mainId, { running: false, error: result.outcome === WorktreeScanOutcome.STALE ? getProjectSliceSnapshot().worktreeScans[mainId]?.error ?? null : null });
+      await runLocked(0);
     } catch (error) {
       // The request may have committed before IPC/refresh failed. Refresh only;
       // never replay a stale batch or claim the saved state was rolled back.
@@ -185,7 +219,11 @@ function scanProjectWorktrees(projectId: string): Promise<void> {
       setWorktreeScan(mainId, { running: false, error: String(error) });
       debugLog('worktree', `scan failed mainProjectId=${mainId}: ${String(error)}`);
     }
-  })().finally(() => scanRequests.delete(mainId));
+  })().finally(() => {
+    const state = getProjectSliceSnapshot().worktreeScans[mainId];
+    if (state?.running) setWorktreeScan(mainId, { ...state, running: false });
+    scanRequests.delete(mainId);
+  });
   scanRequests.set(mainId, request);
   return request;
 }
@@ -533,7 +571,7 @@ export function App() {
 
   // Centralized event handlers
   useEffect(() => {
-    const offRescan = on(Events.WORKTREE_RESCAN, (projectId: string) => { void scanProjectWorktrees(projectId); });
+    const offRescan = on(Events.WORKTREE_RESCAN, (projectId: string) => { void scanProjectWorktrees(projectId, true); });
     const offCloseTab = on(Events.CLOSE_TAB, async (projectId: string, tabIndex: number) => {
       const projectIndex = getProjectIndexById(projectId);
       const proj = getProjectById(projectId);

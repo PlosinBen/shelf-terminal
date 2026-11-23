@@ -1,4 +1,4 @@
-import { projectRemovalTargets } from '@shared/projects';
+import { orphanCleanupScope, type StagedOrphan, projectRemovalTargets } from '@shared/projects';
 import { buildWorktreeChildConfig, WORKTREE_AGENT_SOURCE_INVALID } from '@shared/worktree-child-config';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
@@ -39,7 +39,7 @@ export interface MainProjectsRepository {
   mutate(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
   delete(projectId: ProjectId, expectedProjectIds?: readonly ProjectId[]): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
-  reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], isCurrent?: () => boolean): Promise<readonly Project[] | null>;
+  reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], isCurrent?: () => boolean, stagedOrphans?: readonly StagedOrphan[]): Promise<readonly Project[] | null>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
 
@@ -263,8 +263,13 @@ export function createMainProjectsRepository(
       return projects.find(({ id }) => id === projectId) ?? null;
     },
 
-    async reconcileWorktrees(baseline, updates, additions, isCurrent = () => true) {
+    async reconcileWorktrees(baseline, updates, additions, isCurrent = () => true, stagedOrphans) {
       if (!sameWorktreeBaseline(projects, baseline) || !isCurrent()) return null;
+      if (stagedOrphans && !isDeepStrictEqual(orphanCleanupScope(projects), stagedOrphans)) {
+        throw new ProjectRepositoryError('save', 'Orphan projects or Agent sessions changed. Rescan to review the current list.');
+      }
+      const removedIds = new Set(stagedOrphans?.map(project => project.id));
+      const removed = projects.filter(project => removedIds.has(project.id));
       const created = additions.map(input => {
         const parent = projects.find(project => project.id === input.parentProjectId);
         const latestInput = parent ? {
@@ -274,7 +279,7 @@ export function createMainProjectsRepository(
         return createProject(createProjectId(), latestInput);
       });
       const candidate = readyCollection([
-        ...projects.map(project => {
+        ...projects.filter(project => !removedIds.has(project.id)).map(project => {
           const update = updates.find(update => update.id === project.id);
           return update ? { ...project, worktreeBranch: update.worktreeBranch, worktreeState: update.worktreeState } : project;
         }),
@@ -301,7 +306,9 @@ export function createMainProjectsRepository(
         }
       }
       if (isDeepStrictEqual(candidate, projects)) return projects;
+      for (const project of removed) cleanup.capture?.(project);
       await persist('save', candidate);
+      for (const project of removed) pendingCleanup.add(project.id);
       return projects;
     },
 

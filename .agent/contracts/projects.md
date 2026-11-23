@@ -69,7 +69,7 @@ interface ProjectDeleteResult {
 }
 ```
 
-`reconcileWorktrees(baseline, updates, additions, isCurrent?)` is an internal main-repository batch operation returning the committed collection or null for a stale baseline. It serializes with add/save/delete/reorder, merges only scan metadata into current projects, inherits current parent setup for additions, and persists once before publication. Its baseline compares topology rather than mutable preferences/session ids. It is not a renderer-supplied replace-all operation.
+`reconcileWorktrees(baseline, updates, additions, isCurrent?, stagedOrphans?)` is an internal main-repository batch operation returning the committed collection or null for a stale baseline. It serializes with add/save/delete/reorder, merges only scan metadata into current projects, inherits current parent setup for additions, and persists once before publication. Its baseline compares topology rather than mutable preferences/session ids. It is not a renderer-supplied replace-all operation.
 
 The repository is exposed only after synchronous bootstrap loading succeeds. It has no public `load`, `replaceAll`, raw file, or persisted-document operation.
 
@@ -90,7 +90,11 @@ staging history and deleting. Confirmation lists affected children and Shelf dat
 parent removal does not delete Git worktrees, branches or working directories. Cleanup attempts
 every removed member; `retryCleanup(parentId)` retries only unfinished members, and `leftover`
 reports one current target failure while all failures are logged. Existing orphan records are
-not automatically migrated or deleted.
+preserved on load and connect. On explicit Rescan, renderer lists all projects whose registered
+parent is absent, obtains confirmation, stages their Agent history, and submits the sorted IDs
+and session ownership. Main rechecks this scope, validates the remaining scan, and persists
+removals, updates and fresh discoveries together. Post-commit cleanup uses each old project ID;
+retrying cleanup does not save the config again.
 
 Before Project deletion, renderer stages an IndexedDB pending-cleanup entry for every Agent record
 in every removed project. After durable config deletion, it waits for backend teardown and renderer history writes, then clears history and its pending entry atomically. Retry/Cancel is available; cancelled/failed clears retain durable retry inventory for startup. Main target/storage cleanup retains its separate retry result.

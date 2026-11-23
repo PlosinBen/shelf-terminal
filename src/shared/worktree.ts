@@ -16,7 +16,7 @@ export function worktreeLabel(project: { cwd: string; worktreeBranch?: string | 
   return project.worktreeBranch || `${project.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()} (detached)`;
 }
 export type WorktreeScanResult =
-  | { outcome: typeof WorktreeScanOutcome.APPLIED; projects: readonly import('./projects').Project[] }
+  | { outcome: typeof WorktreeScanOutcome.APPLIED; projects: readonly import('./projects').Project[]; orphanCleanup?: readonly { id: string; result: import('./projects').ProjectDeleteResult }[] }
   | { outcome: typeof WorktreeScanOutcome.SKIPPED | typeof WorktreeScanOutcome.STALE };
 
 export interface WorktreeSource {
