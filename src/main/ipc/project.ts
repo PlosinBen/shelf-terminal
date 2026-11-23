@@ -15,8 +15,8 @@ export function registerProjectHandlers(): void {
     getProjectsRepository().add(input));
   ipcMain.handle(IPC.PROJECT_UPDATE, (_event, projectId: string, mutation: ProjectMutation) =>
     getProjectsRepository().mutate(projectId, mutation));
-  ipcMain.handle(IPC.PROJECT_DELETE, (_event, projectId: string) =>
-    getProjectsRepository().delete(projectId));
+  ipcMain.handle(IPC.PROJECT_DELETE, (_event, projectId: string, expectedProjectIds?: readonly string[]) =>
+    getProjectsRepository().delete(projectId, expectedProjectIds));
   ipcMain.handle(IPC.PROJECT_RETRY_CLEANUP, (_event, projectId: string) =>
     getProjectsRepository().retryCleanup(projectId));
   ipcMain.handle(IPC.PROJECT_REORDER, (_event, sourceId: string, targetId: string) =>

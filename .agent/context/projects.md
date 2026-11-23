@@ -211,3 +211,22 @@ swept. These operations affect Shelf UI history/metadata only, not provider-nati
   blocks collection for that session until restart. Collection failures are logged and shown with retry/cancel.
 - Normal in-View Clear History must not remove a pending Project deletion request. Only explicit cleanup
   completion removes that request; otherwise an intervening Clear History can lose post-delete retry ownership.
+
+
+## projects#15 — Parent removal includes registered children in one durable mutation  ·  [Decision]
+
+**Decision:** Removing a parent removes its registered descendants in the same config write.
+Confirmation lists child projects and the Shelf data being removed. Main performs cleanup for
+all members after commit and retains failed members for retry through the requested project ID.
+Renderer holds the affected mutation queues, stages every member's Agent history cleanup and
+waits for teardown before clearing history. The confirmed ID set is rechecked at main's serialized
+mutation boundary; changed membership requires the user to cancel and review again.
+
+**Reason:** Deleting only the parent leaves children pointing to an absent owner. Their existing
+target registrations then block discovery from another main project. Sequential config deletions
+can leave the same partial state if persistence fails midway.
+
+**Do not change casually because:** Shelf registration removal does not authorize deleting Git
+worktrees, branches or working directories. Parent removal preserves them. Removing a single
+child preserves its parent and siblings. Already-orphaned records require explicit recovery;
+this invariant must not become a startup deletion sweep or automatic reparenting rule.

@@ -54,7 +54,7 @@ function cleanup() {
 function readyRepository(
   config: ProjectConfigPersistence,
   createProjectId: () => string,
-  projectCleanup = cleanup().value,
+  projectCleanup: ProjectCleanup = cleanup().value,
 ) {
   const result = createMainProjectsRepository(config, createProjectId, projectCleanup);
   if (!result.ok) throw new Error(`unexpected load failure: ${result.error.message}`);
@@ -194,6 +194,60 @@ describe('main projects repository', () => {
     expect(repository.getAll()).toEqual([project('b')]);
     expect(projectCleanup.run).toHaveBeenCalledWith('a');
     await expect(repository.retryCleanup('a')).resolves.toEqual({ cleanupPending: false });
+  });
+
+  it('atomically removes a parent and its children and cleans every removed project', async () => {
+    const config = persistence([project('a'), project('child', 'a'), project('second', 'a'), project('b')]);
+    const projectCleanup = cleanup();
+    const capture = vi.fn();
+    const repository = readyRepository(config.value, () => 'unused', { ...projectCleanup.value, capture });
+    await repository.delete('a');
+    expect(repository.getAll()).toEqual([project('b')]);
+    expect(config.save).toHaveBeenCalledExactlyOnceWith([project('b')]);
+    expect(capture.mock.calls.map(([p]) => p.id)).toEqual(['a', 'child', 'second']);
+    expect(projectCleanup.run.mock.calls.map(([id]) => id)).toEqual(['a', 'child', 'second']);
+  });
+
+  it('retries failed child cleanup through the removed parent without repeating successful cleanup', async () => {
+    const config = persistence([project('a'), project('child', 'a'), project('second', 'a')]);
+    const projectCleanup = cleanup();
+    projectCleanup.run.mockImplementation(async id => { if (id === 'child') throw new Error('child cleanup failed'); });
+    const repository = readyRepository(config.value, () => 'unused', projectCleanup.value);
+    await expect(repository.delete('a')).resolves.toEqual({ cleanupPending: true });
+    expect(repository.getAll()).toEqual([]);
+    expect(projectCleanup.run).toHaveBeenCalledWith('second');
+    projectCleanup.run.mockClear().mockResolvedValue(undefined);
+    await expect(repository.retryCleanup('a')).resolves.toEqual({ cleanupPending: false });
+    expect(projectCleanup.run).toHaveBeenCalledExactlyOnceWith('child');
+    expect(config.save).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a changed confirmation scope before persistence or cleanup', async () => {
+    const config = persistence([project('a'), project('child', 'a')]);
+    const projectCleanup = cleanup();
+    const repository = readyRepository(config.value, () => 'unused', projectCleanup.value);
+    await expect(repository.delete('a', ['a'])).rejects.toThrow('removal scope changed');
+    expect(config.save).not.toHaveBeenCalled();
+    expect(projectCleanup.run).not.toHaveBeenCalled();
+    expect(repository.getAll()).toHaveLength(2);
+  });
+
+  it('preserves the full group when deletion cannot persist', async () => {
+    const initial = [project('a'), project('child', 'a'), project('b')];
+    const config = persistence(initial);
+    config.save.mockResolvedValueOnce({ ok: false, error: { stage: 'replace', path: '/config/projects.json', message: 'disk full' } });
+    const projectCleanup = cleanup();
+    const repository = readyRepository(config.value, () => 'unused', projectCleanup.value);
+    await expect(repository.delete('a')).rejects.toBeInstanceOf(ProjectRepositoryError);
+    expect(repository.getAll()).toEqual(initial);
+    expect(projectCleanup.run).not.toHaveBeenCalled();
+  });
+
+  it('removes only the selected child, preserving its parent and siblings', async () => {
+    const config = persistence([project('a'), project('child', 'a'), project('second', 'a')]);
+    const repository = readyRepository(config.value, () => 'unused');
+    await repository.delete('child');
+    expect(repository.getAll().map(p => p.id)).toEqual(['a', 'second']);
   });
 
   it('moves whole worktree groups and skips same-group reorder', async () => {

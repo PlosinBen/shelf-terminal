@@ -48,7 +48,7 @@ interface ShelfApi {
     getAll: () => Promise<readonly import('../shared/projects').Project[]>;
     add: (input: import('../shared/projects').ProjectCreateInput) => Promise<import('../shared/projects').Project>;
     update: (projectId: string, mutation: import('../shared/project-mutations').ProjectMutation) => Promise<import('../shared/project-mutations').ProjectMutationResult>;
-    delete: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
+    delete: (projectId: string, expectedProjectIds?: readonly string[]) => Promise<import('../shared/projects').ProjectDeleteResult>;
     retryCleanup: (projectId: string) => Promise<import('../shared/projects').ProjectDeleteResult>;
     reorder: (sourceId: string, targetId: string) => Promise<void>;
     validateDirs: () => Promise<string[]>;

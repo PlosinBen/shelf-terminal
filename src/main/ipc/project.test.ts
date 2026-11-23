@@ -68,7 +68,7 @@ describe('project IPC repository mapping', () => {
     await handlers.get(IPC.PROJECT_ADD)?.({}, input);
     const mutation = { kind: PROJECT_MUTATION.EDIT, edits: [{ field: 'name' as const, before: 'a', value: 'A' }] };
     await handlers.get(IPC.PROJECT_UPDATE)?.({}, canonical.id, mutation);
-    await handlers.get(IPC.PROJECT_DELETE)?.({}, 'a');
+    await handlers.get(IPC.PROJECT_DELETE)?.({}, 'a', ['a', 'child']);
     await handlers.get(IPC.PROJECT_RETRY_CLEANUP)?.({}, 'a');
     await handlers.get(IPC.PROJECT_REORDER)?.({}, 'a', 'b');
 
@@ -76,7 +76,7 @@ describe('project IPC repository mapping', () => {
     expect(repository.add).toHaveBeenCalledWith(input);
     expect(repository.mutate).toHaveBeenCalledWith(canonical.id, mutation);
     expect(repository.save).not.toHaveBeenCalled();
-    expect(repository.delete).toHaveBeenCalledWith('a');
+    expect(repository.delete).toHaveBeenCalledWith('a', ['a', 'child']);
     expect(repository.retryCleanup).toHaveBeenCalledWith('a');
     expect(repository.reorder).toHaveBeenCalledWith('a', 'b');
   });

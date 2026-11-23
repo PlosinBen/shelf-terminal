@@ -55,7 +55,7 @@ interface MainProjectsRepository {
   add(input: ProjectCreateInput): Promise<Project>;
   save(project: Project): Promise<void>;
   mutate(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
-  delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  delete(projectId: ProjectId, expectedProjectIds?: readonly ProjectId[]): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
@@ -82,7 +82,18 @@ Identical save, missing delete, and same-group reorder are successful no-ops. Mi
 
 `add()` rejects before persistence when another canonical project has the same effective target. Persisted load and `save()` do not enforce this uniqueness rule, so existing duplicate records remain valid.
 
-Before Project deletion, renderer stages an IndexedDB pending-cleanup entry for every Agent record. After durable config deletion, it waits for backend teardown and renderer history writes, then clears history and its pending entry atomically. Retry/Cancel is available; cancelled/failed clears retain durable retry inventory for startup. Main target/storage cleanup retains its separate retry result.
+Parent deletion removes the parent and its registered descendants in one atomic config write.
+Removing a child preserves its parent and siblings. `expectedProjectIds`, when provided, must
+match the current removal set inside the serialized mutation; a mismatch rejects before commit.
+Renderer supplies the confirmed set and holds each affected project's mutation queue while
+staging history and deleting. Confirmation lists affected children and Shelf data cleanup;
+parent removal does not delete Git worktrees, branches or working directories. Cleanup attempts
+every removed member; `retryCleanup(parentId)` retries only unfinished members, and `leftover`
+reports one current target failure while all failures are logged. Existing orphan records are
+not automatically migrated or deleted.
+
+Before Project deletion, renderer stages an IndexedDB pending-cleanup entry for every Agent record
+in every removed project. After durable config deletion, it waits for backend teardown and renderer history writes, then clears history and its pending entry atomically. Retry/Cancel is available; cancelled/failed clears retain durable retry inventory for startup. Main target/storage cleanup retains its separate retry result.
 
 Closing/disconnecting collects a View only when neither Default nor runtime references it. Removing a Default collects an already-closed View after successful save; a still-live View remains until close. Startup applies the same rule to unused canonical records. Collection clears history before forgetting metadata, runs within the per-project update queue, and does not scan unknown history or delete provider-native files. Referenced unknown-provider records remain retained.
 
@@ -108,7 +119,7 @@ Authoritative channels: `src/shared/ipc-channels.ts`; bridge: `src/main/preload.
 project.getAll(): Promise<readonly Project[]>
 project.add(input: ProjectCreateInput): Promise<Project>
 project.update(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>
-project.delete(projectId: ProjectId): Promise<ProjectDeleteResult>
+project.delete(projectId: ProjectId, expectedProjectIds?: readonly ProjectId[]): Promise<ProjectDeleteResult>
 project.retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>
 project.reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>
 project.validateDirs(): Promise<ProjectId[]>

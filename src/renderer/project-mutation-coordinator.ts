@@ -29,7 +29,7 @@ export interface ProjectMutationCoordinator {
   getInvalidDirectoryIds(): Promise<readonly ProjectId[]>;
   add(input: ProjectCreateInput): Promise<Project>;
   save(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
-  delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  delete(projectId: ProjectId, expectedProjectIds?: readonly ProjectId[]): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
@@ -73,8 +73,8 @@ export function createProjectMutationCoordinator(
       return refreshAfterCommit('save', result);
     },
 
-    async delete(projectId) {
-      const result = await client.delete(projectId);
+    async delete(projectId, expectedProjectIds) {
+      const result = await client.delete(projectId, expectedProjectIds);
       return refreshAfterCommit('delete', result);
     },
 

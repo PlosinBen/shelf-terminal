@@ -66,7 +66,7 @@ contextBridge.exposeInMainWorld('shelfApi', {
     getAll: () => ipcRenderer.invoke(IPC.PROJECT_GET_ALL),
     add: (input: unknown) => ipcRenderer.invoke(IPC.PROJECT_ADD, input),
     update: (projectId: string, mutation: import('@shared/project-mutations').ProjectMutation) => ipcRenderer.invoke(IPC.PROJECT_UPDATE, projectId, mutation),
-    delete: (projectId: string) => ipcRenderer.invoke(IPC.PROJECT_DELETE, projectId),
+    delete: (projectId: string, expectedProjectIds?: readonly string[]) => ipcRenderer.invoke(IPC.PROJECT_DELETE, projectId, expectedProjectIds),
     retryCleanup: (projectId: string) => ipcRenderer.invoke(IPC.PROJECT_RETRY_CLEANUP, projectId),
     reorder: (sourceId: string, targetId: string) => ipcRenderer.invoke(IPC.PROJECT_REORDER, sourceId, targetId),
     validateDirs: () => ipcRenderer.invoke(IPC.PROJECT_VALIDATE_DIRS),

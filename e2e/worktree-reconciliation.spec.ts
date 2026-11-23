@@ -1,3 +1,4 @@
+import { openAgentTab, sendAgentPrompt } from './helpers';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -35,6 +36,62 @@ test.describe('worktree reconciliation', () => {
     await launch();
   });
   test.afterEach(async () => { await app?.close().catch(() => {}); fs.rmSync(root, { recursive: true, force: true }); });
+
+  test('parent removal confirms children, removes the whole group and preserves Git worktrees', async () => {
+    await connectMain();
+    await expect(rows()).toHaveCount(1);
+    const projects = await page.evaluate(() => window.shelfApi.project.getAll());
+    const registeredChild = projects.find(project => project.parentProjectId === 'base')!;
+    // Include child-owned Shelf data, so removal proves more than hiding sidebar rows.
+    const childStorage = path.join(userData, 'projects', registeredChild.id);
+    fs.mkdirSync(childStorage, { recursive: true });
+    fs.writeFileSync(path.join(childStorage, 'removal-marker'), 'child data');
+    const gitBefore = git(base, 'worktree', 'list', '--porcelain');
+    await rows().first().click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: /^Connect$/ }).click();
+    await openAgentTab(page);
+    await sendAgentPrompt(page, 'hello');
+    const historyCount = () => page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('shelf-agent-history');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        return await new Promise<number>((resolve, reject) => {
+          const request = db.transaction('messages').objectStore('messages').count();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      } finally { db.close(); }
+    });
+    await expect.poll(historyCount, { timeout: 10_000 }).toBeGreaterThan(0);
+    const remove = async () => {
+      await page.locator('.sidebar-item').filter({ hasText: 'Scan Base' }).first().click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: /^Remove$/ }).click();
+    };
+    await remove();
+    const dialog = page.locator('.worktree-dialog');
+    await expect(dialog).toContainText('external');
+    await expect(dialog).toContainText(registeredChild.cwd);
+    await expect(dialog).toContainText('conversation history');
+    await expect(dialog).toContainText('Git worktree files and branches will be kept');
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(await page.evaluate(() => window.shelfApi.project.getAll())).toHaveLength(2);
+    expect(fs.existsSync(childStorage)).toBe(true);
+    expect(await historyCount()).toBeGreaterThan(0);
+    await remove();
+    await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(page.locator('.sidebar-item')).toHaveCount(0);
+    await expect.poll(() => fs.existsSync(childStorage)).toBe(false);
+    await expect.poll(historyCount).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(userData, 'projects.json'), 'utf8')).projects).toEqual([]);
+    expect(git(base, 'worktree', 'list', '--porcelain')).toBe(gitBefore);
+    expect(fs.existsSync(child)).toBe(true);
+    await app.close();
+    await launch();
+    await expect(page.locator('.sidebar-item')).toHaveCount(0);
+  });
 
   test('explains duplicate main projects and preserves existing worktrees on rescan', async () => {
     const [main] = await page.evaluate(() => window.shelfApi.project.getAll());

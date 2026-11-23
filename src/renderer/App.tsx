@@ -1,3 +1,4 @@
+import { projectRemovalTargets } from '@shared/projects';
 import { isWorktreeUnavailable, WorktreeScanOutcome } from '@shared/worktree';
 import { clearValidatedWorktreeDirectories, setWorktreeScan, getProjectSliceSnapshot, setEditingProjectById } from './store';
 import { CONFIRM_REMOVE_EVENT } from './components/RemoveConfirmDialog';
@@ -546,32 +547,43 @@ export function App() {
       if (tab?.type === 'agent' && tab.sessionId) void cleanupAgentViews(projectId, [tab.sessionId], settled);
     });
 
-    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string, options?: { focusProjectId?: string }) => queueProjectUpdate(projectId, async () => {
-      const projectIndex = getProjectIndexById(projectId);
-      const proj = getProjectById(projectId);
-      if (projectIndex === -1 || !proj) return;
-      if (!await prepareDelegationClose(proj.tabs.filter(tab => tab.type === 'agent').map(tab => tab.id))) return;
-      const staged = await runProjectOperation('stage deleted Agent history', () =>
-        queueAgentHistoryCleanup(projectId, Object.keys(proj.agentViews)));
-      if (staged.status === 'cancelled') return;
-      const deleted = await runProjectOperation('delete', () => projectCoordinator.delete(projectId));
-      if (deleted.status === 'cancelled') return;
-      if (options?.focusProjectId) {
-        if (getProjectById(options.focusProjectId)) {
-          setActiveProjectById(options.focusProjectId);
-        } else {
-          console.warn('[project-delete] focus target missing', { projectId, focusProjectId: options.focusProjectId });
+    const offRemoveProject = on(Events.REMOVE_PROJECT, (projectId: string, options?: { focusProjectId?: string; expectedProjectIds?: readonly string[] }) => queueProjectUpdate(projectId, async () => {
+      const targets = projectRemovalTargets(getProjectViews(), projectId);
+      if (!targets.length) return;
+      // Hold each child's mutation queue as well: staged history must include
+      // all View records, and no child may allocate a new View during removal.
+      const childIds = targets.filter(project => project.id !== projectId).map(project => project.id).sort();
+      const withChildren = (index: number): Promise<void> => index < childIds.length
+        ? queueProjectUpdate(childIds[index], () => withChildren(index + 1))
+        : removeGroup();
+      const removeGroup = async () => {
+        const current = projectRemovalTargets(getProjectViews(), projectId);
+        const expectedIds = options?.expectedProjectIds ?? targets.map(project => project.id);
+        if (!await prepareDelegationClose(current.flatMap(project => project.tabs.filter(tab => tab.type === 'agent').map(tab => tab.id)))) return;
+        const staged = await runProjectOperation('stage deleted Agent history', async () => {
+          for (const project of current) await queueAgentHistoryCleanup(project.id, Object.keys(project.agentViews));
+        });
+        if (staged.status === 'cancelled') return;
+        const deleted = await runProjectOperation('delete', () => projectCoordinator.delete(projectId, expectedIds));
+        if (deleted.status === 'cancelled') return;
+        if (options?.focusProjectId) {
+          if (getProjectById(options.focusProjectId)) {
+            setActiveProjectById(options.focusProjectId);
+          } else {
+            console.warn('[project-delete] focus target missing', { projectId, focusProjectId: options.focusProjectId });
+          }
         }
-      }
-      const settled = Promise.all(proj.tabs.map(teardownTab));
-      // Teardown flushes idle pending history. Queue the clears afterwards so
-      // those writes cannot resurrect messages belonging to a deleted Project.
-      const history = await runProjectOperation('clear deleted Agent history', async () => {
-        await settled;
-        await Promise.all(Object.keys(proj.agentViews).map(completeAgentHistoryCleanup));
-      });
-      if (history.status === 'cancelled') console.warn('[project-delete] history cleanup cancelled', { projectId });
-      await recoverProjectCleanup(projectId, deleted.value);
+        const settled = Promise.all(current.flatMap(project => project.tabs.map(teardownTab)));
+        // Teardown flushes idle pending history. Clear only after those writes
+        // settle, for every member of the durably removed group.
+        const history = await runProjectOperation('clear deleted Agent history', async () => {
+          await settled;
+          await Promise.all(current.flatMap(project => Object.keys(project.agentViews).map(completeAgentHistoryCleanup)));
+        });
+        if (history.status === 'cancelled') console.warn('[project-delete] history cleanup cancelled', { projectId });
+        await recoverProjectCleanup(projectId, deleted.value);
+      };
+      await withChildren(0);
     }));
 
     const offWorktreeFinishCompleted = on(Events.WORKTREE_FINISH_COMPLETED, (payload: {

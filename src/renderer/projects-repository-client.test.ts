@@ -29,14 +29,14 @@ describe('renderer projects repository client', () => {
     await client.add(input);
     const mutation = { kind: PROJECT_MUTATION.CREATE_AGENT_VIEW, provider: 'claude' };
     await client.save(project.id, mutation);
-    await client.delete('a');
+    await client.delete('a', ['a', 'child']);
     await client.retryCleanup('a');
     await client.reorder('a', 'b');
 
     expect(api.validateDirs).toHaveBeenCalledWith();
     expect(api.add).toHaveBeenCalledWith(input);
     expect(api.update).toHaveBeenCalledWith(project.id, mutation);
-    expect(api.delete).toHaveBeenCalledWith('a');
+    expect(api.delete).toHaveBeenCalledWith('a', ['a', 'child']);
     expect(api.retryCleanup).toHaveBeenCalledWith('a');
     expect(api.reorder).toHaveBeenCalledWith('a', 'b');
   });

@@ -11,7 +11,7 @@ export interface RendererProjectsRepositoryClient {
   getInvalidDirectoryIds(): Promise<readonly ProjectId[]>;
   add(input: ProjectCreateInput): Promise<Project>;
   save(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
-  delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  delete(projectId: ProjectId, expectedProjectIds?: readonly ProjectId[]): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
 }
@@ -22,7 +22,7 @@ export function createRendererProjectsRepositoryClient(): RendererProjectsReposi
     getInvalidDirectoryIds: () => window.shelfApi.project.validateDirs(),
     add: (input) => window.shelfApi.project.add(input),
     save: (projectId, mutation) => window.shelfApi.project.update(projectId, mutation),
-    delete: (projectId) => window.shelfApi.project.delete(projectId),
+    delete: (projectId, expectedProjectIds) => window.shelfApi.project.delete(projectId, expectedProjectIds),
     retryCleanup: (projectId) => window.shelfApi.project.retryCleanup(projectId),
     reorder: (sourceId, targetId) => window.shelfApi.project.reorder(sourceId, targetId),
   };

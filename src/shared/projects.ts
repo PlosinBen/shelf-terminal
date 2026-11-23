@@ -62,3 +62,22 @@ export interface ProjectDeleteResult {
     readonly reason: string;
   };
 }
+
+/** The requested project and its registered descendants; never inferred from disk. */
+export function projectRemovalTargets<T extends Pick<Project, 'id' | 'parentProjectId'>>(
+  projects: readonly T[], projectId: ProjectId,
+): T[] {
+  if (!projects.some(project => project.id === projectId)) return [];
+  const ids = new Set([projectId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const project of projects) {
+      if (project.parentProjectId && ids.has(project.parentProjectId) && !ids.has(project.id)) {
+        ids.add(project.id);
+        changed = true;
+      }
+    }
+  }
+  return projects.filter(project => ids.has(project.id));
+}

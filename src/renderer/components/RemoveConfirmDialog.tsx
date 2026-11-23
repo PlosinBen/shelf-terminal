@@ -1,3 +1,4 @@
+import { projectRemovalTargets } from '@shared/projects';
 import { isWorktreeUnavailable } from '@shared/worktree';
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
@@ -48,6 +49,9 @@ export function RemoveConfirmDialog() {
 
   if (!pending) return null;
 
+  const targets = projectRemovalTargets(projects, pending.projectId);
+  const children = targets.filter(project => project.id !== pending.projectId);
+
   const handleConfirm = async () => {
     const proj = projects.find((p) => p.id === pending.projectId);
     if (pending.isWorktree && cleanWorktree && proj && !isWorktreeUnavailable(proj)) {
@@ -60,7 +64,7 @@ export function RemoveConfirmDialog() {
         );
       }
     }
-    emit(Events.REMOVE_PROJECT, pending.projectId);
+    emit(Events.REMOVE_PROJECT, pending.projectId, { expectedProjectIds: targets.map(project => project.id) });
     setPending(null);
   };
 
@@ -77,6 +81,13 @@ export function RemoveConfirmDialog() {
         </div>
         <div className="remove-confirm-body">
           <p>Remove <strong>{displayName}</strong>?</p>
+          {children.length > 0 && (
+            <div>
+              <p>Also remove these child projects and their Shelf data (including notes and conversation history):</p>
+              <ul>{children.map(child => <li key={child.id}>{child.worktreeBranch ?? child.name} — {child.cwd}</li>)}</ul>
+              <p>Git worktree files and branches will be kept.</p>
+            </div>
+          )}
           {pending.isWorktree && (
             <label className="remove-confirm-checkbox">
               <input

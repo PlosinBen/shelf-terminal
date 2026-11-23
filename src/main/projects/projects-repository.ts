@@ -1,3 +1,4 @@
+import { projectRemovalTargets } from '@shared/projects';
 import { buildWorktreeChildConfig, WORKTREE_AGENT_SOURCE_INVALID } from '@shared/worktree-child-config';
 import { isDeepStrictEqual } from 'node:util';
 import { log } from '@shared/logger';
@@ -36,7 +37,7 @@ export interface MainProjectsRepository {
   add(input: ProjectCreateInput): Promise<Project>;
   save(project: Project): Promise<void>;
   mutate(projectId: ProjectId, mutation: ProjectMutation): Promise<ProjectMutationResult>;
-  delete(projectId: ProjectId): Promise<ProjectDeleteResult>;
+  delete(projectId: ProjectId, expectedProjectIds?: readonly ProjectId[]): Promise<ProjectDeleteResult>;
   retryCleanup(projectId: ProjectId): Promise<ProjectDeleteResult>;
   reconcileWorktrees(baseline: readonly Project[], updates: readonly Project[], additions: readonly ProjectCreateInput[], isCurrent?: () => boolean): Promise<readonly Project[] | null>;
   reorder(sourceId: ProjectId, targetId: ProjectId): Promise<void>;
@@ -202,6 +203,7 @@ export function createMainProjectsRepository(
   if (!loaded.ok) return { ok: false, error: loaded.error };
   let projects = readyCollection(loaded.value, 'load');
   const pendingCleanup = new Set<ProjectId>();
+  const cleanupGroups = new Map<ProjectId, readonly ProjectId[]>();
 
   async function persist(
     operation: Exclude<ProjectRepositoryOperation, 'load'>,
@@ -237,6 +239,19 @@ export function createMainProjectsRepository(
           : {}),
       };
     }
+  }
+
+  async function runGroupCleanup(projectId: ProjectId): Promise<ProjectDeleteResult> {
+    const ids = cleanupGroups.get(projectId) ?? [projectId];
+    const failures: ProjectDeleteResult[] = [];
+    for (const id of ids) {
+      if (!pendingCleanup.has(id)) continue;
+      const result = await runCleanup(id);
+      if (result.cleanupPending) failures.push(result);
+    }
+    if (!failures.length) cleanupGroups.delete(projectId);
+    const leftover = failures.find(result => result.leftover)?.leftover;
+    return { cleanupPending: failures.length > 0, ...(leftover ? { leftover } : {}) };
   }
 
   const repository: MainProjectsRepository = {
@@ -339,20 +354,25 @@ export function createMainProjectsRepository(
       await persist('save', candidate);
     },
 
-    async delete(projectId) {
-      const removed = projects.find(({ id }) => id === projectId);
-      const candidate = projects.filter(({ id }) => id !== projectId);
-      if (candidate.length === projects.length) return { cleanupPending: false };
-      const ready = deepFreeze(candidate);
-      if (removed) cleanup.capture?.(removed);
+    async delete(projectId, expectedProjectIds) {
+      // projects#15: persist the full removal set before cleaning any member.
+      const removed = projectRemovalTargets(projects, projectId);
+      if (!removed.length) return { cleanupPending: false };
+      const ids = removed.map(project => project.id);
+      if (expectedProjectIds && !isDeepStrictEqual([...expectedProjectIds].sort(), [...ids].sort())) {
+        throw new ProjectRepositoryError('delete', 'Project removal scope changed; cancel and review the project and its children again.');
+      }
+      const removedIds = new Set(ids);
+      const ready = deepFreeze(projects.filter(project => !removedIds.has(project.id)));
+      for (const project of removed) cleanup.capture?.(project);
       await persist('delete', ready);
-      pendingCleanup.add(projectId);
-      return runCleanup(projectId);
+      for (const id of ids) pendingCleanup.add(id);
+      cleanupGroups.set(projectId, ids);
+      return runGroupCleanup(projectId);
     },
 
     async retryCleanup(projectId) {
-      if (!pendingCleanup.has(projectId)) return { cleanupPending: false };
-      return runCleanup(projectId);
+      return runGroupCleanup(projectId);
     },
 
     async reorder(sourceId, targetId) {
