@@ -4,6 +4,7 @@ import { createShelfMcpAuthority } from '../src/main/agent/shelf-mcp-authority';
 import { SHELF_MCP, SHELF_MCP_FAILURE } from '@shared/shelf-mcp';
 import { DELEGATION } from '@shared/agent-delegation';
 import { runBridgeTool } from './app-tool-tools';
+import * as logger from './server-logger';
 const authority = createShelfMcpAuthority();
 vi.mock('./app-tool-client', () => ({
   callMain: async (op: string, args: { endpointId: string }) => {
@@ -106,11 +107,17 @@ describe('shelf MCP bridge server', () => {
   });
 
   it('serves the app-level bridge tools over HTTP', async () => {
+    const log = vi.spyOn(logger, 'serverLog');
     handle = await startShelfMcpServer();
     const client = new Client({ name: 'test-client', version: '0.0.0' });
     await client.connect(new StreamableHTTPClientTransport(new URL(handle.url), { requestInit: { headers: handle.headers } }));
     const { tools } = await client.listTools();
     await client.close();
+    try {
+      expect(log).toHaveBeenCalledWith('debug', 'shelf-mcp', 'Discovery response', expect.objectContaining({
+        method: 'tools/list', status: 200, toolNames: tools.map(tool => tool.name),
+      }));
+    } finally { log.mockRestore(); }
 
     expect(tools.map((t) => t.name).sort()).toEqual([
       'browser_fetch',

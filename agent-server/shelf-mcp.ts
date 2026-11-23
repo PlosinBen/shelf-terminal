@@ -14,6 +14,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isJSONRPCResultResponse } from '@modelcontextprotocol/sdk/types.js';
 import { runBridgeTool, SHELF_BRIDGE_TOOLS, bridgeToolArgs } from './app-tool-tools';
 import { SHELF_MCP, SHELF_MCP_FAILURE, type ShelfMcpEndpoint } from '@shared/shelf-mcp';
 import { ShelfMcpStartupError } from './shelf-mcp-lifecycle';
@@ -70,7 +71,8 @@ export async function startShelfMcpServer(
   authorize: (endpointId: string) => Promise<ShelfMcpAuthentication> = requestShelfMcpAuthentication,
 ): Promise<ShelfMcpHandle> {
   // Bootstrap before binding: a failed authorization cannot expose a listener.
-  const authentication = await authorize(randomUUID()).catch(error => {
+  const endpointId = randomUUID();
+  const authentication = await authorize(endpointId).catch(error => {
     throw new ShelfMcpStartupError(SHELF_MCP_FAILURE.AUTHORIZATION, error);
   });
   let authority = '';
@@ -91,6 +93,7 @@ export async function startShelfMcpServer(
       rejectRequest(res, 403, 'Forbidden'); return;
     }
     if (!authentication.verifyAuthorization(req.headers.authorization)) {
+      serverLog('debug', 'shelf-mcp', 'Unauthorized request', { endpointId, status: 401 });
       rejectRequest(res, 401, 'Unauthorized', { 'WWW-Authenticate': 'Bearer' }); return;
     }
     const chunks: Buffer[] = [];
@@ -130,6 +133,22 @@ export async function startShelfMcpServer(
       // Fresh server + transport per request (stateless — avoids cross-request state).
       const server = buildShelfMcpServer();
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      const method = parsed && typeof parsed === 'object' && 'method' in parsed ? parsed.method : undefined;
+      if (method === 'initialize' || method === 'tools/list') {
+        let toolNames: string[] | undefined;
+        if (method === 'tools/list') {
+          const send = transport.send.bind(transport);
+          transport.send = (message, options) => {
+            if (isJSONRPCResultResponse(message) && Array.isArray(message.result.tools)) {
+              toolNames = message.result.tools.map(tool => tool.name);
+            }
+            return send(message, options);
+          };
+        }
+        res.once('finish', () => serverLog('debug', 'shelf-mcp', 'Discovery response', {
+          endpointId, method, status: res.statusCode, toolNames,
+        }));
+      }
       res.on('close', () => { void transport.close(); void server.close(); });
       try {
         await server.connect(transport);

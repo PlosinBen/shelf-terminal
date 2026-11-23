@@ -17,6 +17,8 @@ title: Shelf — 驗證能力與執行入口
 
 ## 能力與入口
 
+Shelf 內建 HTTP MCP 的工具探索可從 main debug log 的 `[shelf-mcp] Discovery response` 查證。以時間和 `endpointId` 對照 `initialize`、`tools/list` 的 HTTP 狀態與實際回應的 `toolNames`；授權失敗另記 `Unauthorized request`。這只能證明 Shelf 端回傳了哪些工具。Copilot 模型端的搜尋結果要另外對照該 session 的 `tool_search_output`。
+
 命令定義以 [package.json](../package.json) 為準；測試選取以 [vitest.config.ts](../vitest.config.ts) 與 [playwright.config.ts](../playwright.config.ts) 為準。各功能的測試契約與特定操作注意事項見 [Testing Practices](context/testing.md)，本檔不重複其逐功能說明。
 
 | 行為／範圍 | 入口 | 能證明與限制 |
