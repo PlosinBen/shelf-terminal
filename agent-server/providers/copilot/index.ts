@@ -28,6 +28,7 @@ import { COPILOT_PROVIDER } from '@shared/agent-providers';
 import type { AgentPrefs } from '@shared/types';
 import { PERMISSION_CONTROL_STRATEGIES, type PermissionControlCapabilities } from '@shared/permission-controls';
 import { CONFIG_EDIT_KEYS, formatConfigAck, type ConfigEditKey } from '@shared/config-ack';
+import { ConfigControlRejectedError } from '@shared/agent-config-control';
 import { parseSlashPrefix } from '@shared/slash-prefix';
 import { severityFromUtilization, type ServerBackend, type QueryInput, type SendFn, type ProviderCapabilities } from '../types';
 import { serverLog } from '../../server-logger';
@@ -160,6 +161,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   let child: ChildProcess | null = null;
   let session: AcpSession | null = null;
   let sessionCwd: string | null = null;
+  let stoppedSession: { resumeId: string; cwd: string; appId?: string } | null = null;
   // The appId the live session was created with — MCP servers + skills root are
   // fixed at session/new, so if appId is only learned later (gatherCapabilities
   // has no appId; the first `send` does), the session is recreated to pick them
@@ -555,6 +557,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
   }
 
   function resetLiveSessionState(): void {
+    stoppedSession = null;
     sessionSkills = null;
     invocationEpoch++;
     activeAutopilotCompletion?.resolve('terminated');
@@ -700,7 +703,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
    * persist a new session id — Shelf never touches the context store directly.
    */
   async function ensureSession(
-    input: { cwd: string; appId?: string; resumeId?: string | null },
+    input: { cwd: string; appId?: string; resumeId?: string | null; requireExisting?: boolean },
     send: SendFn | null,
   ): Promise<AcpSession> {
     // appId is stable per app instance; now carried on caps too, so it's known
@@ -771,6 +774,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
             : await driver.load(c.agent, input.resumeId, opts);
           sessionCwd = input.cwd;
           sessionAppId = appId;
+          stoppedSession = null;
           const restored = session.resumeSessionResponse ?? session.loadSessionResponse;
           sessionModes = restored?.modes ?? undefined;
           sessionConfigOptions = restored?.configOptions ?? undefined;
@@ -779,7 +783,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           publishContextUsage();
           return session;
         } catch (err) {
-          if (!isMissingCopilotSessionError(err, input.resumeId)) throw err;
+          if (input.requireExisting || !isMissingCopilotSessionError(err, input.resumeId)) throw err;
           // A persisted pointer can outlive the CLI's session storage. Clear it
           // before starting so a failed session/new cannot wedge every retry on
           // the same stale id. Context loss is visible, not silent.
@@ -797,6 +801,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
         catch (error) { serverLog('warn', 'copilot', `App skill source snapshot unavailable before session creation appId=${appId}: ${(error as Error).message}`); }
       }
       session = await driver.startNew(c.agent, opts);
+      stoppedSession = null;
       if (root && before) {
         try {
           const after = snapshotCopilotSkills(await readSkillCatalog(input.cwd, appId), root);
@@ -1063,9 +1068,23 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     bindSessionSend(send: SendFn): void { sessionSend = send; publishContextUsage(); },
     configRequiresIdle(key) {
       if (key === CONFIG_EDIT_KEYS.PERMISSION_MODE || key === CONFIG_EDIT_KEYS.NATIVE_APPROVAL) throw new Error(`Copilot does not accept config key "${key}"`);
-      return key === CONFIG_EDIT_KEYS.NATIVE_MODE;
+      return stoppedSession !== null || key === CONFIG_EDIT_KEYS.NATIVE_MODE;
     },
-    async configure(edit, send) { await applyConfigEdit(edit.key, edit.value, send, false); },
+    async configure(edit, send) {
+      if (stoppedSession) {
+        const target = stoppedSession;
+        const epoch = invocationEpoch;
+        try {
+          await ensureSession({ ...target, requireExisting: true }, null);
+        } catch (error) {
+          serverLog('warn', 'copilot', 'Could not restore stopped session for configuration', { sessionId: target.resumeId, error: String(error) });
+          throw new ConfigControlRejectedError('Could not restore the Copilot session. The setting was not applied.');
+        }
+        if (epoch !== invocationEpoch) throw new ConfigControlRejectedError('Session changed before the setting could be applied.');
+        hydrateCurrentSelections();
+      }
+      await applyConfigEdit(edit.key, edit.value, send, false);
+    },
 
     resolvePermission(toolUseId: string, allow: boolean, message?: string, scope?: 'once' | 'session'): void {
       permissions.resolvePermission(toolUseId, allow, message, scope);
@@ -1126,6 +1145,9 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
       const liveConn = conn;
       const liveSession = session;
       const liveChild = child;
+      const cwd = sessionCwd;
+      const appId = sessionAppId;
+      if (stoppedSession && !liveConn && !liveSession) return;
       if (!liveConn || !liveSession) throw new Error('copilot cancel failed: no active ACP session');
       try {
         if (promptCompletion) {
@@ -1162,6 +1184,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
           }
         }
       }
+      if (cwd !== null) stoppedSession = { cwd, appId, resumeId: liveSession.sessionId };
     },
 
     skillTarget(appId: string | undefined): string | undefined {
@@ -1178,6 +1201,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
      *  only this respawn after login. Mirrors the appId-change respawn, minus the
      *  appId check. */
     reconnect(): void {
+      stoppedSession = null;
       sessionSkills = null;
       invocationEpoch++;
       activeAutopilotCompletion?.resolve('terminated');
@@ -1195,6 +1219,7 @@ export function createCopilotBackend(deps: CopilotDeps = {}): ServerBackend {
     },
 
     dispose(): void {
+      stoppedSession = null;
       sessionSkills = null;
       invocationEpoch++;
       loginRunner?.cancel();

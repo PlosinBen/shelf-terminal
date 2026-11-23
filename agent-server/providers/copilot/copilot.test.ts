@@ -414,6 +414,49 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
     backend.dispose();
   });
 
+  it.each(['resume', 'load', 'missing'] as const)('restores only the stopped session for a permission edit (%s)', async method => {
+    let promptStarted!: () => void;
+    const started = new Promise<void>(resolve => { promptStarted = resolve; });
+    const first = createMockAcpAgent({ configOptions: COPILOT_CONFIG, waitForCancelOnPrompt: true,
+      stopReason: 'cancelled', onPrompt: promptStarted });
+    const restore = vi.fn();
+    const setPermission = vi.fn();
+    const newSession = vi.fn();
+    const prompt = vi.fn();
+    const next = createMockAcpAgent({
+      agentCapabilities: method === 'resume' ? { sessionCapabilities: { resume: {} } } : { loadSession: true },
+      onResumeSession: restore, onLoadSession: restore, onPrompt: prompt, onNewSession: newSession,
+      loadSessionError: method === 'missing' ? 'Resource not found: Session mock-session not found' : undefined,
+      configOptions: COPILOT_CONFIG, onSetConfigOption: setPermission,
+      configOptionsOnSetConfigOption: withConfigSelection(COPILOT_CONFIG, 'allow_all', 'on'),
+    });
+    const openAgent = vi.fn().mockReturnValueOnce({ target: first }).mockReturnValue({ target: next });
+    const backend = createCopilotBackend({ openAgent, getShelfMcp: async () => null });
+    try {
+      const turn = backend.query({ cwd: '/repo', prompt: 'started work' }, () => {});
+      await started;
+      await backend.stop();
+      await turn;
+      await backend.stop();
+      expect(openAgent).toHaveBeenCalledTimes(1);
+      const events: OutgoingMessage[] = [];
+      const edit = backend.configure!({ key: 'nativePermission', value: 'on' }, event => events.push(event));
+      if (method === 'missing') {
+        await expect(edit).rejects.toThrow('The setting was not applied');
+        expect(setPermission).not.toHaveBeenCalled();
+        expect(events).toEqual([]);
+      } else {
+        await edit;
+        expect(setPermission).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'mock-session', configId: 'allow_all', value: 'on' }));
+        expect(events).toContainEqual(expect.objectContaining({ type: 'capabilities', permissionControl:
+          expect.objectContaining({ permission: expect.objectContaining({ currentValue: 'on' }) }) }));
+      }
+      expect(restore).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'mock-session', cwd: '/repo' }));
+      expect(newSession).not.toHaveBeenCalled();
+      expect(prompt).not.toHaveBeenCalled();
+    } finally { backend.dispose(); }
+  });
+
   it('fails stop when Copilot settles the cancelled prompt with a different reason', async () => {
     let promptStarted!: () => void;
     const started = new Promise<void>((resolve) => { promptStarted = resolve; });

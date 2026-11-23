@@ -454,6 +454,8 @@ Renderer 在 dev/E2E 傳入是否顯示 internal provider 的環境政策，再�
 
 使用者要求取消是獨立的 control-plane boundary：若 Copilot 的 `session/prompt` 仍 active，provider 發出 `session/cancel` 後，`stop()` 必須等待同一個 prompt 回傳 `stopReason:'cancelled'`；prompt failure、其他 stop reason 或 bounded RPC timeout 都是取消失敗，必須 fail loud。無論 live prompt 或已 settlement，最後都解除 completion gate、forget driver session、關閉 ACP connection 並 kill CLI process，下一輪從 persisted session restore。原因是 CLI 的 cancel 會保留背景 shell，單憑 cancelled 不足以維持 Shelf 的停止效果。已 settlement 路徑沒有 acknowledgement 可等，採 best-effort cancel 後 teardown；活著的 CLI 無法送出 termination signal 時不得回報 stop 成功。此處涵蓋 CLI 管理的 attached shell，不承諾終止 detached 外部程序；不改 UI idle 語意。
 
+成功 Stop 後，若下一個操作是狀態列設定，Copilot provider 以停止時的 cwd、appId 與 session ID 按需恢復同一個 session，再依恢復的設定快照套用變更。這個操作不送 prompt。若原 session 已不存在，回報設定未套用，保留原 context pointer；狀態列操作不得觸發新對話。
+
 Tool call 的 display metadata 也是 session-scoped carry，以 `toolCallId` 暫存，terminal translate 後立即 evict；reset/forget 清空。driver 不保存 `textByMsg`，文字 delta 的累積與持久化只由 renderer 負責。`activeExecutionSend` 僅供當下 tool permission round-trip，不是一般 notification/content sink。
 
 `kill()` 成功只代表 termination signal 已送出，stop 不同步等待 OS process exit；不得把 stop 的返回時點當成所有子程序已消失的證據。需要確認實際退出時，應檢查 PID／exit，並區分 CLI 管理的 attached shell 與 detached 外部程序。

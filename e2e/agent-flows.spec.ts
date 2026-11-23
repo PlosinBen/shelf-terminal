@@ -511,6 +511,25 @@ test.describe('agent flows via fake provider', () => {
       await expect(page.locator('.agent-messages:visible')).toContainText('usable after rejection');
     });
 
+    test('changes Copilot permission from the status bar immediately after double-Esc', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await page.locator('.tab-add').click({ button: 'right' });
+      await page.locator('.context-menu-item', { hasText: 'Agent (Copilot)' }).click();
+      const permission = page.locator('[data-config-key="nativePermission"]:visible');
+      await expect(permission).toHaveText('Allow all: Off');
+      await sendAgentPrompt(page, 'delay:10000|text:cancelled work');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('running');
+      await page.locator('.agent-textarea:visible').focus();
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.agent-status-label:visible')).toHaveText('idle');
+      await permission.click();
+      await page.locator('.agent-perm-option:visible', { hasText: 'On' }).click();
+      await expect(permission).toHaveText('Allow all: On');
+      await expect(page.locator('.agent-config-feedback')).toHaveCount(0);
+      await expect(page.locator('.agent-msg-user:visible')).toHaveCount(1);
+    });
+
     test('shows and mutates mode and permission independently', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);
