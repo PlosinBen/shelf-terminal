@@ -49,9 +49,33 @@ test.describe('worktree reconciliation', () => {
     const gitBefore = git(base, 'worktree', 'list', '--porcelain');
     await launch();
     await connectMain();
-    await page.getByRole('button', { name: 'Worktree scan failed' }).click();
+    const trigger = page.getByRole('button', { name: 'Worktree scan failed' });
+    await trigger.hover();
+    await expect(page.locator('.worktree-scan-popover')).toBeVisible();
     const warning = page.locator('.worktree-scan-popover');
     await expect(warning).toContainText('Duplicate main projects');
+    const anchor = await trigger.boundingBox();
+    const panel = await warning.boundingBox();
+    expect(panel!.x).toBeCloseTo(anchor!.x + anchor!.width + 8, 0);
+    await warning.hover();
+    // Wait beyond the dismissal delay to prove moving into the panel cancels it.
+    await page.waitForTimeout(450);
+    await expect(warning).toBeVisible();
+    await page.mouse.move(790, 10);
+    await expect(warning).toHaveCount(0);
+    await trigger.focus();
+    await expect(warning).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(warning.getByRole('button', { name: 'Rescan project worktrees' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(warning).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await expect(warning).toBeVisible();
+    await page.mouse.click(790, 10);
+    await expect(warning).toHaveCount(0);
+    await trigger.hover();
+    await expect(warning).toBeVisible();
     // A sidebar warning near the bottom must not put Close outside the viewport.
     await page.getByRole('button', { name: 'Worktree scan failed' }).evaluate(button => {
       const host = button.parentElement!;
@@ -72,6 +96,8 @@ test.describe('worktree reconciliation', () => {
       browserWindow.setContentSize(800, 250);
     });
     await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(250);
+    await trigger.hover();
+    await warning.hover();
     await expect(close).toBeInViewport({ ratio: 1 });
     await expect(warning.getByRole('button', { name: 'Rescan project worktrees' })).toBeInViewport({ ratio: 1 });
     const details = warning.locator(':scope > span');
@@ -86,6 +112,7 @@ test.describe('worktree reconciliation', () => {
     }
     await warning.getByRole('button', { name: 'Rescan project worktrees' }).click();
     await expect(warning.getByRole('button', { name: 'Rescan project worktrees' })).toBeEnabled();
+    await page.waitForTimeout(450);
     await expect(warning).toContainText('Duplicate main projects');
     await expect(rows()).toHaveCount(1);
     const saved = await page.evaluate(() => window.shelfApi.project.getAll());

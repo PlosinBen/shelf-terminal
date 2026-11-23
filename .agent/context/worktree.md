@@ -166,7 +166,7 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 
 **Do not change casually because:** A confirmed non-Git main without children is normal and skips reconciliation. An unrecognizable main with existing children is an error. Errors appear beside the main project, with details and Rescan, without replacing normal content or changing focus. IPC/renderer refresh failure may happen after commit; refresh canonical data instead of claiming rollback or replaying a stale batch.
 
-The scan-error popover stays within the viewport, with long details scrolling independently of Close and Rescan. A warning near the bottom of the sidebar must not place dismissal controls below the window. Closing details retains the warning and last-known scan result.
+The scan-error popover opens beside its warning on hover, keyboard focus or click, and stays within the viewport. Long details scroll independently of Close and Rescan. Leaving the warning and panel schedules dismissal after 300ms; entering the panel cancels dismissal so reading and retrying have no fixed timeout. Escape, Close and outside clicks dismiss it. Closing details retains the warning and last-known scan result. Position follows the warning on scroll and window resize rather than using a fixed bottom corner.
 
 ## worktree#20 — Detached Finish merges the inspected commit and has no branch to delete  ·  [Decision]
 
