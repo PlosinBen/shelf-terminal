@@ -25,7 +25,7 @@
  * Prereq: ollama running on http://localhost:11434, models pulled.
  */
 import { createOpenAI } from '@ai-sdk/openai';
-import { streamText, generateText } from 'ai';
+import { streamText, generateText, jsonSchema } from 'ai';
 
 const BASE_URL = 'http://localhost:11434/v1';
 
@@ -37,12 +37,12 @@ const provider = createOpenAI({ apiKey: '', baseURL: BASE_URL });
 const tools = {
   multiply: {
     description: 'Multiply two integers and return the product',
-    parameters: {
+    inputSchema: jsonSchema({
       type: 'object',
       properties: { a: { type: 'number' }, b: { type: 'number' } },
       required: ['a', 'b'],
-    },
-  } as any,
+    }),
+  },
 };
 
 const toolPrompt = [{ role: 'user' as const, content: 'What is 7 times 13? Use the multiply tool.' }];
@@ -61,11 +61,13 @@ async function h2_basicStream(model: string) {
   console.log(`\n=== H2: basic streaming (${model}) ===`);
   try {
     const result = streamText({
-      model: provider(model),
+      model: provider.chat(model),
       messages: [{ role: 'user', content: 'Say "hello" and nothing else.' }],
     });
     let text = '';
     for await (const part of result.fullStream) {
+      if (part.type === 'error') throw part.error;
+      if (part.type === 'abort') throw new Error('Stream aborted');
       if (part.type === 'text-delta') text += part.text;
     }
     console.log(`✅ PASS — text="${text.trim()}"`);
@@ -78,10 +80,12 @@ async function h3_toolCall(model: string) {
   console.log(`\n--- H3: tool_call (${model}) ---`);
   // streamText path (what PM actually uses)
   try {
-    const result = streamText({ model: provider(model), messages: toolPrompt, tools });
+    const result = streamText({ model: provider.chat(model), messages: toolPrompt, tools });
     let toolCall = '';
     let textSample = '';
     for await (const part of result.fullStream) {
+      if (part.type === 'error') throw part.error;
+      if (part.type === 'abort') throw new Error('Stream aborted');
       if (part.type === 'tool-call') toolCall = `${part.toolName}(${JSON.stringify(part.input)})`;
       else if (part.type === 'text-delta' && !textSample) textSample = part.text;
     }
@@ -92,7 +96,7 @@ async function h3_toolCall(model: string) {
   }
   // non-stream cross-check
   try {
-    const result = await generateText({ model: provider(model), messages: toolPrompt, tools });
+    const result = await generateText({ model: provider.chat(model), messages: toolPrompt, tools });
     if (result.toolCalls.length > 0) {
       console.log(`  generate: ✅ toolCalls=${JSON.stringify(result.toolCalls.map(c => `${c.toolName}(${JSON.stringify(c.input)})`))}`);
     } else {

@@ -207,7 +207,8 @@ title: shelf-terminal — Intent → File Index
 | Barrel export | `index.ts` | 統一匯出 PM 模組所有公開 API |
 | LLM 對話循環 | `agent-loop.ts` | 結構化 system prompt + tool use loop + streaming + sliding window + auto-retry |
 | Sliding window helper | `history-window.ts` | `trimHistoryForLLM` 切到 user boundary，避免裸切 function_call |
-| LLM streaming client | `llm-client.ts` | OpenAI-compatible SSE streaming（Electron `net.fetch`），解析 tool_calls |
+| LLM streaming client | `llm-client.ts` | AI SDK chat completions、工具 schema／history 轉換、串流錯誤與取消傳遞 |
+| LLM SDK 契約驗證 | `llm-client-stream.test.ts` | 真實 SDK 搭配替代 fetch，檢查 wire schema／history／error／abort |
 | Tool 定義 + 執行 | `tools.ts` | tool schemas + `executeTool` dispatcher + `inferTabState` + Away Mode 過濾 |
 | Scrollback ring buffer | `scrollback-buffer.ts` | Per-tab 100KB ring buffer、ANSI strip、lastNLines 讀取 |
 | Note 儲存 | `note-store.ts` | PM 單筆 note + global note 讀寫 |

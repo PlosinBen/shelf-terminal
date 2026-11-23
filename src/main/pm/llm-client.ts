@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai';
-import { streamText, type ModelMessage } from 'ai';
+import { APICallError, jsonSchema, streamText, type ModelMessage, type ToolSet } from 'ai';
 import { log } from '@shared/logger';
 import type { PmProviderConfig } from '@shared/types';
 import { PM_PROVIDERS } from '@shared/types';
@@ -44,15 +44,14 @@ function buildProvider(config: PmProviderConfig) {
 
 /**
  * Convert PM's internal OpenAI-style ChatMessage[] (which the history-store
- * persists) into ai-sdk v6's strict ModelMessage[] schema:
+ * persists) into AI SDK's ModelMessage[] schema:
  *
  *  - PM ChatMessage `{role:'assistant', content:null, tool_calls:[...]}`
  *    becomes `{role:'assistant', content:[{type:'tool-call', toolCallId, toolName, input}]}`
  *  - PM ChatMessage `{role:'tool', content:'...', tool_call_id}` becomes
  *    `{role:'tool', content:[{type:'tool-result', toolCallId, toolName, output:{type:'text', value:'...'}}]}`
  *  - The system message is pulled out and returned separately so the caller
- *    can pass it via `streamText({ system, messages })` — using the dedicated
- *    `system` option also dismisses ai-sdk's prompt-injection warning.
+ *    can pass it via `streamText({ instructions, messages })`.
  *
  * toolName is required by `ToolResultPart` but PM's internal tool message
  * doesn't store it, so we track `toolCallId → toolName` from preceding
@@ -141,28 +140,33 @@ export async function* streamChat(
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   log.debug('pm-llm', `request: ${messages.length} messages, ${tools.length} tools`);
+  signal?.throwIfAborted();
 
   const provider = buildProvider(config);
 
-  const toolMap: Record<string, { description: string; parameters: Record<string, unknown> }> = {};
+  const toolMap: ToolSet = {};
   for (const t of tools) {
     toolMap[t.function.name] = {
       description: t.function.description,
-      parameters: t.function.parameters,
+      inputSchema: jsonSchema(t.function.parameters),
     };
   }
 
-  // Adapt PM's internal OpenAI-style ChatMessage[] to ai-sdk v6 ModelMessage[]
+  // Adapt PM's persisted OpenAI-style ChatMessage[] to ModelMessage[]
   // schema (tool_calls become content-block tool-call parts, tool result
   // content becomes a tool-result array, system pulled out). See toModelMessages.
   const { system, modelMessages } = toModelMessages(messages);
 
   const result = streamText({
-    model: provider(config.model),
-    system,
+    model: provider.chat(config.model),
+    instructions: system,
     messages: modelMessages,
-    tools: Object.keys(toolMap).length > 0 ? toolMap as any : undefined,
+    tools: Object.keys(toolMap).length > 0 ? toolMap : undefined,
     abortSignal: signal,
+    // PM owns retries and the visible backoff. See pm-agent#17.
+    maxRetries: 0,
+    // Errors are consumed below and logged by the agent loop with turn context.
+    onError: () => {},
   });
 
   for await (const part of result.fullStream) {
@@ -171,11 +175,20 @@ export async function* streamChat(
         yield { type: 'text', text: part.text };
         break;
       case 'tool-call':
+        if (part.invalid) throw part.error;
         yield { type: 'tool_call_start', toolCallId: part.toolCallId, toolName: part.toolName };
         yield { type: 'tool_call_args', toolCallId: part.toolCallId, argsChunk: JSON.stringify(part.input) };
         break;
+      case 'error':
+        if (APICallError.isInstance(part.error)) {
+          throw new Error(`LLM API error ${part.error.statusCode ?? 'unknown'}: ${part.error.message}`, { cause: part.error });
+        }
+        throw part.error instanceof Error ? part.error : new Error(String(part.error));
+      case 'abort':
+        throw new DOMException('PM generation aborted', 'AbortError');
     }
   }
 
+  signal?.throwIfAborted();
   yield { type: 'done' };
 }

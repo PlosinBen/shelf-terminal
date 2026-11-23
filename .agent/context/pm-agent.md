@@ -22,7 +22,7 @@ related:
 
 ## pm-agent#2 — PM 用 OpenAI-compatible API + `@ai-sdk/openai` 收斂多 provider  ·  [Decision]
 
-**Decision**：`llm-client.ts` 透過 `@ai-sdk/openai` 的 `createOpenAI({ baseURL, apiKey })` + `ai` 套件的 `streamText()` 打 OpenAI-compatible `/v1/chat/completions`，所有 provider（OpenAI / Gemini / Ollama / 未來自建）共用同一條 code path。`PM_PROVIDERS` metadata 定義每家的 `baseURL` 預設值，user 可在 `PmProviderConfig.baseURL` 覆寫（見 `pm-agent#10`）。
+**Decision**：`llm-client.ts` 透過 `@ai-sdk/openai` 的 `createOpenAI({ baseURL, apiKey }).chat(model)` + `ai` 套件的 `streamText()` 打 OpenAI-compatible `/v1/chat/completions`，所有 provider（OpenAI / Gemini / Ollama / 未來自建）共用同一條 code path。必須明確選 `.chat()`，provider 的預設呼叫使用 Responses API，不能假設自訂 baseURL 會切換協定。`PM_PROVIDERS` metadata 定義每家的 `baseURL` 預設值，user 可在 `PmProviderConfig.baseURL` 覆寫（見 `pm-agent#10`）。
 
 **Reason**：一次 SDK 處理 SSE streaming、tool_call args 跨 chunk 合併、reasoning_effort、abort signal 等 OpenAI-compatible 細節，不需要為每個 provider 重新對齊 wire 行為。`@ai-sdk/openai` 是 provider-agnostic，加新 OpenAI-compatible provider 只要新增 metadata entry，零新邏輯。
 
@@ -292,7 +292,7 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 
 **Symptom**：PM 對話撞 503 後自動重試。
 
-**Root cause**：`agent-loop.ts` 對 retryable HTTP error（503/429/500/502/504）自動重試最多 3 次，間隔 5s → 10s → 20s（exponential backoff）。重試期間 UI 顯示 "Retrying in Ns..."。
+**Root cause**：`agent-loop.ts` 對 retryable HTTP error（503/429/500/502/504）自動重試最多 3 次，間隔 5s → 10s → 20s（exponential backoff）。重試期間 UI 顯示 "Retrying in Ns..."。SDK 設定 `maxRetries: 0`，避免兩層重試疊加；LLM client 將 SDK HTTP error 的 status 保留在 `LLM API error <status>: <message>`，讓既有 retry 分類與 UI 訊息一致，原始 error 保留為 cause。
 
 **Fix**：重試期間按 Stop 可中止。全部失敗後 error 存進 history（role: 'error'），重啟後可見。
 
@@ -329,3 +329,11 @@ User 用 slash command 切 mode：`/pm` / `/use_<alias>` / `/projects` / `/mode`
 **Do not change casually because**：
 - 不要把回退邏輯改成「往前找直到下一個 user」（forward search）— 會丟掉切點到下一個 user 之間的 context，最近的 tool 序列直接消失。
 - 不要在切完後手動補 placeholder user turn — Gemini 雖然會接受結構，但 LLM 看到憑空冒出來的 user 會困惑。
+
+## pm-agent#21 — PM SDK 工具 schema 與錯誤必須經過明確轉換  ·  [Gotcha]
+
+**現況**：AI SDK 7 / OpenAI provider 4 在 main bundle 執行，要求 Node >=22；產品本機使用 Electron 內嵌 Node。PM 保留既有 OpenAI-style history，送出前轉成 `ModelMessage[]`，system prompt 經 `instructions` 傳入。工具的 JSON Schema 以 `jsonSchema(parameters)` 包裝後放在 `inputSchema`，tool map 使用 `ToolSet`，不能用 `as any` 掩蓋 SDK 欄位變更。
+
+**原因**：舊的 `parameters` 欄位會讓 SDK 送出空 schema，遺失 properties／required；`fullStream` 的 error／abort 是事件，不保證 iterator 自行拋錯。Client 必須將 error／abort 拋給 PM loop，並拒絕 invalid tool call，不能讓失敗落到 `done` 或執行器。正常結束才 yield done；取消不保存空白或未完成的 assistant 成功訊息。SDK onError callback 不另行輸出，錯誤由 fullStream 分支傳遞到 loop 統一記錄與呈現。
+
+**驗證邊界**：LLM client 測試使用真實 SDK、替代 fetch；PM SDK E2E 使用 loopback HTTP、實際 main bundle／IPC／面板及 history 檔案。它們不證明真實 OpenAI／Gemini／Ollama 服務或所有模型的工具能力。參考 [AI SDK 7 migration](https://ai-sdk.dev/docs/migration-guides/migration-guide-7-0) 與 [OpenAI provider chat models](https://ai-sdk.dev/providers/ai-sdk-providers/openai#chat-models)。
