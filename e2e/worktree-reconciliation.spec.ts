@@ -52,6 +52,34 @@ test.describe('worktree reconciliation', () => {
     await page.getByRole('button', { name: 'Worktree scan failed' }).click();
     const warning = page.locator('.worktree-scan-popover');
     await expect(warning).toContainText('Duplicate main projects');
+    // A sidebar warning near the bottom must not put Close outside the viewport.
+    await page.getByRole('button', { name: 'Worktree scan failed' }).evaluate(button => {
+      const host = button.parentElement!;
+      host.style.position = 'fixed';
+      host.style.bottom = '60px';
+      host.style.left = '20px';
+      host.style.zIndex = '100';
+    });
+    const close = warning.getByRole('button', { name: 'Close', exact: true });
+    await expect(close).toBeInViewport({ ratio: 1 });
+    await close.click();
+    await expect(warning).toHaveCount(0);
+    await page.getByRole('button', { name: 'Worktree scan failed' }).click();
+    await expect(warning).toContainText('Duplicate main projects');
+    const testWindow = await app.browserWindow(page);
+    await testWindow.evaluate(browserWindow => {
+      browserWindow.setMinimumSize(0, 0);
+      browserWindow.setContentSize(800, 250);
+    });
+    await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(250);
+    await expect(close).toBeInViewport({ ratio: 1 });
+    await expect(warning.getByRole('button', { name: 'Rescan project worktrees' })).toBeInViewport({ ratio: 1 });
+    const details = warning.locator(':scope > span');
+    expect(await details.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+    await details.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await close.click();
+    await expect(warning).toHaveCount(0);
+    await page.getByRole('button', { name: 'Worktree scan failed' }).click();
     for (const detail of ['Scan Base', 'ID: base', 'ID: other-main', 'ID: existing-child', base, child,
       'No scan updates were saved', 'Rescanning will fail again']) {
       await expect(warning).toContainText(detail);

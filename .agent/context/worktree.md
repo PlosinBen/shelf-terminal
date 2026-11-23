@@ -166,6 +166,8 @@ Every invocation requires `development-flow`, `propose_worktree_create`, and `pr
 
 **Do not change casually because:** A confirmed non-Git main without children is normal and skips reconciliation. An unrecognizable main with existing children is an error. Errors appear beside the main project, with details and Rescan, without replacing normal content or changing focus. IPC/renderer refresh failure may happen after commit; refresh canonical data instead of claiming rollback or replaying a stale batch.
 
+The scan-error popover stays within the viewport, with long details scrolling independently of Close and Rescan. A warning near the bottom of the sidebar must not place dismissal controls below the window. Closing details retains the warning and last-known scan result.
+
 ## worktree#20 — Detached Finish merges the inspected commit and has no branch to delete  ·  [Decision]
 
 **Decision:** Finish resolves the live source identity, branch and HEAD, uses that commit for both free-target and checked-out-target fast-forward paths, and rejects changed HEAD before merge. Recheck source identity/HEAD/branch before cleanup. Detached sources follow the same clean/ff-only gates; cleanup removes their checkout but deletes no branch. Display labels are separate from branch deletion arguments.
