@@ -96,6 +96,14 @@ Renderer 共用 `setPlan` 透過 `debugLog` 記錄 `agent-plan` tag（main 以 I
 - 變更 scripts、harness、auth／平台前提、log／artifact 或清理機制時，同批更新本檔及必要入口。具體設定與 spec 保持 source of truth，本檔不維護歷次通過紀錄。
 
 
+### Provider SDK 升級驗收與後續驗證
+
+Provider SDK 升級以已完成的 macOS 驗證及 Linux 隔離 fixture 為驗收範圍。Copilot／Codex 的真人 smoke 涵蓋對話、工具、停止後續聊與 session 恢復；Copilot account quota 另有畫面確認。受測設定為 Copilot allow-all 與 Codex approval=never，不能外推受限權限下的互動授權。此範圍不取代各功能專屬驗證，例如下方 app skill command 的 native dispatch。
+
+Claude 真人服務 smoke 排入後續，不阻擋 SDK 升級結案。既有真實 SDK／loopback 模型的 interrupt、含歷史 resume 與完整 /clear 後恢復證據，不等於 Shelf UI 搭配真實帳號服務已通過。恢復 Claude 驗證工作、取得可用測試帳號／訂閱，或收到相關問題時，補查對話、工具／權限、停止後續聊與重啟恢復，記錄有效 model／mode／permission 與 log 範圍。
+
+Windows／WSL 不列為這輪升級的待完成驗收；日後收到平台問題時另開 issue note，使用實際平台重現與驗證。真實認證／FIPS／未測 TLS 路徑仍屬覆蓋限制，不因結案視為已通過。Alpine 與 Codex moderation/display 的既有處置見 [improvements.md](improvements.md)，Copilot MCP／usage 等上游限制見 [UPSTREAM_WATCH.md](UPSTREAM_WATCH.md)。PM 的真實服務驗證獨立於 agent provider 驗收。
+
 ### App skill command 驗證界線
 
 App skill command 的共用提交、queue、設定與 history 行為由 unit／fake-provider E2E 覆蓋；SSH dispatcher／direct 測試驗證遠端投影與控制路由，不代表遠端真實模型服務。Codex 有正式 adapter 的真實服務證據；Claude／Copilot 的正式 adapter native dispatch 以真實 CLI 搭配本機模擬推論驗證，probe 的 main receipt approval 為模擬，不能宣稱完整真實服務端到端通過。
