@@ -90,7 +90,7 @@ staging history and deleting. Confirmation lists affected children and Shelf dat
 parent removal does not delete Git worktrees, branches or working directories. Cleanup attempts
 every removed member; `retryCleanup(parentId)` retries only unfinished members, and `leftover`
 reports one current target failure while all failures are logged. Existing orphan records are
-preserved on load and connect. On explicit Rescan, renderer lists all projects whose registered
+preserved on load. Connect and Rescan run the same scan. After verifying a Git snapshot, main returns the orphan IDs before any write. Renderer lists all projects whose registered
 parent is absent, obtains confirmation, stages their Agent history, and submits the sorted IDs
 and session ownership. Main rechecks this scope, validates the remaining scan, and persists
 removals, updates and fresh discoveries together. Post-commit cleanup uses each old project ID;

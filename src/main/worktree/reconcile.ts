@@ -1,3 +1,4 @@
+import { orphanProjects } from '@shared/projects';
 import { sameWorktreeBaseline } from '../projects/projects-repository';
 import { repoLockKey } from './repo-lock';
 import { isDeepStrictEqual } from 'node:util';
@@ -60,6 +61,10 @@ async function run(id: string, stagedOrphans?: readonly StagedOrphan[]): Promise
     if (children.length) throw new Error('Main project is no longer a Git repository');
     if (stagedOrphans?.length) throw new Error('Cannot complete orphan cleanup without a Git worktree scan. Rescan from a Git project.');
     return { outcome: WorktreeScanOutcome.SKIPPED };
+  }
+  if (!stagedOrphans) {
+    const orphans = orphanProjects(baseline);
+    if (orphans.length) return { outcome: WorktreeScanOutcome.ORPHANS, orphanIds: orphans.map(project => project.id) };
   }
   const identities = new Map<string, WorktreeIdentity | null>();
   for (const child of children) {

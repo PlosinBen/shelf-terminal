@@ -1,5 +1,5 @@
 export const WorktreeAvailability = { VALID: 'valid', MISSING: 'missing' } as const;
-export const WorktreeScanOutcome = { APPLIED: 'applied', SKIPPED: 'skipped', STALE: 'stale' } as const;
+export const WorktreeScanOutcome = { APPLIED: 'applied', ORPHANS: 'orphans', SKIPPED: 'skipped', STALE: 'stale' } as const;
 export interface WorktreeIdentity {
   readonly checkoutPath: string;
   readonly gitDir: string;
@@ -16,6 +16,7 @@ export function worktreeLabel(project: { cwd: string; worktreeBranch?: string | 
   return project.worktreeBranch || `${project.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop()} (detached)`;
 }
 export type WorktreeScanResult =
+  | { outcome: typeof WorktreeScanOutcome.ORPHANS; orphanIds: readonly string[] }
   | { outcome: typeof WorktreeScanOutcome.APPLIED; projects: readonly import('./projects').Project[]; orphanCleanup?: readonly { id: string; result: import('./projects').ProjectDeleteResult }[] }
   | { outcome: typeof WorktreeScanOutcome.SKIPPED | typeof WorktreeScanOutcome.STALE };
 

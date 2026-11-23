@@ -93,7 +93,7 @@ test.describe('worktree reconciliation', () => {
     await expect(page.locator('.sidebar-item')).toHaveCount(0);
   });
 
-  test('explicit rescan cleans confirmed orphan registrations and rediscovers live checkouts', async () => {
+  test('connect scan detects orphan registrations and rescan retries after cancellation', async () => {
     const [main] = await page.evaluate(() => window.shelfApi.project.getAll());
     await app.close();
     const old = { ...main, id: 'orphan', parentProjectId: 'removed', cwd: fs.realpathSync(child), agentViews: {} };
@@ -103,16 +103,18 @@ test.describe('worktree reconciliation', () => {
     for (const { id } of [old, second]) fs.mkdirSync(path.join(userData, 'projects', id), { recursive: true });
     const before = git(base, 'worktree', 'list', '--porcelain');
     await launch();
+    await app.evaluate(({ dialog }) => {
+      (globalThis as any).orphanPrompts = 0;
+      dialog.showMessageBox = async (_window, options) => {
+        if (options.title !== 'Remove orphan Shelf projects?') throw new Error('Unexpected dialog: ' + options.title);
+        return { response: ++(globalThis as any).orphanPrompts === 1 ? 1 : 0, checkboxChecked: false };
+      };
+    });
     await connectMain();
+    await expect.poll(() => app.evaluate(() => (globalThis as any).orphanPrompts)).toBe(1);
     const warning = page.getByRole('button', { name: 'Worktree scan failed' });
     await warning.click();
-    await app.evaluate(({ dialog }) => {
-      let attempts = 0;
-      dialog.showMessageBox = async () => ({ response: ++attempts === 1 ? 1 : 0, checkboxChecked: false });
-    });
     const rescan = page.getByRole('button', { name: 'Rescan project worktrees' }).first();
-    await rescan.click();
-    await expect(rescan).toBeEnabled();
     expect((await page.evaluate(() => window.shelfApi.project.getAll())).map(project => project.id)).toContain(old.id);
     await rescan.click();
     await expect(warning).toHaveCount(0);
