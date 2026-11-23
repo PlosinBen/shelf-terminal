@@ -702,3 +702,9 @@ Fresh capabilities probe 若建立 `session/new`，立刻透過 session-scoped `
 **Resume identity**：恢復使用一般 SDK 訊息的 `session_id`，在前景 result 收尾時保存至 context；明確 `/clear` 先清除保存的舊 ID。`conversation_reset.new_conversation_id` 不直接作為 `options.resume`：SDK 0.3.329 的完整 `/clear` 序列中，它與後續 init/result 的 session_id 不同。Shelf 的顯示歷史與 provider context 各有生命週期，不因此事件自動刪除 IDB 歷史。
 
 **Boundary**：上述停止語意的 runtime 證據涵蓋 general-purpose local_agent（fork subagent 關閉）與 local_bash，使用真實 SDK/native CLI 配本機模擬推論；不代表 workflow、fork subagent、one-shot 或全部平台。完整 `/clear` 的 SDK 序列已觀察，但含模型歷史的恢復、Plan mode clear-context、fresh_session/onboarding 與任意中途退出未完整驗證。後續涉及這些路徑時先取得事件序列，不把 conversation ID 與 resume session ID 視為同義。
+
+<a id="agent-providers60"></a>
+
+## agent-providers#60 — Copilot ACP 的 MCP server 總覽無法驗證個別工具可見性 · [Gotcha]
+
+Copilot CLI 1.0.114 透過 ACP 收到完整的 `/mcp show <server>` 時，只回傳 server 總覽。直接透過 ACP 接上提供已知工具的測試 server，分別送出 `/mcp`、指定該 server 與指定不存在的 server，三次得到相同清單。`connected` 表示 CLI 回報 server 已連線；判斷個別工具是否可用，需要對照 MCP 的 `tools/list`、模型的工具搜尋結果與實際呼叫。這項顯示限制無法解釋對話恢復後工具搜尋為空的原因。
