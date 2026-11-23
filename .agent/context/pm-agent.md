@@ -24,11 +24,11 @@ related:
 
 **Decision**：`llm-client.ts` 透過 `@ai-sdk/openai` 的 `createOpenAI({ baseURL, apiKey }).chat(model)` + `ai` 套件的 `streamText()` 打 OpenAI-compatible `/v1/chat/completions`，所有 provider（OpenAI / Gemini / Ollama / 未來自建）共用同一條 code path。必須明確選 `.chat()`，provider 的預設呼叫使用 Responses API，不能假設自訂 baseURL 會切換協定。`PM_PROVIDERS` metadata 定義每家的 `baseURL` 預設值，user 可在 `PmProviderConfig.baseURL` 覆寫（見 `pm-agent#10`）。
 
-**Reason**：一次 SDK 處理 SSE streaming、tool_call args 跨 chunk 合併、reasoning_effort、abort signal 等 OpenAI-compatible 細節，不需要為每個 provider 重新對齊 wire 行為。`@ai-sdk/openai` 是 provider-agnostic，加新 OpenAI-compatible provider 只要新增 metadata entry，零新邏輯。
+**Reason**：共用 SDK 處理 SSE streaming、tool_call args 跨 chunk 合併、reasoning_effort、abort signal 等 OpenAI-compatible 細節。相容的服務可透過 metadata 與 baseURL 設定接入；實際服務及模型支援的欄位、工具與取消行為仍需分別驗證，不能由共用 code path 推論全面相容。
 
 **Do not change casually because**：
 - 不要加 `openai` SDK 或 `@anthropic-ai/sdk` dependency — `@ai-sdk/openai` 已涵蓋
-- 不要繞過 `streamText` 自己用 `net.fetch` 打 SSE — ai-sdk 內部處理 OpenAI/Gemini/Ollama 都正常，自寫 fetch 等於重做 tool_call args 合併、abort、usage callback 等邏輯
+- 不要繞過 `streamText` 自己用 `net.fetch` 打 SSE — 自寫 fetch 會重做 tool_call args 合併、abort、usage callback 等邏輯；SDK fixture 通過不等於真實 OpenAI／Gemini／Ollama 服務已全部驗證
 
 **Background**：PM 用 `@ai-sdk/openai` 跑 SSE streaming 與跨 provider 行為一致性；本 entry 以此實作為準。
 
