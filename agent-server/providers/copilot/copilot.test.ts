@@ -1063,7 +1063,7 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
 
   it('resumes persisted ACP state before capability discovery creates a new session', async () => {
     let newSessions = 0;
-    let resumedSessionId: string | undefined;
+    const resume = vi.fn();
     let promptSessionId: string | undefined;
     const mock = createMockAcpAgent({
       agentCapabilities: { sessionCapabilities: { resume: {} } },
@@ -1071,10 +1071,11 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       configOptions: COPILOT_CONFIG,
       commandsOnResumeSession: [{ name: 'compact', description: 'Summarize conversation' }],
       onNewSession: () => { newSessions += 1; },
-      onResumeSession: (params) => { resumedSessionId = (params as { sessionId?: string }).sessionId; },
+      onResumeSession: resume,
       onPrompt: (params) => { promptSessionId = (params as { sessionId?: string }).sessionId; },
     });
-    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => null });
+    const endpoint = { url: 'http://127.0.0.1:9999/mcp', headers: { Authorization: 'Bearer test-token' } };
+    const backend = createCopilotBackend({ openAgent: () => ({ target: mock }), getShelfMcp: async () => endpoint });
 
     const caps = await backend.gatherCapabilities!(
       '/tmp/project',
@@ -1091,7 +1092,13 @@ describe('acp-copilot backend (via mock ACP agent)', () => {
       },
     );
 
-    expect(resumedSessionId).toBe('persisted-acp-session');
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'persisted-acp-session',
+      mcpServers: expect.arrayContaining([{
+        name: 'shelf', type: 'http', url: endpoint.url,
+        headers: [{ name: 'Authorization', value: endpoint.headers.Authorization }],
+      }]),
+    }));
     expect(newSessions).toBe(0);
     expect(caps.permissionControl).toMatchObject({
       strategy: 'native',

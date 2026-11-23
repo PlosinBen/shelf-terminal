@@ -260,6 +260,7 @@ export function createSessionDriver(options: SessionDriverOptions = {}): Session
       const response = await agent.request(methods.agent.session.resume, {
         sessionId,
         cwd: opts.cwd,
+        mcpServers: opts.mcpServers ?? [],
         ...(opts.additionalDirectories?.length ? { additionalDirectories: opts.additionalDirectories } : {}),
       });
       routeState(sessionId).cwd = opts.cwd;
