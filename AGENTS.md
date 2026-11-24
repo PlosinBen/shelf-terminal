@@ -40,8 +40,12 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 - 執行彼此獨立的命令時，分開呼叫工具，避免用 `;` 串接，讓 Shelf 分別顯示每個命令的結果。後一步需要前一步成功時，才用 `&&` 串接。若查無結果符合預期，只將該工具代表「查無結果」的退出碼視為正常，其他錯誤仍回傳原退出碼。
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
 - 禁止靜默吞錯 / 丟資料 — 狀態對不上、解析失敗、收到非預期輸入時要 fail-loud（log 出關鍵 id / context），不要 silent `return` 或 catch 後不處理。良性 race 用低調 log（`debugLog` 落檔）、真資料遺失要大聲（`console.warn/error`）；純函式回傳 anomaly 讓 caller log（保持可測）。樂觀更新尤其要在跟真相源對帳對不上時留痕
-- **Worktree-first development**（覆寫 development-flow「原地開 branch」預設）：
-  - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護 + 純套件升級；若升級後測試有問題，則開 note 並依 development-flow 處理。
-  - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
-  - **伴隨 code 變更的 doc 跟著 code 走**：一次 code 變更該連帶更新的 `.agent/` / contract / map，與那份 code 同在 worktree、同批改，不拆回 main。
-  - 對本 repo 中必須隔離的 code / test work，**必須**以 `shelf-worktree-handoff` 作為控制流程；**禁止**繞過它自行建立 worktree，或留在 parent project 實作。該 skill、development-flow 或必要 Shelf worktree tools 任一缺失時，**必須立即停止並明確回報，禁止降級或自行補做整合流程**。純文件維護仍依本 repo 的明文例外處理。
+
+## Worktree-first
+
+修改 source 或 tests 必須在 Shelf worktree 內進行。尚未進入對應 worktree 時，先走 `shelf-worktree-handoff`。
+
+- **Main checkout** 可用於規劃、唯讀調查、純文件維護，以及只改依賴宣告和 lockfile 的套件升級。純套件升級可在 main 執行既有測試。
+- **套件升級後測試失敗**時，建立工作 note 並依 `development-flow` 處理。若需修改 source 或 tests，先走 Shelf handoff。
+- **隨 code 變更的文件**與 code 放在同一個 worktree，同批交付。
+- **缺少 `shelf-worktree-handoff`、`development-flow` 或必要的 Shelf 工具**時，立即停止需要隔離的工作並回報阻礙。Worktree 的建立、接續和收尾一律走 Shelf handoff。
