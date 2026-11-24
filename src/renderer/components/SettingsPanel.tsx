@@ -4,6 +4,7 @@ import { recordCombo } from '../hooks/useKeybindings';
 import type { AppSettings, KeybindingAction, ProviderModel } from '@shared/types';
 import { PM_PROVIDERS } from '@shared/types';
 import { type ListStatus, type ListError } from './settings/helpers';
+import { GeneralSettingsTab } from './settings/GeneralSettingsTab';
 import { TerminalSettingsTab } from './settings/TerminalSettingsTab';
 import { AgentSettingsTab } from './settings/AgentSettingsTab';
 import { ModelsSettingsTab } from './settings/ModelsSettingsTab';
@@ -11,12 +12,12 @@ import { PmAgentSettingsTab } from './settings/PmAgentSettingsTab';
 import { ShortcutsSettingsTab } from './settings/ShortcutsSettingsTab';
 import { WebSettingsTab } from './settings/WebSettingsTab';
 
-type SettingsTab = 'terminal' | 'agent' | 'models' | 'pm' | 'web' | 'shortcuts';
+type SettingsTab = 'general' | 'terminal' | 'agent' | 'models' | 'pm' | 'web' | 'shortcuts';
 
 export function SettingsPanel() {
   const { settingsVisible, settings } = useStore();
   const [draft, setDraft] = useState<AppSettings>(settings);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('terminal');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [recordingAction, setRecordingAction] = useState<KeybindingAction | null>(null);
   const [pathError, setPathError] = useState<string | null>(null);
   const [logsPath, setLogsPath] = useState<string>('');
@@ -39,7 +40,7 @@ export function SettingsPanel() {
   useEffect(() => {
     if (settingsVisible) {
       setDraft(settings);
-      setActiveTab('terminal');
+      setActiveTab('general');
       setRecordingAction(null);
       setPathError(null);
       window.shelfApi.app.logsPath().then(setLogsPath);
@@ -115,7 +116,7 @@ export function SettingsPanel() {
       const result = await window.shelfApi.connector.listDir({ type: 'local' }, draft.defaultLocalPath);
       if (result.error) {
         setPathError(`Path does not exist: ${draft.defaultLocalPath}`);
-        setActiveTab('terminal');
+        setActiveTab('general');
         return;
       }
     }
@@ -153,16 +154,17 @@ export function SettingsPanel() {
         </div>
         <div className="settings-layout">
           <div className="settings-tabs">
+            <button className={`settings-tab ${activeTab === 'general' ? 'active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
             <button className={`settings-tab ${activeTab === 'terminal' ? 'active' : ''}`} onClick={() => setActiveTab('terminal')}>Terminal</button>
             <button className={`settings-tab ${activeTab === 'agent' ? 'active' : ''}`} onClick={() => setActiveTab('agent')}>Agent</button>
-            <button className={`settings-tab ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Models</button>
+            <button className={`settings-tab ${activeTab === 'models' ? 'active' : ''}`} onClick={() => setActiveTab('models')}>Model Catalog</button>
             <button className={`settings-tab ${activeTab === 'pm' ? 'active' : ''}`} onClick={() => setActiveTab('pm')}>PM Agent</button>
             <button className={`settings-tab ${activeTab === 'web' ? 'active' : ''}`} onClick={() => setActiveTab('web')}>Web</button>
             <button className={`settings-tab ${activeTab === 'shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('shortcuts')}>Shortcuts</button>
           </div>
           <div className="settings-body">
-            {activeTab === 'terminal' && (
-              <TerminalSettingsTab
+            {activeTab === 'general' && (
+              <GeneralSettingsTab
                 draft={draft}
                 updateDraft={updateDraft}
                 pathError={pathError}
@@ -172,6 +174,8 @@ export function SettingsPanel() {
                 refreshLogsSize={refreshLogsSize}
               />
             )}
+
+            {activeTab === 'terminal' && <TerminalSettingsTab draft={draft} updateDraft={updateDraft} />}
 
             {activeTab === 'agent' && (
               <AgentSettingsTab draft={draft} updateDraft={updateDraft} />

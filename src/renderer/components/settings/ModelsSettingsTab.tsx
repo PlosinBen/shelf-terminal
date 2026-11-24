@@ -11,7 +11,7 @@ interface Props {
 export function ModelsSettingsTab({ draft, updateDraft }: Props) {
   return (
     <>
-      <div className="settings-section-title">Models</div>
+      <div className="settings-section-title">Model Catalog</div>
       <div className="project-edit-hint">Custom entries shown in PM Agent and Claude pickers. SDK-provided defaults are not listed here.</div>
       {[...PM_PROVIDERS, ...AGENT_PROVIDER_REGISTRY].map((p) => (
         <ProviderModelsSection

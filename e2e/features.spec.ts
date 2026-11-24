@@ -67,8 +67,19 @@ test('settings panel opens with mod+comma', async ({ shelfApp: { page } }) => {
   const panel = page.locator('.settings-panel');
   await expect(panel).toBeVisible({ timeout: 3_000 });
 
+  await expect(panel.locator('.settings-tab.active')).toHaveText('General');
   const themeSelect = page.locator('.settings-select').first();
   await expect(themeSelect).toBeVisible();
+
+  const path = panel.getByPlaceholder('~ (home directory)');
+  await path.fill('/nonexistent-shelf-settings-test/directory');
+  await panel.getByRole('button', { name: 'Model Catalog' }).click();
+  await expect(panel.locator('.settings-section-title')).toHaveText('Model Catalog');
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel.locator('.settings-tab.active')).toHaveText('General');
+  await expect(panel.locator('.settings-path-error')).toContainText(await path.inputValue());
+  await panel.getByRole('button', { name: 'Agent', exact: true }).click();
+  await expect(panel.locator('.settings-section-title')).toHaveText(['Display', 'History', 'Idle Sessions']);
 
   // Keybindings are on Shortcuts tab
   await page.locator('.settings-tab', { hasText: 'Shortcuts' }).click();
@@ -79,11 +90,26 @@ test('settings panel opens with mod+comma', async ({ shelfApp: { page } }) => {
   await expect(panel).not.toBeVisible();
 });
 
+test('General saves the default local path in the existing settings file', async ({ shelfApp: { page, userDataDir } }) => {
+  await page.keyboard.press(`${modifier}+,`);
+  const panel = page.locator('.settings-panel');
+  const localPath = panel.getByPlaceholder('~ (home directory)');
+  await localPath.fill(userDataDir);
+  await panel.getByRole('button', { name: 'Terminal', exact: true }).click();
+  await panel.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(panel).not.toBeVisible();
+  const settingsFile = path.join(userDataDir, 'settings.json');
+  await expect.poll(() => fs.existsSync(settingsFile) && JSON.parse(fs.readFileSync(settingsFile, 'utf8')).defaultLocalPath).toBe(userDataDir);
+  await page.keyboard.press(`${modifier}+,`);
+  await expect(localPath).toHaveValue(userDataDir);
+});
+
 test('settings cancel discards changes', async ({ shelfApp: { page } }) => {
   await page.keyboard.press(`${modifier}+,`);
   const panel = page.locator('.settings-panel');
   await expect(panel).toBeVisible({ timeout: 3_000 });
 
+  await panel.getByRole('button', { name: 'Terminal', exact: true }).click();
   // Change font size
   const fontInput = panel.locator('.settings-input[type="number"]').first();
   const originalValue = await fontInput.inputValue();
@@ -96,6 +122,7 @@ test('settings cancel discards changes', async ({ shelfApp: { page } }) => {
   // Reopen and check value is unchanged
   await page.keyboard.press(`${modifier}+,`);
   await expect(panel).toBeVisible({ timeout: 3_000 });
+  await panel.getByRole('button', { name: 'Terminal', exact: true }).click();
   const currentValue = await panel.locator('.settings-input[type="number"]').first().inputValue();
   expect(currentValue).toBe(originalValue);
 

@@ -70,7 +70,7 @@ PM SDK 串接可使用 `npm run test:unit -- src/main/pm/llm-client-stream.test.
 
 Copilot 檔案顯示的 `acp/translate.test.ts`、`acp/client.test.ts` 覆蓋結構化路徑、partial locations、new/load/resume cwd 與保守標題。`npm run test:e2e -- e2e/codex-provider-flow.spec.ts --grep 'Copilot structured file'` 使用 fake transport 呼叫實際 ACP metadata carry／translator，驗證路徑、內容與歷史恢復；不是修改後真實 CLI 的端到端驗證。現有 runtime 證據包括 read locations 與 edit diff，不足以將空字串判為新增或刪除。Claude live 檔案結果尚未驗證，訂閱不可用時以本機 SDK 契約 fixture 為證據邊界；後續恢復服務才可補 live 覆蓋。
 
-Settings → Terminal → Log level 設 Debug，重啟包含目前 agent-server bundle 的 dev runtime。只在自建暫存目錄測試讀取、新增、覆寫、修改、搬移及刪除測試檔；一次操作完成後保留同 session 的 main log。
+Settings → General → Diagnostics → Log level 設 Debug，重啟包含目前 agent-server bundle 的 dev runtime。只在自建暫存目錄測試讀取、新增、覆寫、修改、搬移及刪除測試檔；一次操作完成後保留同 session 的 main log。
 
 Claude 結構化檔案結果可用 `npm run test:unit -- agent-server/providers/claude/file-result.test.ts` 驗證 shape guards、配對、失敗 fallback 與實際內容；`npm run test:e2e -- e2e/codex-provider-flow.spec.ts --grep 'Claude structured file results'` 由 fake transport 呼叫真實 Claude translator，驗證標題／card 格式更新、收合與歷史內容。此 E2E 使用 Codex 名稱的測試 tab，證明共通 renderer 流程，不涵蓋 Claude 登入或真實 SDK 事件。
 
@@ -81,7 +81,7 @@ Claude 結構化檔案結果可用 `npm run test:unit -- agent-server/providers/
 
 ### Copilot 待辦／plan 通知診斷（事件與輸出）
 
-使用包含目前 agent-server bundle 的 runtime，將 Settings → Terminal 的 Log level 設為 Debug；`copilot-plan` tag 經既有 main logger 寫入該次 userData log。`ACP notification` 在 provider/driver 篩選前記錄 sessionId、事件類型與 entries 陣列長度，略過高頻文字／思考 chunk；不記錄對話、工具輸入輸出或待辦文字。`plan output` 記錄送往 Shelf 的 plan 內容長度（0 表示清空）。`prompt begin`／`prompt settled` 標示觀察區間；settled 不代表 session 後續內容已結束，晚到通知仍可出現。
+使用包含目前 agent-server bundle 的 runtime，將 Settings → General → Diagnostics 的 Log level 設為 Debug；`copilot-plan` tag 經既有 main logger 寫入該次 userData log。`ACP notification` 在 provider/driver 篩選前記錄 sessionId、事件類型與 entries 陣列長度，略過高頻文字／思考 chunk；不記錄對話、工具輸入輸出或待辦文字。`plan output` 記錄送往 Shelf 的 plan 內容長度（0 表示清空）。`prompt begin`／`prompt settled` 標示觀察區間；settled 不代表 session 後續內容已結束，晚到通知仍可出現。
 
 以新的 Copilot 對話要求建立兩項原生待辦、完成其中一項，並保留另一項未完成；對照同一 session 的通知與輸出。收到 plan 卻沒有 plan output 時，檢查 hydration／output sink 路由；有 plan output 但沒有 UI 時，再追 main IPC／renderer。只有 tool_call 不能證明待辦已變更，須用該 session 的原生紀錄確認。沒有 plan 通知僅能支持已捕捉區間的觀察，不能推論所有 Copilot 版本均不支援。診斷完成後可恢復原 log level。
 
