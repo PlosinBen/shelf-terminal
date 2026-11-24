@@ -3406,8 +3406,7 @@ button {
   padding-right: 40px;
 }
 
-.fold-body-container + .fold-body-container,
-.fold-body-container + .fold-reading-controls {
+.fold-body-container + .fold-body-container {
   margin-top: 12px;
 }
 
@@ -3438,22 +3437,28 @@ button {
 
 .fold-reading-controls {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
+  justify-content: center;
 }
 
 .fold-reading-controls button {
   background: var(--surface);
   color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 3px 6px;
-  font-size: 12px;
+  border: 0;
+  border-radius: 0 0 5px 5px;
+  padding: 0;
+  width: 44px;
+  height: 20px;
+  display: grid;
+  place-items: center;
   cursor: pointer;
 }
 
-.fold-reading-controls button:hover {
+.fold-reading-controls button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.fold-reading-controls button:hover,
+.fold-reading-controls button:focus-visible {
   color: var(--text);
 }
 

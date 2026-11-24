@@ -214,7 +214,13 @@ test.describe('agent flows via fake provider', () => {
       await expect(card.locator('.fold-command-text')).toHaveCount(0);
       await sendCard(true);
       await expect(card.locator('.fold-body-code')).toBeVisible();
-      await expect(card.locator('.fold-reading-controls')).toHaveCSS('margin-top', '12px');
+      const toggle = card.getByRole('button', { name: 'Show full output (46 lines)' });
+      await expect(toggle).toHaveText('');
+      await expect(toggle).toHaveAttribute('title', 'Show full output (46 lines)');
+      const buttonBox = (await toggle.boundingBox())!;
+      const previewBox = (await outputBlock.boundingBox())!;
+      expect(buttonBox.y).toBeCloseTo(previewBox.y + previewBox.height, 0);
+      expect(buttonBox.x + buttonBox.width / 2).toBeCloseTo(previewBox.x + previewBox.width / 2, 0);
       await expectCopyAligned();
       await header.click();
       await expect(card.locator('.fold-body-code')).toHaveCount(0);
@@ -247,7 +253,10 @@ test.describe('agent flows via fake provider', () => {
       expect(outputStyle.scrollbar.startsWith(outputStyle.background + ' ')).toBe(false);
       await card.getByRole('button', { name: 'Copy output', exact: true }).click();
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
-      await card.getByRole('button', { name: 'Show preview', exact: true }).click();
+      const collapse = card.getByRole('button', { name: 'Show preview', exact: true });
+      await expect(collapse).toHaveAttribute('aria-expanded', 'true');
+      await collapse.focus();
+      await page.keyboard.press('Enter');
       await expect(card.locator('.fold-body-code')).not.toContainText('<failure-at-tail>');
       await card.getByRole('button', { name: 'Show full output (46 lines)', exact: true }).click();
       await expect(card.locator('.fold-body-code')).toHaveText(output);

@@ -184,6 +184,8 @@ function CodeFold({ message, settingMode, nested }: {
     observer.observe(el);
     return () => observer.disconnect();
   }, [isExpanded, fullOutput, preview]);
+  const toggleLabel = fullOutput ? 'Show preview' : preview.remaining
+    ? `Show full output (${preview.lines.length + preview.remaining} lines)` : 'Show full output';
   const copy = async (text: string, target: 'details' | 'output') => {
     try {
       await navigator.clipboard.writeText(text);
@@ -212,19 +214,19 @@ function CodeFold({ message, settingMode, nested }: {
         {nested && nested.length > 0 && <div className="agent-subagent-nested">
           {nested.map(child => <AgentMessage key={child.id} message={child} />)}
         </div>}
-        {output && <>
+        {output && <div className="fold-body-container">
+          <FoldCopyButton target="output" onCopy={() => copy(output, 'output')} />
+          <pre className="fold-body fold-body-code" data-preview={!fullOutput} tabIndex={fullOutput ? 0 : undefined} aria-label="Output">
+            {fullOutput ? output : <span ref={previewRef} style={{ maxHeight: `${OUTPUT_PREVIEW_LINES}lh` }}>{preview.lines.join('\n')}</span>}
+          </pre>
           {(preview.remaining > 0 || wrapsPastPreview || fullOutput) && <div className="fold-reading-controls">
-            <button type="button" aria-expanded={fullOutput} onClick={() => setFullOutput(!fullOutput)}>
-              {fullOutput ? 'Show preview' : preview.remaining ? `Show full output (${preview.lines.length + preview.remaining} lines)` : 'Show full output'}
+            <button type="button" aria-expanded={fullOutput} aria-label={toggleLabel} title={toggleLabel} onClick={() => setFullOutput(!fullOutput)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m5 6 7 6 7-6m-14 6 7 6 7-6" />
+              </svg>
             </button>
           </div>}
-          <div className="fold-body-container">
-            <FoldCopyButton target="output" onCopy={() => copy(output, 'output')} />
-            <pre className="fold-body fold-body-code" data-preview={!fullOutput} tabIndex={fullOutput ? 0 : undefined} aria-label="Output">
-              {fullOutput ? output : <span ref={previewRef} style={{ maxHeight: `${OUTPUT_PREVIEW_LINES}lh` }}>{preview.lines.join('\n')}</span>}
-            </pre>
-          </div>
-        </>}
+        </div>}
         {copyStatus && <div className="fold-copy-status" role="status">{copyStatus}</div>}
       </>}
     </div>
