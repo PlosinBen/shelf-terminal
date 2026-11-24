@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Begin every user-facing final reply in natural language with `Ben,`. If the requested output format requires an exact response, follow that format.
+
 ## Agent Reference Docs
 
 先讀 [.agent/index.md](.agent/index.md)（bundle 入口），或依情境直接跳：
