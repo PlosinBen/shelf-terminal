@@ -147,7 +147,7 @@ export function MessageList({ tabId, visible }: Props) {
         {showSpinner && (
           <div className="agent-loading">
             <span className="agent-loading-spinner" />
-            <span className="agent-loading-text">Agent is running... (Esc to stop)</span>
+            <span className="agent-loading-text">Agent is running... {tab?.runningDetail && `${tab.runningDetail} · `}(Esc to stop)</span>
           </div>
         )}
 

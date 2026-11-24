@@ -253,6 +253,31 @@ describe('Codex official app-server backend lifecycle', () => {
     }));
   });
 
+  it('reports transient retries only for the active turn and clears them on progress', async () => {
+    const app = new FakeAppServer({
+      'turn/start': () => {
+        const scope = { threadId: 'thread-1', turnId: 'turn-1' };
+        app.fire('turn/started', { threadId: scope.threadId, turn: { id: scope.turnId } });
+        const retry = { ...scope, willRetry: true, error: { message: 'Reconnecting... 1/5', codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 429 } } } };
+        app.fire('error', { ...retry, turnId: 'older' });
+        app.fire('error', { ...retry, willRetry: false });
+        app.fire('error', retry);
+        app.fire('item/agentMessage/delta', { ...scope, itemId: 'reply', delta: 'back' });
+        app.fire('turn/completed', turnCompleted(scope.turnId));
+        return { turn: { id: scope.turnId } };
+      },
+    });
+    const backend = createCodexBackend({ createAppServer: () => app });
+    const out: OutgoingMessage[] = [];
+    try {
+      await backend.query({ prompt: 'work', cwd: '/repo' }, m => out.push(m));
+      expect(out.filter(m => m.type === 'status' && 'runningDetail' in m)).toEqual([
+        { type: 'status', runningDetail: 'Rate limited · retrying (1/5)' },
+        { type: 'status', runningDetail: null },
+      ]);
+    } finally { backend.dispose(); }
+  });
+
   it('forwards turn plan notifications as replacement checklists including an empty snapshot', async () => {
     const app = new FakeAppServer({
       'turn/start': () => {

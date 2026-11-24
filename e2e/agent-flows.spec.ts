@@ -969,6 +969,17 @@ test.describe('agent flows via fake provider', () => {
       await expect(statusBar).toContainText('quota: 7%', { timeout: 5_000 });
     });
 
+    test('running indicator replaces and clears provider detail', async ({ shelfApp: { page } }) => {
+      await setupProject(page);
+      await openAgentTab(page);
+      await sendAgentPrompt(page, 'running-detail:Preparing workspace|delay:1500|running-detail:Reading files|delay:1500|running-detail:|delay:1500|text:back');
+      const running = page.locator('.agent-loading-text:visible');
+      await expect(running).toContainText('Preparing workspace');
+      await expect(running).toHaveText('Agent is running... Reading files · (Esc to stop)');
+      await expect(running).toHaveText('Agent is running... (Esc to stop)');
+      await expect(running).toHaveCount(0);
+    });
+
     test('/clear removes session context usage without clearing account quota', async ({ shelfApp: { page } }) => {
       await setupProject(page);
       await openAgentTab(page);

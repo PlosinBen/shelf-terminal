@@ -114,6 +114,7 @@ export interface AgentTabState {
   costUsd: number | undefined;
   numTurns: number | undefined;
   contextUsage: StatusSegment | null;
+  runningDetail: string | null;
   rateLimits: StatusSegment[];
   /** Account-level usage (copilot premium-request quota). Shared per host/account. */
   credits: StatusSegment | null;
@@ -477,6 +478,7 @@ export function initTab(tabId: string, opts: InitTabOpts) {
     costUsd: undefined,
     numTurns: undefined,
     contextUsage: null,
+    runningDetail: null,
     rateLimits: [],
     credits: null,
     capabilities: null,
@@ -926,6 +928,7 @@ export function setExecutionActive(tabId: string, value: boolean) {
   tabs.set(tabId, {
     ...cur,
     isExecutionActive: value,
+    runningDetail: null,
     messages: nextMessages,
     // Auto-dismiss any in-flight picker at execution end — provider's abort
     // path already resolved its pending Promise, so leaving the UI up
@@ -953,6 +956,7 @@ export interface StatusPartial {
   costUsd?: number;
   numTurns?: number;
   contextUsage?: StatusSegment | null;
+  runningDetail?: string | null;
   rateLimits?: StatusSegment[];
   credits?: StatusSegment;
 }
@@ -968,6 +972,7 @@ export function setStatus(tabId: string, partial: StatusPartial) {
     if (partial.costUsd != null) next.costUsd = partial.costUsd;
     if (partial.numTurns != null) next.numTurns = partial.numTurns;
     if (partial.contextUsage !== undefined) next.contextUsage = partial.contextUsage;
+    if (partial.runningDetail !== undefined) next.runningDetail = partial.runningDetail;
     if (Array.isArray(partial.rateLimits) && partial.rateLimits.length > 0) {
       next.rateLimits = partial.rateLimits;
     }

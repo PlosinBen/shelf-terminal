@@ -107,6 +107,7 @@ export function bindAgentStoreSubscriptions(): () => void {
       costUsd: s.costUsd,
       numTurns: s.numTurns,
       contextUsage: s.contextUsage,
+      runningDetail: s.runningDetail,
       rateLimits: s.rateLimits,
       credits: s.credits,
     });

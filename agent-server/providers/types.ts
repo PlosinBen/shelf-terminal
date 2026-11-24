@@ -135,6 +135,8 @@ export type OutgoingMessage = WireEnvelope & (
       numTurns?: number;
       /** `null` explicitly clears usage from a replaced conversation session. */
       contextUsage?: StatusSegment | null;
+      /** Transient provider text after the running indicator. Omit to retain, null to clear. */
+      runningDetail?: string | null;
       rateLimits?: StatusSegment[];
       /** Account-level usage (e.g. copilot premium-request quota). Provider-agnostic
        *  segment; copilot fills it post-execution via `refreshAccountStatus`. */

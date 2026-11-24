@@ -120,6 +120,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
   let activeThreadId: string | null = null;
   let displayCwd: string | undefined;
   let activeTurnId: string | null = null;
+  let retryPending = false;
   let resolveActiveTurn: (() => void) | null = null;
   const commandMetadataByItemId = new Map<string, { command?: string }>();
   const commandOutputByItemId = new Map<string, string>();
@@ -172,6 +173,22 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
     });
     const forward = (method: string) => {
       client.onNotification(method, (params) => {
+        const payload = asRecord(params);
+        const currentTurn = !!activeThreadId && !!activeTurnId
+          && payload?.threadId === activeThreadId && payload.turnId === activeTurnId;
+        if (method === 'error') {
+          if (!currentTurn || payload?.willRetry !== true || !activeSend) return;
+          const error = asRecord(payload.error);
+          const attempt = /\b(?:reconnecting|retrying)\s*(?:\.\.\.|…)?\s*\(?([0-9]{1,3})\s*\/\s*([0-9]{1,3})\b/i.exec(stringValue(error?.message) ?? '');
+          const reason = isRateLimitError(error) ? 'Rate limited · retrying' : 'Retrying request';
+          retryPending = true;
+          activeSend({ type: 'status', runningDetail: reason + (attempt ? ` (${attempt[1]}/${attempt[2]})` : '') });
+          return;
+        }
+        if (retryPending && currentTurn && (method.startsWith('item/') || method === CODEX_PLAN_UPDATED)) {
+          retryPending = false;
+          activeSend?.({ type: 'status', runningDetail: null });
+        }
         const planPayload = method === CODEX_PLAN_UPDATED ? asRecord(params) : null;
         const planTrace = method === CODEX_PLAN_UPDATED ? {
           threadId: stringValue(planPayload?.threadId),
@@ -180,6 +197,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
         } : null;
         if (planTrace) serverLog('debug', CODEX_PLAN_LOG_TAG, 'received', planTrace);
         if (method === 'turn/started') {
+          retryPending = false;
           activeTurnId = stringValue(asRecord(asRecord(params)?.turn)?.id) ?? activeTurnId;
           commandMetadataByItemId.clear();
           commandOutputByItemId.clear();
@@ -222,6 +240,7 @@ export function createCodexBackend(deps: CodexBackendDeps = {}): ServerBackend {
       });
     };
     for (const method of [
+      'error',
       'thread/status/changed',
       'turn/started',
       'turn/completed',
@@ -1166,7 +1185,8 @@ function isRateLimitError(error: Record<string, unknown> | null): boolean {
   if (!error) return false;
   const info = asRecord(error.codexErrorInfo ?? error.codex_error_info);
   const attempts = asRecord(info?.responseTooManyFailedAttempts ?? info?.response_too_many_failed_attempts);
-  const status = numberValue(attempts?.httpStatusCode ?? attempts?.http_status_code);
+  const detail = attempts ?? asRecord(info?.responseStreamDisconnected);
+  const status = numberValue(detail?.httpStatusCode ?? detail?.http_status_code);
   if (status === HTTP_TOO_MANY_REQUESTS) return true;
   const message = stringValue(error.message);
   return !!message && /(?:\b429\b|too many requests)/i.test(message);

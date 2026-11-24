@@ -702,6 +702,11 @@ export function createFakeBackend(_representedProvider: AgentProvider = FAKE_PRO
       return;
     }
 
+    if (step.startsWith('running-detail:')) {
+      send({ type: 'status', runningDetail: step.slice('running-detail:'.length) || null });
+      return;
+    }
+
     // plan:<markdown> — emit a plan / todo-list side-channel update. Routed to
     // PlanPanel (tab.currentPlan), NOT the timeline and NOT the background-tasks
     // panel — lets an E2E assert the plan/todo surface renders independently of
