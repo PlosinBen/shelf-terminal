@@ -74,3 +74,10 @@ does not restore them. Temporary disconnect, hibernation and provider replacemen
 themselves close a logical View. Project/worktree cleanup uses the same preflight before
 teardown. No history, disk persistence or restart recovery: restart loses pending results.
 Existing View and conversation persistence is unchanged.
+
+Renderer teardown notices are separate from operation errors and scoped to the affected
+participant tab IDs. Each View offers a keyboard-accessible Dismiss button. Dismissal
+compares the displayed notice identity, so an older callback cannot remove a newer notice;
+it leaves other Views, errors, active relationships and result slots unchanged. Snapshot
+updates and tab switches do not recreate dismissed notices. Locally busy explicit actions
+retain their existing suppression of teardown notices.

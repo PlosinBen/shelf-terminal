@@ -3,7 +3,7 @@ import { onAgent } from './events';
 import { getProjectById, getProjectIndexById, setActiveProjectById, setActiveTab } from './store';
 import {
   getDelegations, setDelegations, enqueueDelegationPicker, removeDelegationPicker,
-  setDelegationBusy, setDelegationError,
+  setDelegationBusy, setDelegationError, notifyDelegationEnded,
 } from './delegationStore';
 
 /** Called by App's central coordinator, never from a UI trigger. */
@@ -13,7 +13,9 @@ export function bindDelegationEvents() {
   const offUpdate = api.onUpdate(value => {
     changed = true;
     const removed = getDelegations().entries.filter(old => !value.some(entry => entry.id === old.id));
-    if (removed.some(entry => !getDelegations().busy.includes(entry.id))) setDelegationError('The other View closed or the delegation ended. This does not stop this Agent.');
+    for (const entry of removed) {
+      if (!getDelegations().busy.includes(entry.id)) notifyDelegationEnded(entry);
+    }
     if (value.some(entry => !getDelegations().entries.some(old => old.id === entry.id))) setDelegationError(null);
     setDelegations(value);
   });

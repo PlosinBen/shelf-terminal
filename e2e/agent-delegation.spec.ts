@@ -79,6 +79,43 @@ test.describe('worktree Agent delegation', () => {
     await expect(panel()).toContainText('Result ready');
     return panel().getAttribute('data-delegation-id');
   }
+  for (const close of ['peer View', 'Finish']) {
+    test(`${close} teardown notice is scoped and stays dismissed`, async () => {
+      await selectAndStart();
+      // Collect first so Finish/close can exercise the same teardown without discard.
+      await panel().getByRole('button', { name: 'Collect result' }).click();
+      await expect(panel().getByRole('button', { name: 'Collect result' })).toBeDisabled();
+      await spike();
+      if (close === 'peer View') {
+        await page.locator('.tab-bar .tab').last().locator('.tab-close').click();
+      } else {
+        await page.locator('.sidebar-item.worktree-child').click({ button: 'right' });
+        await page.locator('.context-menu-item', { hasText: 'Finish' }).click();
+        const popup = page.locator('.worktree-dialog', { hasText: 'Finish Worktree' });
+        await popup.locator('.conn-btn-next').click();
+        await expect(page.locator('.sidebar-item.worktree-child')).toHaveCount(0);
+      }
+      await main();
+      const dismiss = page.getByRole('button', { name: 'Dismiss delegation ended notice' });
+      await expect(dismiss).toBeVisible();
+      await expect(page.locator('.agent-view:visible').getByRole('status')).toContainText('This does not stop this Agent.');
+      // A second Agent View in the same Project must not inherit this notice.
+      await openAgentTab(page);
+      await expect(dismiss).toHaveCount(0);
+      await expect(page.locator('.agent-textarea:visible')).toBeEditable();
+      await page.locator('.tab-bar .tab').nth(1).click();
+      await dismiss.focus(); await page.keyboard.press('Enter');
+      await expect(dismiss).toHaveCount(0);
+      // Reading authoritative state and switching tabs must not recreate it (updates covered by unit).
+      await page.evaluate(() => window.shelfApi.delegation.current());
+      await page.locator('.tab-bar .tab').last().click();
+      await page.locator('.tab-bar .tab').nth(1).click();
+      await expect(dismiss).toHaveCount(0);
+      await sendAgentPrompt(page, 'text:ordinary input after teardown');
+      await expect(page.locator('.agent-messages:visible')).toContainText('ordinary input after teardown');
+      expect(await page.evaluate(() => window.shelfApi.delegation.current())).toEqual([]);
+    });
+  }
   test('manual collection and sequential phases preserve the relation; intervention rejects main work', async ({}, testInfo) => {
     const id = await selectAndStart();
     const [identity] = await page.evaluate(() => window.shelfApi.delegation.current());

@@ -1,12 +1,17 @@
 import { DELEGATION as D } from '@shared/agent-delegation';
 import { emitAgent } from '../../events';
-import { useDelegations } from '../../delegationStore';
+import { useDelegations, dismissDelegationEnded } from '../../delegationStore';
 
 export function DelegationPanel({ tabId }: { tabId: string }) {
-  const { entries, busy, error } = useDelegations();
+  const { entries, busy, error, endedNotices } = useDelegations();
   const relevant = entries.filter(e => e.main.tabId === tabId || e.spike.tabId === tabId);
-  if (!relevant.length && !error) return null;
+  const notice = endedNotices[tabId];
+  if (!relevant.length && !error && !notice) return null;
   return <div className="delegation-panel" data-testid="delegation-panel">
+    {notice && <div className="delegation-error" role="status">
+      <span>The other View closed or the delegation ended. This does not stop this Agent.</span>
+      <button className="delegation-button" aria-label="Dismiss delegation ended notice" onClick={() => dismissDelegationEnded(tabId, notice)}>Dismiss</button>
+    </div>}
     {error && <div className="delegation-error" role="status">{error}</div>}
     {relevant.map(entry => {
       const recipient = entry.spike.tabId === tabId;

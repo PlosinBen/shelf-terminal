@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DELEGATION as D, type DelegationSnapshot } from '@shared/agent-delegation';
 import { bindDelegationEvents, prepareDelegationClose } from './delegation-events';
-import { getDelegations, setDelegations, setDelegationError, setDelegationBusy } from './delegationStore';
+import { getDelegations, setDelegations, setDelegationError, setDelegationBusy, dismissDelegationEnded } from './delegationStore';
 import { emitAgent, __resetBusForTests } from './events';
 
 vi.mock('./store', () => ({ getProjectById: vi.fn(), getProjectIndexById: vi.fn(), setActiveProjectById: vi.fn(), setActiveTab: vi.fn() }));
 let cleanup: (() => void) | undefined;
-afterEach(() => { cleanup?.(); cleanup = undefined; __resetBusForTests(); setDelegations([]); setDelegationError(null); setDelegationBusy('d', false); vi.restoreAllMocks(); });
+afterEach(() => { cleanup?.(); cleanup = undefined; __resetBusForTests(); setDelegations([]); for (const [tab, notice] of Object.entries(getDelegations().endedNotices)) dismissDelegationEnded(tab, notice); setDelegationError(null); setDelegationBusy('d', false); vi.restoreAllMocks(); });
 function setup() {
   const api = {
     current: vi.fn(async () => [] as DelegationSnapshot[]), action: vi.fn(async () => ({ ok: true })),
@@ -19,6 +19,37 @@ function setup() {
   return { api, confirm };
 }
 describe('delegation central renderer handler', () => {
+  it('keeps peer teardown notices separate from delivery errors', () => {
+    const { api } = setup(); cleanup = bindDelegationEvents();
+    const entry = { id: 'd', main: { tabId: 'main' }, spike: { tabId: 'child' } } as DelegationSnapshot;
+    api.onUpdate.mock.calls[0][0]([entry]);
+    setDelegationError('delivery failed');
+    api.onUpdate.mock.calls[0][0]([]);
+    expect(getDelegations().error).toBe('delivery failed');
+  });
+  it('scopes dismissal to the observed notice and View, preserving newer notices and active results', () => {
+    const { api } = setup(); cleanup = bindDelegationEvents();
+    const update = api.onUpdate.mock.calls[0][0];
+    const entry = { id: 'd', main: { tabId: 'main' }, spike: { tabId: 'child' } } as DelegationSnapshot;
+    update([entry]); update([]);
+    const old = getDelegations().endedNotices.main;
+    expect(old).toBeDefined();
+    expect(getDelegations().endedNotices.unrelated).toBeUndefined();
+    update([{ ...entry, id: 'new' }]); update([]);
+    dismissDelegationEnded('main', old);
+    const fresh = getDelegations().endedNotices.main;
+    expect(fresh).not.toBe(old);
+    const active = { ...entry, id: 'active', resultState: D.RESULT.READY };
+    update([active]);
+    setDelegationError('new failure');
+    dismissDelegationEnded('main', fresh);
+    update([active]);
+    expect(getDelegations().endedNotices.main).toBeUndefined();
+    expect(getDelegations().endedNotices.child).toBe(fresh);
+    expect(getDelegations().error).toBe('new failure');
+    expect(getDelegations().entries).toEqual([active]);
+    expect(api.action).not.toHaveBeenCalled();
+  });
   it('only projects result availability; never automatically sends or collects a result', async () => {
     const { api } = setup(); cleanup = bindDelegationEvents();
     api.onUpdate.mock.calls[0][0]([{ id: 'd', resultState: D.RESULT.READY } as DelegationSnapshot]);
