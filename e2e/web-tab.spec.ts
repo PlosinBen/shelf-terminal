@@ -51,6 +51,21 @@ async function openWebTab(page: Page) {
 }
 
 test.describe('web tab', () => {
+  test('switches Shelf tabs by number with focus inside the web page', async ({ shelfApp: { app, page } }) => {
+    await setupProject(page);
+    await openWebTab(page);
+    await page.locator('webview').click();
+    await app.evaluate(({ webContents }) => {
+      const guest = webContents.getAllWebContents().find(wc => wc.getType() === 'webview');
+      if (!guest) throw new Error('Expected Web tab guest');
+      guest.focus();
+      const modifiers: Electron.KeyboardInputEvent['modifiers'] = [process.platform === 'darwin' ? 'meta' : 'control'];
+      guest.sendInputEvent({ type: 'keyDown', keyCode: '1', modifiers });
+      guest.sendInputEvent({ type: 'keyUp', keyCode: '1', modifiers });
+    });
+    await expect(page.locator('.tab-bar .tab').first()).toHaveClass(/active/);
+  });
+
   test('web.fetch focuses and names the requesting project before its permission popup', async ({ shelfApp: { page } }) => {
     await setupNamedProject(page, 'shelf-test-a');
     await setupNamedProject(page, 'shelf-test-b');

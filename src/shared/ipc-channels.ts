@@ -1,4 +1,5 @@
 export const IPC = {
+  WEB_SWITCH_TAB: 'web:switch-tab',
   // Renderer → Main (invoke)
   PTY_SPAWN: 'pty:spawn',
   PTY_KILL: 'pty:kill',

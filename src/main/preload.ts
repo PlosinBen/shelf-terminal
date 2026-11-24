@@ -238,6 +238,11 @@ contextBridge.exposeInMainWorld('shelfApi', {
     },
   },
   web: {
+    onSwitchTab: (callback: (number: number) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, number: number) => callback(number);
+      ipcRenderer.on(IPC.WEB_SWITCH_TAB, listener);
+      return () => ipcRenderer.removeListener(IPC.WEB_SWITCH_TAB, listener);
+    },
     listSessions: () => ipcRenderer.invoke(IPC.WEB_LIST_SESSIONS),
     deleteSession: (domain: string) => ipcRenderer.invoke(IPC.WEB_DELETE_SESSION, domain),
     listGrants: () => ipcRenderer.invoke(IPC.WEB_LIST_GRANTS),

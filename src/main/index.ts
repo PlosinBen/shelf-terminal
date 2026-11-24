@@ -51,6 +51,14 @@ function createWindow() {
     },
   });
   setMainWindow(win);
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.on('before-input-event', (event, input) => {
+      const modOnly = isMac ? input.meta && !input.control : input.control && !input.meta;
+      if (input.type !== 'keyDown' || !modOnly || input.shift || input.alt || !/^[1-9]$/.test(input.key)) return;
+      event.preventDefault();
+      win.webContents.send(IPC.WEB_SWITCH_TAB, Number(input.key));
+    });
+  });
   win.on('close', event => {
     if (exitController.committed()) return;
     event.preventDefault();

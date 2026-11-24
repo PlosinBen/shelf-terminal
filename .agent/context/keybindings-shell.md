@@ -17,6 +17,8 @@ related:
 
 帶參數的快捷鍵 action 採 `action_param` 命名，例如 `switchTab_3`。
 
+Web 分頁內的網頁使用獨立 WebContents。焦點在網頁內時，main 從 guest 的 `before-input-event` 接收 macOS 的 Cmd+1～9 或 Windows/Linux 的 Ctrl+1～9，經 `IPC.WEB_SWITCH_TAB` 將分頁編號送回主視窗，由 `useKeybindings` 依目前專案的分頁順序切換。
+
 **Reason**：xterm 會攔截大部分鍵盤事件（包括 Ctrl+D、Ctrl+T 等）。用 capture phase + stopPropagation 確保 app 快捷鍵優先於 xterm。新增快捷鍵只需在 types + defaults + useKeybindings 註冊，不需要改 TerminalView。
 
 **Do not change casually because**：如果讓 xterm 先收到事件再判斷要不要放行，每新增一個快捷鍵都要同步改 TerminalView 的 `attachCustomKeyEventHandler`。

@@ -173,6 +173,7 @@ interface ShelfApi {
     ) => () => void;
   };
   web: {
+    onSwitchTab: (callback: (number: number) => void) => () => void;
     listSessions: () => Promise<import('../shared/web-session').WebSessionEntry[]>;
     deleteSession: (domain: string) => Promise<void>;
     listGrants: () => Promise<import('../shared/web-session').WebGrantsByProject>;

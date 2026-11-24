@@ -59,6 +59,14 @@ export function useKeybindings() {
       if (nextIndex !== null) setActiveProject(nextIndex);
     };
 
+    const numberedTabAction = (number: number) => {
+      const project = projects[activeProjectIndex];
+      const index = number - 1;
+      return project?.tabs[index] ? () => setActiveTab(activeProjectIndex, index) : null;
+    };
+    const unsubscribe = window.shelfApi.web.onSwitchTab(number => {
+      if (!getUiSliceSnapshot().appExitPreparing) numberedTabAction(number)?.();
+    });
     const handler = (e: KeyboardEvent) => {
       if (getUiSliceSnapshot().appExitPreparing) {
         e.preventDefault();
@@ -91,12 +99,7 @@ export function useKeybindings() {
           case 'toggleSplitRight': return activeProject && activeProjectId ? () => emit(Events.TOGGLE_SPLIT, activeProjectId) : null;
           case 'prevTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.max(0, activeProject.activeTabIndex - 1)) : null;
           case 'nextTab':        return activeProject ? () => setActiveTab(activeProjectIndex, Math.min(activeProject.tabs.length - 1, activeProject.activeTabIndex + 1)) : null;
-          case 'switchTab': {
-            const index = parseInt(params[0], 10) - 1;
-            return activeProject && index >= 0 && index < activeProject.tabs.length
-              ? () => setActiveTab(activeProjectIndex, index)
-              : null;
-          }
+          case 'switchTab': return numberedTabAction(Number(params[0]));
           default: return null;
         }
       })();
@@ -109,7 +112,10 @@ export function useKeybindings() {
     };
 
     window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('keydown', handler, true);
+    };
   }, [projects, activeProjectIndex, activeProjectId, hideDisconnected, bindings]);
 }
 
