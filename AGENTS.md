@@ -4,7 +4,7 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 
 ## Agent Reference Docs
 
-先讀 [.agent/index.md](.agent/index.md)（bundle 入口），或依情境直接跳：
+修改子系統前，依任務從 [.agent/index.md](.agent/index.md) 查閱相關主題文件，也可依下表直接前往：
 
 | Situation | Read |
 |-----------|------|
@@ -37,6 +37,7 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 - 優先思考、查證再動手，不要猜測 — 不確定的事先查 code / 文件 / 既有實作確認（例：裝套件前先 `npm view <pkg> versions` 確認版本，不要假設版號）
 - 設計盡可能簡單，避免過度設計 / 過度抽象 / 過度設定 — 先滿足當前需求，不預先為想像中的未來鋪設
 - 修正問題時只動必要的項目 — 不順手改無關的 code / 格式 / 重構，降低審閱與回歸風險
+- 跨檔共用的識別值，例如事件名、IPC channel 或 wire kind，應在一處定義為具名常數，由產生端和消費端共用。
 - 讀取或修改檔案時，優先使用目前 agent 提供的原生檔案工具。只有需要依資料結構解析或轉換內容時，才考慮使用腳本。
 - 執行彼此獨立的命令時，分開呼叫工具，避免用 `;` 串接，讓 Shelf 分別顯示每個命令的結果。後一步需要前一步成功時，才用 `&&` 串接。若查無結果符合預期，只將該工具代表「查無結果」的退出碼視為正常，其他錯誤仍回傳原退出碼。
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
@@ -65,8 +66,3 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
   - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
   - **伴隨 code 變更的 doc 跟著 code 走**：一次 code 變更該連帶更新的 `.agent/` / contract / map，與那份 code 同在 worktree、同批改，不拆回 main。
   - 對本 repo 中必須隔離的 code / test work，**必須**以 `shelf-worktree-handoff` 作為控制流程；**禁止**繞過它自行建立 worktree，或留在 parent project 實作。該 skill、development-flow 或必要 Shelf worktree tools 任一缺失時，**必須立即停止並明確回報，禁止降級或自行補做整合流程**。純文件維護仍依本 repo 的明文例外處理。
-
-## Conventions
-
-- 修改子系統前，依 [.agent/index.md](.agent/index.md) 閱讀對應的架構、契約和設計決策。
-- 跨檔共用或重複使用的字串識別值統一定義為具名常數，產生端與消費端共用。一次性的單檔字串可直接寫。
