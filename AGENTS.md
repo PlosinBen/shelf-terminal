@@ -6,19 +6,19 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 
 修改子系統前，依任務從 [.agent/index.md](.agent/index.md) 查閱相關主題文件，也可依下表直接前往：
 
-| Situation | Read |
-|-----------|------|
-| 找功能在哪個檔案 | [.agent/map.md](.agent/map.md) |
-| 理解系統結構 / 抽象資料流 | [.agent/architecture/index.md](.agent/architecture/index.md) |
-| 查介面規格 / 訊息格式 / 路由規則 | [.agent/contracts/index.md](.agent/contracts/index.md) |
-| 理解為什麼這樣設計、什麼不該改、debug 前先看 | [.agent/context/index.md](.agent/context/index.md) — decisions + gotchas 按 topic；code 以 `<topic>#N` 引用（如 `skills#4` → `context/skills.md` 第 4 條）|
-| 評估新 feature 該不該做、判斷是否偏離產品定位 | [.agent/PRODUCT.md](.agent/PRODUCT.md) |
-| 選擇驗證、查環境前提、證據位置與覆蓋限制 | [.agent/verification.md](.agent/verification.md) |
-| 查相關工作的已知改善提案與再檢視條件 | [.agent/improvements.md](.agent/improvements.md) — 待評估清單，不等於已採納或授權實作 |
-| 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
-| 查封存 spike 成果／清理分支前確認保留限制 | [.agent/SPIKE_ARCHIVE.md](.agent/SPIKE_ARCHIVE.md) — 已移除 worktree 的保留分支、證據位置與刪除條件 |
-| 追蹤「必要回檢」的上游 issue（我方有 workaround/退化、等上游修好回收） | [.agent/UPSTREAM_WATCH.md](.agent/UPSTREAM_WATCH.md) — 薄 index，每次 release 前回檢（綁在 RELEASE_FLOW step 0.6）；rationale 仍在 `context/<topic>` |
-| 開發中 feature 的暫存工作筆記 | [.agent/features/](.agent/features/) — **development-flow** skill 的 transient note（PRD/SDD/Spec/Tasks），收尾 consolidate 進永久 doc 後刪除；**非永久文件**（gitignored、不跨機器同步）|
+| 何時查 | 文件 |
+|---|---|
+| 找功能或模組的位置 | [.agent/map.md](.agent/map.md) |
+| 理解架構、資料流或系統邊界 | [.agent/architecture/index.md](.agent/architecture/index.md) |
+| 查介面、訊息格式或路由 | [.agent/contracts/index.md](.agent/contracts/index.md) |
+| 查設計理由、既有約束或已知問題 | [.agent/context/index.md](.agent/context/index.md) |
+| 評估需求是否符合產品定位 | [.agent/PRODUCT.md](.agent/PRODUCT.md) |
+| 選擇驗證方式、查前提或覆蓋範圍 | [.agent/verification.md](.agent/verification.md) |
+| 查待評估的改善提案與回檢條件 | [.agent/improvements.md](.agent/improvements.md) |
+| 查發版流程與 tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
+| 查封存成果或清理分支前確認限制 | [.agent/SPIKE_ARCHIVE.md](.agent/SPIKE_ARCHIVE.md) |
+| 發版前回檢上游問題 | [.agent/UPSTREAM_WATCH.md](.agent/UPSTREAM_WATCH.md) |
+| 接續進行中的開發 | [.agent/features/](.agent/features/) |
 
 ### Documentation maintenance
 開發流程依 **development-flow**；文件維護依 **project-agent-docs**；驗證依 **verification-discipline**，專案能力見 [.agent/verification.md](.agent/verification.md)；Git 交付依 **git-change-handoff**；文件格式依 **open-knowledge-format**。
