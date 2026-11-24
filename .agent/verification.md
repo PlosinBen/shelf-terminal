@@ -11,10 +11,16 @@ title: Shelf — 驗證能力與執行入口
 
 - 測試交付規則見 [AGENTS.md](../AGENTS.md#rules)。純文件修改以來源、格式與連結檢查為主，不因此啟動產品。
 - Node.js 22+；依 [package.json](../package.json) 安裝專案依賴。`postinstall` 包含 Electron native module rebuild，需相應建置環境。沒有安裝依賴不等於產品測試失敗。
-- 驗證用 `npm run typecheck` 和 `npm run test:unit`。優先使用 `package.json` 定義的 npm scripts，避免直接組 `tsc --noEmit`、`vitest run` 等底層指令，以減少額外審閱。UI 行為走既有 E2E fixture，避免直接用 `npm run dev` 或 `npx electron` 啟動產品。
+- 優先使用 `package.json` 定義的 npm scripts，避免直接組 `tsc --noEmit`、`vitest run` 等底層指令，以減少額外審閱。UI 行為走既有 E2E fixture，避免直接用 `npm run dev` 或 `npx electron` 啟動產品。
 - E2E 包含 build、耗時較長。用當前工具提供的背景執行方式啟動 `npm run test:e2e -- <spec>`（例如 Bash 工具的 `run_in_background`），保留輸出並追蹤完成。無背景工具時如實指出限制。
 - Renderer 行為的 E2E 驗證以受影響 spec 的實際執行結果為準。若環境前提不足而無法執行，完成其餘可獨立執行的檢查，回報已完成的檢查、未驗證的行為，以及執行 E2E 還缺的具體前提。
 - 以下能力由 scripts／設定／代表性 fixture 盤點；操作 recipe 尚未經完整 runtime 演練，使用時確認目標環境的實際可用性。
+
+## 驗證時機與範圍
+
+- **開發中**：每次修正先跑能驗證該行為的最小範圍，例如單一測試案例或 spec。Bug fix 先確認重現測試因預期原因失敗，修正後重跑確認通過。
+- **收尾前**：在最終版本執行 `npm run typecheck`、完整 `npm run test:unit`，以及涵蓋變更行為和受影響既有流程的 E2E。改到共用元件、資料格式或跨模組介面時，沿實際使用路徑擴大 E2E 範圍。
+- **驗證失敗**：先停下依賴該結果的步驟，用最小測試定位並逐一修正。修完重跑受修正影響的收尾檢查，已通過且證據仍適用的檢查可沿用。
 
 ## 能力與入口
 
@@ -34,7 +40,7 @@ Shelf 內建 HTTP MCP 的工具探索可從 main debug log 的 `[shelf-mcp] Disc
 | SSH 密碼認證與 agent 部署 | `npm run test:agent-deploy-ssh` | [SSH 部署 spec](../e2e/connector/agent-deploy-ssh.spec.ts) 需 Docker 與 Unix SSH／SCP，Windows skip；測試自建容器並使用動態 port，以 fake provider 驗 dispatcher／direct 兩條部署路徑、app command 遠端投影與排隊後停用重驗，不證明真實模型登入或對話 |
 | WSL upload／部署 | `npm run test:wsl`、`npm run test:agent-deploy-wsl` | Windows 主機與可用 distro；[WSL spec](../e2e/connector/wsl.spec.ts) 在非 Windows skip，不把 macOS／Linux 執行當作 WSL 通過 |
 
-從受影響模組的既有測試或 `e2e/` 對應 spec 選起，不為每個任務重建完整 inventory。`npm test` 串接 typecheck、unit、一般 E2E、Docker、SSH，未包含所有 WSL／agent-deploy 專案，也不是每次局部變更都要重跑的預設。
+從受影響模組的既有測試或 `e2e/` 對應 spec 選起。`npm test` 串接 typecheck、unit、一般 E2E、Docker、SSH，未包含所有 WSL／agent-deploy 專案。依變更範圍選擇環境與 spec。
 
 ## 環境隔離與副作用
 
