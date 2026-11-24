@@ -74,6 +74,10 @@ reject (or emit the native process error/exit), and the caller with Project/tab 
 A password-only Unix target requires its existing project-connect authentication before deploy.
 Windows password-only deploy is not promised by a one-time `connect()` verification.
 
+## Bounded preview consumer
+
+`connector/preview-read.ts` composes `spawnProcess` without extending the Connector interface. It checks `isConnected` and the live generation, then reads a regular worker file via POSIX `sh`/`head` using positional argv. Content is bounded at 1 MiB plus one overflow byte; stdout framing and stderr are bounded, and probe+read share a 15-second deadline. Failure kills the client process and never invokes connect or host file reads. Shell startup output outside the random frame is rejected. The caller validates raw bytes as UTF-8 and renders inert text. Workers without these POSIX capabilities report an explicit read error.
+
 ## Connection types
 
 Defined as the discriminated union `Connection` in `src/shared/types.ts`; `createConnector` dispatches on `type`.

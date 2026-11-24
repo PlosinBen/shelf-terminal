@@ -70,7 +70,8 @@ title: shelf-terminal — Intent → File Index
 | Web.fetch permission channel | `web-permission.ts` | `requestWebPermission()`：app 層全域 popup + away→Telegram + first-wins + timeout backstop |
 | browser_open gate + 開分頁 | `browser-open.ts` | `requestBrowserOpen()`：Open/Deny popup（不記住、無 Telegram、timeout backstop）+ `openWebTab()` 送 `web:open-tab`（agent 開登入分頁的 `web.open` op 用） |
 | External URL intent gate | `external-url-intent.ts` + `external-url-intent-gate.ts` | main-owned validation/FIFO lifecycle 與 Copy/Open/Cancel side effects |
-| Link Open routing / local file preview | `link-open-intent.ts` + `link-file-preview.ts` + `../shared/link-open-intent.ts` | User-click destination validation、original href/source contract 與 bounded UTF-8 reader |
+| Link Open routing / file preview | `link-open-intent.ts` + `link-file-preview.ts` + `../shared/link-open-intent.ts` | User-click destination validation、original href/source contract 與 local/remote bounded UTF-8 preview |
+| Remote preview byte reader | `connector/preview-read.ts` | Source-runtime worker read、bounded bytes/stderr、framing、deadline 與 generation checks |
 | External navigation adapters | `external-navigation.ts` | Electron popup/navigation intent 轉成明確 project-tab 或 app-window source |
 | Terminal browser launcher deployment | `external-url-launcher.ts` | 選 local platform asset或透過 connector 部署 POSIX launcher並回傳 Shelf-required `BROWSER` path |
 | Webview hardening | `web-session-harden.ts` | 強制安全 webPreferences、彈窗/導航/權限/下載鎖定（全在 main） |

@@ -4,9 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LINK_OPEN, type LinkOpenInput, type LinkOpenResult } from '@shared/link-open-intent';
 import type { Project } from '@shared/projects';
+import { readRemotePreviewBytes, type PreviewRuntime } from './connector/preview-read';
 
-export async function readLinkFile(input: LinkOpenInput, project: Project): Promise<LinkOpenResult> {
-  if (project.connection.type !== 'local') throw new Error('File preview is unavailable for this remote connection');
+export async function readLinkFile(input: LinkOpenInput, project: Project, runtime?: PreviewRuntime): Promise<LinkOpenResult> {
+  const remote = project.connection.type !== 'local';
+  if (remote && !runtime) throw new Error('File preview requires a remote connector');
   let file = input.url;
   let line: number | undefined;
   const location = /(?:#L?(\d+)(?:C\d+)?(?:(?:-L?\d+))?|:(\d+)(?::\d+)?)$/.exec(file);
@@ -15,10 +17,24 @@ export async function readLinkFile(input: LinkOpenInput, project: Project): Prom
     if (!Number.isSafeInteger(line) || line < 1) throw new Error('Invalid file line number');
     file = file.slice(0, location.index);
   }
-  if (/^file:/i.test(file)) file = fileURLToPath(file);
+  if (remote && /^file:/i.test(file)) {
+    const url = new URL(file);
+    if ((url.hostname && url.hostname !== 'localhost') || url.search) throw new Error('Unsupported remote file URL');
+    file = decodeURIComponent(url.pathname);
+  } else if (/^file:/i.test(file)) file = fileURLToPath(file);
   else file = decodeURIComponent(file);
   if (!file || file.includes('\0')) throw new Error('Invalid file path');
-  const resolved = path.resolve(project.cwd, file);
+  if (remote && (!path.posix.isAbsolute(project.cwd) || /^[a-z]:[\\/]/i.test(file))) throw new Error('Remote preview requires a POSIX worker path');
+  const resolved = remote ? path.posix.resolve(project.cwd, file) : path.resolve(project.cwd, file);
+  const bytes = remote ? await readRemotePreviewBytes(runtime!, resolved) : await readLocalBytes(resolved);
+  if (bytes.includes(0)) throw new Error('Binary files cannot be previewed');
+  let content: string;
+  try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { throw new Error('File preview requires UTF-8 text'); }
+  return { kind: 'file', url: input.url, path: resolved, content, line };
+}
+
+async function readLocalBytes(resolved: string): Promise<Buffer> {
   const handle = await fs.open(resolved, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     const stat = await handle.stat();
@@ -32,12 +48,7 @@ export async function readLinkFile(input: LinkOpenInput, project: Project): Prom
       length += read.bytesRead;
     }
     if (length > LINK_OPEN.maxFileBytes) throw new Error('File preview is limited to 1 MiB');
-    const bytes = buffer.subarray(0, length);
-    if (bytes.includes(0)) throw new Error('Binary files cannot be previewed');
-    let content: string;
-    try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
-    catch { throw new Error('File preview requires UTF-8 text'); }
-    return { kind: 'file', url: input.url, path: resolved, content, line };
+    return buffer.subarray(0, length);
   } finally {
     await handle.close();
   }

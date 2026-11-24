@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import type { Project } from '@shared/projects';
 import { readLinkFile } from './link-file-preview';
 import { LINK_OPEN } from '@shared/link-open-intent';
+import { spawn } from 'node:child_process';
+import { vi } from 'vitest';
 
 let root: string;
 afterEach(async () => { if (root) await fs.rm(root, { recursive: true, force: true }); });
@@ -36,5 +38,32 @@ describe('read-only file link preview', () => {
     const project = await setup();
     await fs.writeFile(path.join(root, 'secret'), 'host data');
     await expect(readLinkFile(input('./secret'), { ...project, connection: { type: 'ssh', host: 'host', port: 22, user: 'u' } })).rejects.toThrow('remote');
+  });
+  it('uses the source connector for bounded remote bytes and quoted file paths', async () => {
+    const local = await setup();
+    const filename = "quote';$(echo injected).txt";
+    await fs.writeFile(path.join(root, filename), 'remote first\nremote second');
+    const connector = {
+      isConnected: vi.fn(async () => true), isCurrentGeneration: () => true,
+      spawnProcess: vi.fn((request: import('./connector/types').ProcessRequest) => spawn(request.executable, [...request.args], { cwd: request.cwd })),
+    };
+    const remote = { ...local, connection: { type: 'docker' as const, container: 'worker' } };
+    const result = await readLinkFile(input(`${encodeURIComponent(filename)}#L2`), remote, connector);
+    expect(result).toMatchObject({ kind: 'file', path: path.join(root, filename), content: 'remote first\nremote second', line: 2 });
+    expect(connector.spawnProcess).toHaveBeenCalledOnce();
+    await expect(readLinkFile(input('./missing'), remote, connector)).rejects.toThrow('regular');
+    await fs.writeFile(path.join(root, 'huge'), Buffer.alloc(LINK_OPEN.maxFileBytes + 2, 65));
+    await expect(readLinkFile(input('./huge'), remote, connector)).rejects.toThrow('1 MiB');
+    await expect(readLinkFile(input('.'), remote, connector)).rejects.toThrow('regular');
+  });
+  it('does not spawn or fall back to host files for disconnected or stale remote runtimes', async () => {
+    const local = await setup();
+    await fs.writeFile(path.join(root, 'secret'), 'host data');
+    const remote = { ...local, connection: { type: 'ssh' as const, host: 'worker', user: 'u', port: 22 } };
+    const connector = { isConnected: vi.fn(async () => false), isCurrentGeneration: () => true, spawnProcess: vi.fn() };
+    await expect(readLinkFile(input('./secret'), remote, connector)).rejects.toThrow('disconnected');
+    expect(connector.spawnProcess).not.toHaveBeenCalled();
+    await expect(readLinkFile(input('./secret'), remote, { ...connector, isCurrentGeneration: () => false })).rejects.toThrow('changed');
+    expect(connector.spawnProcess).not.toHaveBeenCalled();
   });
 });

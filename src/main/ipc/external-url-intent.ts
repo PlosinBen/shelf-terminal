@@ -6,6 +6,7 @@ import { LINK_OPEN } from '@shared/link-open-intent';
 import { openLink } from '../link-open-intent';
 import { readLinkFile } from '../link-file-preview';
 import { getProjectsRepository } from '../projects/repository-provider';
+import { createConnector } from '../connector';
 
 export function registerExternalUrlIntentHandlers(): void {
   ipcMain.handle(LINK_OPEN.submit, async (_event, payload: unknown) => {
@@ -19,7 +20,7 @@ export function registerExternalUrlIntentHandlers(): void {
           if (!('projectId' in input.source)) throw new Error('Source project is required');
           const project = getProjectsRepository().get(input.source.projectId);
           if (!project) throw new Error('Source project is unavailable');
-          return readLinkFile(input, project);
+          return readLinkFile(input, project, project.connection.type === 'local' ? undefined : createConnector(project.connection));
         },
       });
     } catch (error) {

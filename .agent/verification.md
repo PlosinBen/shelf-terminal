@@ -36,6 +36,7 @@ Shelf 內建 HTTP MCP 的工具探索可從 main debug log 的 `[shelf-mcp] Disc
 | 主機程序記憶體取得 | `npm run test:memory-host` | [host integration test](../src/shared/process-memory-sampler.integration.test.ts) 使用真實平台 adapter；依主機支援判斷執行，不證明其他平台 |
 | Renderer／IPC／main／agent wire | `npm run test:e2e`；單一 spec 如 `npm run test:e2e -- e2e/skills.spec.ts` | [共用 fixture](../e2e/helpers.ts) 啟動實際 Electron，但 backend 換 fake provider；不能據此宣稱真實 SDK／登入／模型服務已驗證 |
 | Docker connector | `npm run test:docker` | 真實 Docker fixture；需 Docker daemon、可取得 image，檢查 [docker spec](../e2e/connector/docker.spec.ts) 的具體行為與前提 |
+| Remote file preview | `npm run test:remote-preview` | [獨立 remote-preview spec](../e2e/connector/remote-preview.spec.ts) 使用真實 Docker/SSH worker、私有容器名稱及動態 SSH port，驗證遠端內容/行號、raw href、quoted paths、權限/size/binary/missing/disconnected 與 no-host-fallback；需 Docker daemon、alpine:3.19 及 linuxserver/openssh-server:latest image。Unix SSH fixture 明確認證後才讀；Windows skip 該密碼 fixture，不能據此宣稱 WSL／Windows SSH 已實測 |
 | SSH connector | `npm run test:ssh` | script 啟動本機 SSH 測試容器；檢查 [SSH spec](../e2e/connector/ssh.spec.ts) 與 [設定](../e2e/connector/ssh-config.ts)，不能推論任意遠端／SSO 已通過 |
 | 遠端 agent 部署、binary／runtime | `npm run test:agent-deploy -- <spec>` | 需 Docker、網路與所選 spec 的前提；[部署 fixture](../e2e/connector/agent-deploy-helpers.ts) 預設 fake，可選真實 backend probe；需讀 spec 區分下載、啟動、未登入偵測與真正已登入操作 |
 | SSH 密碼認證與 agent 部署 | `npm run test:agent-deploy-ssh` | [SSH 部署 spec](../e2e/connector/agent-deploy-ssh.spec.ts) 需 Docker 與 Unix SSH／SCP，Windows skip；測試自建容器並使用動態 port，以 fake provider 驗 dispatcher／direct 兩條部署路徑、app command 遠端投影與排隊後停用重驗，不證明真實模型登入或對話 |
@@ -52,6 +53,7 @@ PM SDK 串接可使用 `npm run test:unit -- src/main/pm/llm-client-stream.test.
 - 正式安裝版使用 Electron 的預設 userData 路徑。未打包且未指定路徑時使用 `-dev` 後綴，詳見 [settings-config#1](context/settings-config.md)。
 - 共用 fixture 預設還會建立及清理主機 home 下固定的 `shelf-test-a`／`shelf-test-b`／`shelf-test-c` 目錄；userData 隔離不代表所有主機資源都隔離。執行前確認不與其他測試或使用者資料衝突。 不使用這些具名專案目錄的測試可在 describe 範圍設定 `test.use({ homeProjectDirectories: false })`，同時略過建立與清理；此選項不隔離產品本身的 home 寫入。
 - Docker／SSH scripts 使用固定 `shelf-test-container` 名稱與 host port 2222；部署 script 也使用固定容器名。先確認可用性，不移除他人的容器以取得空位，不同 runs 避免併發使用這些資源。
+- `test:remote-preview` 自管 UUID 容器／動態 SSH port，停用共用 homeProjectDirectories，只清理自己建立的容器；不使用既有 Docker／SSH scripts 的固定名稱。預設 `npm test` 不包含此獨立入口。
 - 部署 fixture 使用跨 run 重用的 runtime cache；驗證首次部署時，必須辨認 cache 對主張的影響。
 - 持久化功能除了 DOM 結果，也應按相應 spec 檢查該次 userData 或目標檔案／資料；不要只以畫面完成狀態推論寫入成功。
 

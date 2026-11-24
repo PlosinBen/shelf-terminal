@@ -10,6 +10,11 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'remote-preview',
+      testDir: './e2e/connector',
+      testMatch: 'remote-preview.spec.ts',
+    },
+    {
       name: 'e2e',
       testDir: './e2e',
       testIgnore: '**/connector/**',

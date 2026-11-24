@@ -45,7 +45,7 @@ related:
 
 Direct anchor clicks enter Link Open with the original href and declared surface source. Agent and Notes project ownership determines internal Web/file routing; active-project lookup and renderer-bundle URL resolution cannot supply file ownership. Explicit external callers retain the external FIFO gate, including local handling of remote-terminal login URLs. Default mailto is copy-only because Shelf cannot preview email links; it never launches an email application implicitly.
 
-The file preview renders text instead of executing file content. Its current supported boundary is regular local UTF-8 files up to 1 MiB; unavailable remote previews fail explicitly before local filesystem access. The existing connector interface has no bounded file-read primitive. This limit avoids introducing shell-based remote reads or interpreting remote paths on the host.
+The file preview renders text instead of executing file content. It accepts regular UTF-8 files up to 1 MiB. Remote reads compose the connector's existing byte-process boundary rather than duplicating SSH/Docker/WSL clients or adding a file-read method to every adapter. Paths are POSIX worker paths supplied as quoted positional arguments; they are never shell source or host filesystem paths. The reader checks connectivity/generation, bounds byte output and diagnostics, enforces a deadline, and rejects unexpected framing so shell startup output cannot silently corrupt file contents. Read never authenticates automatically; capability, connection or permission failures remain visible errors.
 
 ## external-url-intent#5 — Skills Preview and PM destination are captured independently of source · [Decision]
 
