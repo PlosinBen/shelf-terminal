@@ -9,10 +9,10 @@ title: Shelf — 驗證能力與執行入口
 
 ## 規則與前提
 
-- 依 [CLAUDE.md](../CLAUDE.md) 的 Development／Rules 執行：bug fix 先寫重現測試；renderer 行為變更同批交付 E2E。純文件修改以來源、格式與連結檢查為主，不因此啟動產品。
+- 測試交付規則見 [AGENTS.md](../AGENTS.md#rules)。純文件修改以來源、格式與連結檢查為主，不因此啟動產品。
 - Node.js 22+；依 [package.json](../package.json) 安裝專案依賴。`postinstall` 包含 Electron native module rebuild，需相應建置環境。沒有安裝依賴不等於產品測試失敗。
-- 優先使用 npm scripts。不要啟動 `npm run dev` 或直接開 Electron 干擾使用者；UI 行為走既有測試 fixture。
-- E2E 包含 build、耗時較長，依 repo 規則用可背景執行的工具啟動，保留輸出並追蹤完成；無背景工具時如實指出限制，不宣稱已執行。
+- 驗證用 `npm run typecheck` 和 `npm run test:unit`。優先使用 `package.json` 定義的 npm scripts，避免直接組 `tsc --noEmit`、`vitest run` 等底層指令，以減少額外審閱。UI 行為走既有 E2E fixture，避免直接用 `npm run dev` 或 `npx electron` 啟動產品。
+- E2E 包含 build、耗時較長。用當前工具提供的背景執行方式啟動 `npm run test:e2e -- <spec>`（例如 Bash 工具的 `run_in_background`），保留輸出並追蹤完成。無背景工具時如實指出限制。
 - 以下能力由 scripts／設定／代表性 fixture 盤點；操作 recipe 尚未經完整 runtime 演練，使用時確認目標環境的實際可用性。
 
 ## 能力與入口
@@ -39,7 +39,8 @@ Shelf 內建 HTTP MCP 的工具探索可從 main debug log 的 `[shelf-mcp] Disc
 
 PM SDK 串接可使用 `npm run test:unit -- src/main/pm/llm-client-stream.test.ts` 驗證真實 SDK 的請求 schema、tool history、錯誤與取消；fetch 為 fixture，不打外部服務。`npm run test:e2e -- e2e/pm-sdk-stream.spec.ts` 使用獨立 loopback HTTP server 與實際 main bundle／PM IPC，驗證工具迴圈、面板回覆與錯誤、history 檔案及取消；不啟用 Telegram，也不需要帳號憑證。此測試不代表真實服務／模型工具能力已通過。
 
-- 一般 E2E 每個 test 建立 `shelf-e2e-*` 暫存 userData，以 `NODE_ENV=test` 啟動隱藏視窗並等待 `.app`。設定使用一個 worker，但不同 checkout 的獨立測試程序仍可能互相影響。
+- 一般 E2E 每個 test 建立 `shelf-e2e-*` 暫存 userData，以 `--user-data-dir` 指定路徑，並以 `NODE_ENV=test` 啟動隱藏視窗、等待 `.app`。設定使用一個 worker，但不同 checkout 的獨立測試程序仍可能互相影響。
+- 正式安裝版使用 Electron 的預設 userData 路徑。未打包且未指定路徑時使用 `-dev` 後綴，詳見 [settings-config#1](context/settings-config.md)。
 - 共用 fixture 預設還會建立及清理主機 home 下固定的 `shelf-test-a`／`shelf-test-b`／`shelf-test-c` 目錄；userData 隔離不代表所有主機資源都隔離。執行前確認不與其他測試或使用者資料衝突。 不使用這些具名專案目錄的測試可在 describe 範圍設定 `test.use({ homeProjectDirectories: false })`，同時略過建立與清理；此選項不隔離產品本身的 home 寫入。
 - Docker／SSH scripts 使用固定 `shelf-test-container` 名稱與 host port 2222；部署 script 也使用固定容器名。先確認可用性，不移除他人的容器以取得空位，不同 runs 避免併發使用這些資源。
 - 部署 fixture 使用跨 run 重用的 runtime cache；驗證首次部署時，必須辨認 cache 對主張的影響。
