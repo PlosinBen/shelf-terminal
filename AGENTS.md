@@ -23,7 +23,7 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 ### Documentation maintenance
 開發流程依 **development-flow**；文件維護依 **project-agent-docs**；驗證依 **verification-discipline**，專案能力見 [.agent/verification.md](.agent/verification.md)；Git 交付依 **git-change-handoff**；文件格式依 **open-knowledge-format**。
 
-零星改動則直接更新 `.agent/`：**新增/搬移模組** → `map.md`（intent → file + 一行 role）；**改資料流** → `architecture/<topic>.md`（抽象、不提檔名）；**介面/訊息變更** → `contracts/<topic>.md`；**新決策或 gotcha** → 對應 `context/<topic>.md`（append 下一個 `topic#N`，從 code 以 `<topic>#N` 引用）。context entry 寫**現況 + 為什麼**，不留 changelog / 已廢棄 feature / commit hash / 日期。
+變更若影響模組位置、資料流、介面或設計決策，或發現需要記錄的 gotcha，須同批更新對應的 `.agent/` 文件。
 
 ## Rules
 
@@ -32,7 +32,6 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 - **開發中，每次修正跑能驗證該行為的最小測試。Feature 或 bug fix 收尾前，在最終版本跑型別檢查、完整 unit suite，以及涵蓋變更與受影響既有流程的 E2E。**
 - **Renderer 行為變更須同批新增或更新對應的 E2E，並執行受影響的 spec。** 所需環境不可用時，完成其餘可獨立執行的檢查，並回報未驗證的行為與具體阻礙。沒有可供 E2E 驗證的 core／非 UI 邏輯以 unit test 為主。
 - 不要直接啟動 dev server 或 Electron。驗證使用專案的 npm scripts，執行方式與環境前提見 [.agent/verification.md](.agent/verification.md)。
-- Commit 前確認 `.agent/` 是否需要更新（規範見上方「Documentation maintenance」）— 有新增功能、改變架構、或發現 gotcha 時一併更新
 - `.agent/features/` 是暫時開發 context（gitignored、不跨機器同步）— **程式碼 / 測試 / 永久 doc 絕對禁止引用它**
 - 採用足以滿足當前需求的最簡單設計，改動限於本次任務所需。
 - 跨檔共用的識別值，例如事件名、IPC channel 或 wire kind，應在一處定義為具名常數，由產生端和消費端共用。
