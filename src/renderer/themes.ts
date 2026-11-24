@@ -4,6 +4,7 @@ export interface ShelfTheme {
   name: string;
   label: string;
   terminal: ITheme;
+  semantic?: Partial<Record<keyof typeof SEMANTIC_TOKENS, string>>;
   ui: {
     bg: string;
     bgSecondary: string;
@@ -11,6 +12,7 @@ export interface ShelfTheme {
     text: string;
     textMuted: string;
     accent: string;
+    onAccent: string;
     surface: string;
   };
 }
@@ -47,6 +49,7 @@ const catppuccinMocha: ShelfTheme = {
     text: '#cdd6f4',
     textMuted: '#a6adc8',
     accent: '#89b4fa',
+    onAccent: '#1e1e2e',
     surface: '#313244',
   },
 };
@@ -54,6 +57,11 @@ const catppuccinMocha: ShelfTheme = {
 const catppuccinLatte: ShelfTheme = {
   name: 'catppuccin-latte',
   label: 'Catppuccin Latte',
+  semantic: {
+    error: '#992139', success: '#315d25', warning: '#714900', info: '#215688',
+    foldLabel: '#70408c', statusHealthy: '#315d25', statusSlow: '#714900',
+    statusUnstable: '#984313', statusDead: '#992139',
+  },
   terminal: {
     background: '#eff1f5',
     foreground: '#4c4f69',
@@ -81,8 +89,9 @@ const catppuccinLatte: ShelfTheme = {
     bgSecondary: '#e6e9ef',
     border: '#ccd0da',
     text: '#4c4f69',
-    textMuted: '#6c6f85',
+    textMuted: '#53576c',
     accent: '#1e66f5',
+    onAccent: '#ffffff',
     surface: '#ccd0da',
   },
 };
@@ -117,8 +126,9 @@ const dracula: ShelfTheme = {
     bgSecondary: '#21222c',
     border: '#44475a',
     text: '#f8f8f2',
-    textMuted: '#6272a4',
+    textMuted: '#b1bada',
     accent: '#bd93f9',
+    onAccent: '#21222c',
     surface: '#44475a',
   },
 };
@@ -153,8 +163,9 @@ const nord: ShelfTheme = {
     bgSecondary: '#292e39',
     border: '#3b4252',
     text: '#d8dee9',
-    textMuted: '#4c566a',
+    textMuted: '#a4b0c2',
     accent: '#81a1c1',
+    onAccent: '#20252e',
     surface: '#3b4252',
   },
 };
@@ -189,8 +200,9 @@ const tokyoNight: ShelfTheme = {
     bgSecondary: '#16161e',
     border: '#292e42',
     text: '#c0caf5',
-    textMuted: '#565f89',
+    textMuted: '#9aa5ce',
     accent: '#7aa2f7',
+    onAccent: '#1a1b26',
     surface: '#292e42',
   },
 };
@@ -214,11 +226,7 @@ export function getTheme(name: string): ShelfTheme {
 }
 
 /**
- * Theme-invariant semantic colors (error / success / warning / info / etc).
- * These do NOT vary per theme today — every theme used the same One Dark-ish
- * palette for these roles — so they live in one shared source rather than being
- * duplicated (and silently allowed to drift) across each theme's `ui` block.
- * Promoting them here makes `themes.ts` the single source for ALL theme tokens.
+ * Default semantic colors. Themes can override individual roles for contrast.
  */
 export const SEMANTIC_TOKENS = {
   error: '#e06c75',
@@ -244,6 +252,7 @@ export const SEMANTIC_TOKENS = {
  * copy of the token→var mapping. Per-theme `ui` + shared `SEMANTIC_TOKENS`.
  */
 export function buildThemeVars(theme: ShelfTheme): Record<string, string> {
+  const semantic = { ...SEMANTIC_TOKENS, ...theme.semantic };
   return {
     '--bg': theme.ui.bg,
     '--bg-secondary': theme.ui.bgSecondary,
@@ -251,17 +260,18 @@ export function buildThemeVars(theme: ShelfTheme): Record<string, string> {
     '--text': theme.ui.text,
     '--text-muted': theme.ui.textMuted,
     '--accent': theme.ui.accent,
+    '--on-accent': theme.ui.onAccent,
     '--surface': theme.ui.surface,
-    '--agent-error': SEMANTIC_TOKENS.error,
-    '--agent-success': SEMANTIC_TOKENS.success,
-    '--agent-warning': SEMANTIC_TOKENS.warning,
-    '--agent-info': SEMANTIC_TOKENS.info,
-    '--agent-fold-label': SEMANTIC_TOKENS.foldLabel,
-    '--agent-user-bubble': SEMANTIC_TOKENS.userBubble,
+    '--agent-error': semantic.error,
+    '--agent-success': semantic.success,
+    '--agent-warning': semantic.warning,
+    '--agent-info': semantic.info,
+    '--agent-fold-label': semantic.foldLabel,
+    '--agent-user-bubble': semantic.userBubble,
     // Project status-dot palette — separate namespace from `--agent-*`.
-    '--status-healthy': SEMANTIC_TOKENS.statusHealthy,
-    '--status-slow': SEMANTIC_TOKENS.statusSlow,
-    '--status-unstable': SEMANTIC_TOKENS.statusUnstable,
-    '--status-dead': SEMANTIC_TOKENS.statusDead,
+    '--status-healthy': semantic.statusHealthy,
+    '--status-slow': semantic.statusSlow,
+    '--status-unstable': semantic.statusUnstable,
+    '--status-dead': semantic.statusDead,
   };
 }

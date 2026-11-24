@@ -90,6 +90,27 @@ test('settings panel opens with mod+comma', async ({ shelfApp: { page } }) => {
   await expect(panel).not.toBeVisible();
 });
 
+test('saved themes apply button, label and validation colors in Settings', async ({ shelfApp: { page } }) => {
+  await page.keyboard.press(`${modifier}+,`);
+  const panel = page.locator('.settings-panel');
+  const save = panel.getByRole('button', { name: 'Save', exact: true });
+  await expect(save).toHaveCSS('color', 'rgb(30, 30, 46)');
+  for (const [theme, ink, muted] of [
+    ['nord', 'rgb(32, 37, 46)', 'rgb(164, 176, 194)'],
+    ['catppuccin-latte', 'rgb(255, 255, 255)', 'rgb(83, 87, 108)'],
+  ]) {
+    await panel.locator('.settings-select').first().selectOption(theme);
+    await save.click();
+    await expect(panel).not.toBeVisible();
+    await page.keyboard.press(`${modifier}+,`);
+    await expect(save).toHaveCSS('color', ink);
+    await expect(panel.getByText('Theme', { exact: true })).toHaveCSS('color', muted);
+  }
+  await panel.getByPlaceholder('~ (home directory)').fill('/nonexistent-shelf-test/dir');
+  await save.click();
+  await expect(panel.locator('.settings-path-error')).toHaveCSS('color', 'rgb(153, 33, 57)');
+});
+
 test('General saves the default local path in the existing settings file', async ({ shelfApp: { page, userDataDir } }) => {
   await page.keyboard.press(`${modifier}+,`);
   const panel = page.locator('.settings-panel');

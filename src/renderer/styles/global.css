@@ -18,6 +18,7 @@
   --text: #cdd6f4;
   --text-muted: #a6adc8;
   --accent: #89b4fa;
+  --on-accent: #1e1e2e;
   --surface: #313244;
 }
 
@@ -1110,13 +1111,13 @@ button {
 }
 
 .settings-docker-result.fail {
-  color: #f38ba8;
+  color: var(--agent-error);
 }
 
 .settings-path-error {
   font-size: 12px;
   margin-top: 4px;
-  color: #f38ba8;
+  color: var(--agent-error);
 }
 
 
@@ -1434,7 +1435,7 @@ button {
 }
 
 .settings-sub-hint-warn {
-  color: var(--error, #e06c75);
+  color: var(--agent-error);
 }
 
 .settings-copy-code {
@@ -1588,7 +1589,7 @@ button {
 
 .conn-type-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -1661,7 +1662,7 @@ button {
 
 .conn-server-item:hover {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
 }
 
 .conn-docker-row {
@@ -1710,11 +1711,11 @@ button {
 
 .conn-btn-next {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .conn-btn-next:hover {
-  opacity: 0.9;
+  filter: brightness(0.98);
 }
 
 /* ── Quick Commands (Project Edit) ── */
@@ -1808,7 +1809,7 @@ button {
 }
 
 .settings-input.settings-input-invalid {
-  border-color: #f38ba8;
+  border-color: var(--agent-error);
 }
 
 .env-var-error {
@@ -2058,7 +2059,7 @@ button {
 
 .devtools-btn:hover {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -2609,7 +2610,7 @@ button {
 .pm-msg-user {
   align-self: flex-end;
   background: var(--accent);
-  color: #1e1e2e;
+  color: var(--on-accent);
 }
 
 .pm-msg-assistant {
@@ -2807,7 +2808,7 @@ button {
 .pm-send-btn {
   padding: 8px 16px;
   background: var(--accent);
-  color: #1e1e2e;
+  color: var(--on-accent);
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
@@ -2840,7 +2841,7 @@ button {
 
 .pm-active-toggle.pm-active-on {
   background: var(--accent);
-  color: #1e1e2e;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -5749,7 +5750,7 @@ button {
   padding: 6px 14px;
   border: 1px solid var(--border);
 }
-.mcp-form-save { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.mcp-form-save { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .mcp-form-cancel { background: none; color: var(--text-muted); }
 .mcp-form-cancel:hover { color: var(--text); }
 
@@ -5831,7 +5832,7 @@ button {
 .delegation-button:hover:not(:disabled) { background: var(--surface); border-color: var(--text-muted); }
 .delegation-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .delegation-button:disabled { opacity: .4; cursor: not-allowed; }
-.delegation-collect:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--bg-secondary); }
+.delegation-collect:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .delegation-collect:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, var(--text)); border-color: var(--accent); }
 .delegation-stop { margin-left: 8px; color: #f38ba8; border-color: color-mix(in srgb, #f38ba8 35%, var(--border)); }
 .delegation-stop:hover:not(:disabled) { background: color-mix(in srgb, #f38ba8 12%, var(--bg)); border-color: #f38ba8; }

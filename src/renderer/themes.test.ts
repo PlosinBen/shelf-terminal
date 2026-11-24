@@ -10,13 +10,41 @@ import { themes, getTheme, buildThemeVars, SEMANTIC_TOKENS } from './themes';
  */
 
 const EXPECTED_KEYS = [
-  '--bg', '--bg-secondary', '--border', '--text', '--text-muted', '--accent', '--surface',
+  '--bg', '--bg-secondary', '--border', '--text', '--text-muted', '--accent', '--on-accent', '--surface',
   '--agent-error', '--agent-success', '--agent-warning', '--agent-info',
   '--agent-fold-label', '--agent-user-bubble',
   '--status-healthy', '--status-slow', '--status-unstable', '--status-dead',
 ].sort();
 
 describe('buildThemeVars', () => {
+  function contrast(first: string, second: string) {
+    const luminance = (hex: string) => {
+      const channels = [1, 3, 5].map(start => {
+        const c = parseInt(hex.slice(start, start + 2), 16) / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const [dark, light] = [luminance(first), luminance(second)].sort((a, b) => a - b);
+    return (light + 0.05) / (dark + 0.05);
+  }
+
+  it.each(themes)('$label has readable secondary text and primary button labels', theme => {
+    expect(contrast(theme.ui.accent, theme.ui.onAccent)).toBeGreaterThanOrEqual(4.5);
+    for (const background of [theme.ui.bg, theme.ui.bgSecondary, theme.ui.surface]) {
+      expect(contrast(theme.ui.textMuted, background)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps Latte agent labels readable on panels and cards', () => {
+    const vars = buildThemeVars(getTheme('catppuccin-latte'));
+    for (const role of ['error', 'warning', 'success', 'info', 'fold-label']) {
+      for (const background of ['--bg', '--bg-secondary', '--surface']) {
+        expect(contrast(vars['--agent-' + role], vars[background])).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it('emits the full, stable key set for every theme', () => {
     for (const theme of themes) {
       const vars = buildThemeVars(theme);
@@ -32,8 +60,8 @@ describe('buildThemeVars', () => {
     expect(vars['--accent']).toBe(t.ui.accent);
   });
 
-  it('maps the shared theme-invariant semantic tokens', () => {
-    // Semantic colors are identical across themes by design (theme-invariant).
+  it('uses shared semantic defaults in dark themes', () => {
+    // Both tested themes use the dark defaults.
     const a = buildThemeVars(getTheme('catppuccin-mocha'));
     const b = buildThemeVars(getTheme('dracula'));
     for (const key of ['--agent-error', '--agent-success', '--agent-warning', '--agent-info', '--agent-fold-label', '--agent-user-bubble', '--status-healthy', '--status-slow', '--status-unstable', '--status-dead']) {
