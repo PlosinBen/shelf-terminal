@@ -3614,6 +3614,44 @@ button {
   font-size: 12px;
 }
 
+.reply-block-copy {
+  position: relative;
+}
+
+.reply-block-copy pre {
+  padding-right: 36px;
+}
+
+.reply-block-copy .fold-copy-button {
+  background: var(--surface);
+}
+
+.reply-inline-copy .fold-copy-button {
+  position: static;
+  display: inline-flex;
+  vertical-align: middle;
+  width: 18px;
+  height: 18px;
+  transform: none;
+}
+
+.reply-inline-copy .fold-copy-button,
+.reply-block-copy .fold-copy-button {
+  opacity: 0;
+}
+
+.reply-inline-copy:hover > button,
+.reply-block-copy:hover > button,
+.reply-inline-copy:focus-within > button,
+.reply-block-copy:focus-within > button {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .reply-inline-copy .fold-copy-button,
+  .reply-block-copy .fold-copy-button { opacity: 1; }
+}
+
 .agent-markdown a {
   color: var(--accent);
 }

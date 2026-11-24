@@ -143,6 +143,7 @@ InputZone ──enqueuePendingSend──────▶ agentTabStore (per-tab)
 
 新 union：
 - 純 inline：`reply` / `note` / `system` / `error` / `user`
+- Agent 回覆完成後，Markdown 行內程式碼與多行程式碼區塊各自提供複製按鈕。按鈕在滑鼠移入或鍵盤聚焦時顯示，觸控環境直接顯示。剪貼簿保留區塊文字的換行與縮排。
 - 可收合卡片（共用 `FoldBase` interface）：`fold_text` / `fold_code` / `fold_markdown` / `fold_diff`
 - **`plan` 不在 union 內** — 走獨立 `AgentEvent::plan` + `AGENT_PLAN` IPC channel → 直接寫 `agentTabStore.currentPlan`，永遠不進 timeline
 

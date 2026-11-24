@@ -60,6 +60,33 @@ test.describe('agent flows via fake provider', () => {
   test.describe('command result reading', () => {
     test.use({ homeProjectDirectories: false });
 
+    test('reply markdown copies individual inline and fenced code', async ({ shelfApp: { app, page } }) => {
+      await setupProject(page);
+      await app.evaluate(({ ipcMain }, channel) => {
+        const original = (ipcMain as any)._invokeHandlers.get(channel);
+        ipcMain.removeHandler(channel);
+        ipcMain.handle(channel, (event, payload) => {
+          (globalThis as any).__replyCopyTab = payload.tabId;
+          return original(event, payload);
+        });
+      }, IPC.AGENT_INIT);
+      await openAgentTab(page);
+      const body = '## Summary\n\n  - Preserve <tags> & indentation';
+      await app.evaluate(({ BrowserWindow }, { channel, body }) => {
+        BrowserWindow.getAllWindows()[0].webContents.send(channel, (globalThis as any).__replyCopyTab, {
+          type: 'reply', msgId: 'pr-copy', content: ['PR Title: `fix: A & B`', '', '```markdown', body, '```'].join('\n'),
+        });
+      }, { channel: IPC.AGENT_MESSAGE, body });
+      const reply = page.locator('.agent-msg-reply').filter({ hasText: 'PR Title:' });
+      const inline = reply.getByRole('button', { name: 'Copy code', exact: true });
+      await inline.focus();
+      await inline.press('Enter');
+      await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('fix: A & B');
+      await reply.locator('pre').hover();
+      await reply.getByRole('button', { name: 'Copy code block' }).click();
+      await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(body + '\n');
+    });
+
     test('structured outcomes hide success and preserve exceptions through history', async ({ shelfApp: { app, page } }) => {
       await setupProject(page);
       await app.evaluate(({ ipcMain }, channel) => {

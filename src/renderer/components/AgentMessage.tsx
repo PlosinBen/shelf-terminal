@@ -1,6 +1,7 @@
 import type { AgentDiff } from '@shared/agent-diff';
 import { EXECUTION_STATE as ES, EXECUTION_LABEL } from '@shared/agent-execution';
 import React, { useState, useMemo, useContext, useRef, useLayoutEffect, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { AgentInputMessage } from '@shared/agent-input';
 import { AGENT_EXIT_INTERRUPTED_LABEL } from '@shared/app-exit';
 import { AgentDisplayContext } from './agent/AgentDisplayContext';
@@ -121,7 +122,7 @@ function FoldHeader({ label, subtitle, isExpanded, onToggle, keyboard, summary }
   );
 }
 
-function FoldCopyButton({ target, onCopy }: { target: 'details' | 'output'; onCopy: () => Promise<boolean> }) {
+function CopyButton({ target, onCopy }: { target: 'details' | 'output' | 'code' | 'code block'; onCopy: () => Promise<boolean> }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(resetTimer.current), []);
@@ -208,14 +209,14 @@ function CodeFold({ message, settingMode, nested }: {
       {errorMessage && <div className="fold-error-banner">{errorMessage}</div>}
       {isExpanded && <>
         {details && <div className="fold-body-container">
-          <FoldCopyButton target="details" onCopy={() => copy(details, 'details')} />
+          <CopyButton target="details" onCopy={() => copy(details, 'details')} />
           <pre className="fold-body fold-command-text" tabIndex={0} aria-label="Details">{details}</pre>
         </div>}
         {nested && nested.length > 0 && <div className="agent-subagent-nested">
           {nested.map(child => <AgentMessage key={child.id} message={child} />)}
         </div>}
         {output && <div className="fold-body-container">
-          <FoldCopyButton target="output" onCopy={() => copy(output, 'output')} />
+          <CopyButton target="output" onCopy={() => copy(output, 'output')} />
           <pre className="fold-body fold-body-code" data-preview={!fullOutput} tabIndex={fullOutput ? 0 : undefined} aria-label="Output">
             {fullOutput ? output : <span ref={previewRef} style={{ maxHeight: `${OUTPUT_PREVIEW_LINES}lh` }}>{preview.lines.join('\n')}</span>}
           </pre>
@@ -242,6 +243,50 @@ interface Props {
   nested?: AgentMsg[];
 }
 
+function ReplyMarkdown({ content, streaming }: { content: string; streaming?: boolean }) {
+  const root = useRef<HTMLDivElement>(null);
+  const [targets, setTargets] = useState<Array<{ wrapper: HTMLElement; code: HTMLElement; block: boolean }>>([]);
+  const [failed, setFailed] = useState(false);
+  const body = useMemo(() => <div ref={root} className="agent-msg-content agent-markdown"
+    dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />, [content]);
+
+  useLayoutEffect(() => {
+    if (streaming || !root.current) {
+      setTargets([]);
+      return;
+    }
+    const next: typeof targets = [];
+    for (const code of root.current.querySelectorAll('code')) {
+      if (code.closest('a, button, code code')) continue;
+      const pre = code.parentElement?.tagName === 'PRE' ? code.parentElement : null;
+      const element = pre ?? code;
+      const wrapper = document.createElement(pre ? 'div' : 'span');
+      wrapper.className = pre ? 'reply-block-copy' : 'reply-inline-copy';
+      element.replaceWith(wrapper);
+      wrapper.append(element);
+      next.push({ wrapper, code, block: !!pre });
+    }
+    setTargets(next);
+    return () => {
+      for (const { wrapper } of next) wrapper.replaceWith(wrapper.firstChild!);
+    };
+  }, [content, streaming]);
+
+  return <>{body}{targets.map(({ wrapper, code, block }, index) => createPortal(
+    <CopyButton target={block ? 'code block' : 'code'} onCopy={async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '');
+        setFailed(false);
+        return true;
+      } catch {
+        setFailed(true);
+        return false;
+      }
+    }} />, wrapper, String(index)))}
+    {failed && <div className="fold-copy-status" role="status">Could not copy code. Please select and copy the text manually.</div>}
+  </>;
+}
+
 export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const agentDisplay = useContext(AgentDisplayContext);
@@ -249,10 +294,6 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
   const resolveDisplayMode = (key: AgentDisplayKey): AgentDisplayMode => {
     return agentDisplay[key] ?? DEFAULT_AGENT_DISPLAY[key];
   };
-
-  // Markdown for the `reply` variant — useMemo must run on every render.
-  const replyContent = message.type === 'reply' ? message.content : '';
-  const replyHtml = useMemo(() => renderMarkdown(replyContent), [replyContent]);
 
   // Markdown for the `fold_markdown` body — same constraint.
   const foldMdContent = message.type === 'fold_markdown' && message.body
@@ -264,7 +305,7 @@ export function AgentMessage({ message, cwd: _cwd, nested }: Props) {
     case 'reply':
       return (
         <div className="agent-msg agent-msg-reply">
-          <div className="agent-msg-content agent-markdown" dangerouslySetInnerHTML={{ __html: replyHtml }} />
+          <ReplyMarkdown content={message.content} streaming={message.streaming} />
           {message.streaming === true && <span className="agent-cursor" />}
           {message.exitInterrupted && <div className="agent-msg-system">{AGENT_EXIT_INTERRUPTED_LABEL}</div>}
         </div>
