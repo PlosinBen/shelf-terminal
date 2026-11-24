@@ -5,6 +5,19 @@ const source = { kind: 'project-tab' as const, projectId: 'p', tabId: 'v' };
 const dependencies = () => ({ external: vi.fn(), web: vi.fn(), file: vi.fn() });
 
 describe('link opening destinations', () => {
+  it('opens PM replies in their captured destination and retains app source identity', async () => {
+    const deps = dependencies();
+    expect(await openLink({ url: 'https://example.com/pm', source: { kind: 'pm-reply' }, reason: 'Link', destinationProjectId: 'click-project' }, deps))
+      .toEqual({ kind: 'web', projectId: 'click-project', url: 'https://example.com/pm' });
+    expect(deps.web).toHaveBeenCalledWith('click-project', 'https://example.com/pm');
+    expect(deps.external).not.toHaveBeenCalled();
+  });
+  it('requires PM destination and never interprets it as a file source', async () => {
+    const deps = dependencies();
+    await expect(openLink({ url: 'https://example.com', source: { kind: 'pm-reply' }, reason: 'Link' }, deps)).rejects.toThrow('destination project');
+    await expect(openLink({ url: './secret.txt', source: { kind: 'pm-reply' }, reason: 'Link', destinationProjectId: 'p' }, deps)).rejects.toThrow('source project');
+    expect(deps.file).not.toHaveBeenCalled();
+  });
   it('opens Skills web links in the captured destination without fabricating project ownership', async () => {
     const deps = dependencies();
     const source = { kind: 'skills-preview', skillName: 'example', filePath: 'SKILL.md' };
@@ -15,7 +28,7 @@ describe('link opening destinations', () => {
     expect(deps.web).toHaveBeenCalledWith('click-project', url);
     expect(deps.external).not.toHaveBeenCalled();
   });
-  it('requires an explicit captured destination for Skills without extending the rule to PM', async () => {
+  it('requires an explicit captured destination for Skills without extending the rule to unrelated app-window sources', async () => {
     const deps = dependencies();
     await expect(openLink({ url: 'https://example.com', reason: 'Link', source: { kind: 'skills-preview', skillName: 'example', filePath: 'SKILL.md' } }, deps))
       .rejects.toThrow('destination project');

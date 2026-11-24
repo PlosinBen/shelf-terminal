@@ -1,10 +1,70 @@
 import { expect, test, openAgentTab, sendAgentPrompt } from './helpers';
 import { LINK_OPEN } from '../src/shared/link-open-intent';
+import { IPC } from '../src/shared/ipc-channels';
 import fs from 'node:fs';
 import path from 'node:path';
 
 // These cases own no home-directory fixture and can run beside other checkouts.
 test.use({ homeProjectDirectories: false });
+
+async function openPmReply(app: import('@playwright/test').ElectronApplication, page: import('@playwright/test').Page) {
+  // Supply history at its IPC boundary; render the actual PM reply markup.
+  await app.evaluate(({ ipcMain }, channel) => {
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, () => [{ role: 'assistant', content: '[PM web](https://example.invalid/pm?original=%2f)', timestamp: 1 }]);
+  }, IPC.PM_HISTORY);
+  await page.locator('.right-tab-btn', { hasText: 'PM', exact: true }).click();
+  await expect(page.locator('.pm-msg-md a')).toBeVisible();
+}
+
+test('PM replies without an active project show a copyable missing-destination error', async ({ shelfApp: { app, page } }) => {
+  await openPmReply(app, page);
+  await page.locator('.pm-msg-md a').click();
+  const preview = page.getByRole('dialog', { name: 'Link preview' });
+  await expect(preview).toContainText('A destination project is required');
+  await expect(preview.locator('.link-preview-original')).toHaveText('https://example.invalid/pm?original=%2f');
+  await preview.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('https://example.invalid/pm?original=%2f');
+  expect(await page.evaluate(() => window.shelfApi.project.getAll())).toEqual([]);
+  await expect(page.locator('.external-url-intent-overlay')).toHaveCount(0);
+});
+
+test('PM replies keep PM source and the click-time destination across project switches', async ({ shelfApp: { app, page, userDataDir } }) => {
+  const ids: string[] = [];
+  for (const name of ['PM Target A', 'PM Target B']) {
+    const cwd = path.join(userDataDir, name);
+    fs.mkdirSync(cwd);
+    const project = await page.evaluate(({ cwd, name }) => window.shelfApi.project.add({ name, cwd, connection: { type: 'local' }, maxTabs: 5 }), { cwd, name });
+    ids.push(project.id);
+  }
+  await page.reload();
+  await page.locator('.sidebar-item', { hasText: 'PM Target A' }).click();
+  await openPmReply(app, page);
+  await page.locator('.pm-msg-md a').click();
+  await expect(page.locator('.web-tab:visible .web-tab-address')).toHaveValue('https://example.invalid/pm?original=%2f');
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+  await app.evaluate(({ ipcMain }, channel) => {
+    const state = globalThis as typeof globalThis & { capturedPmLink?: unknown; releasePmLink?: () => void };
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, async (_event, input) => {
+      state.capturedPmLink = input;
+      await new Promise<void>(resolve => { state.releasePmLink = resolve; });
+      return { kind: 'web', projectId: input.destinationProjectId, url: input.url };
+    });
+  }, LINK_OPEN.submit);
+  await page.locator('.pm-msg-md a').click();
+  await expect.poll(() => app.evaluate(() => (globalThis as typeof globalThis & { capturedPmLink?: unknown }).capturedPmLink)).toEqual({
+    url: 'https://example.invalid/pm?original=%2f', reason: 'Open a link from Shelf', source: { kind: 'pm-reply' },
+    destinationProjectId: ids[0], destination: undefined,
+  });
+  await page.locator('.sidebar-item', { hasText: 'PM Target B' }).click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(0);
+  await app.evaluate(() => (globalThis as typeof globalThis & { releasePmLink?: () => void }).releasePmLink!());
+  await expect(page.locator('.sidebar-item.active')).toContainText('PM Target A');
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(2);
+  await page.locator('.sidebar-item', { hasText: 'PM Target B' }).click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(0);
+});
 
 async function openSkillsPreview(page: import('@playwright/test').Page) {
   await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();

@@ -10,6 +10,7 @@ export const LINK_OPEN = {
   destinationAttribute: 'data-link-destination',
   skillAttribute: 'data-link-skill-name',
   skillFileAttribute: 'data-link-skill-file',
+  pmAttribute: 'data-link-pm-reply',
   maxFileBytes: 1024 * 1024,
 } as const;
 

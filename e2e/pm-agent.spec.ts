@@ -1,5 +1,7 @@
 import { test, expect } from './helpers';
 
+test.use({ homeProjectDirectories: false });
+
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 // Helper: open PM panel via footer toggle

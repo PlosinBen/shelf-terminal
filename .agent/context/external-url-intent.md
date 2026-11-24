@@ -47,6 +47,10 @@ Direct anchor clicks enter Link Open with the original href and declared surface
 
 The file preview renders text instead of executing file content. Its current supported boundary is regular local UTF-8 files up to 1 MiB; unavailable remote previews fail explicitly before local filesystem access. The existing connector interface has no bounded file-read primitive. This limit avoids introducing shell-based remote reads or interpreting remote paths on the host.
 
-## external-url-intent#5 — Skills Preview destination is captured independently of source · [Decision]
+## external-url-intent#5 — Skills Preview and PM destination are captured independently of source · [Decision]
 
-Skills are app-scoped. Their HTTP(S) preview links open in the project active at click time, carried as an immutable destinationProjectId; source remains the skill name and current preview file. Do not manufacture project ownership for Skills or resolve destination against the active project after an asynchronous response. Without an active project, retain the original link in an explicit copyable error. This rule applies to Skills Preview, not PM, and supplies no project filesystem base for relative Skills links.
+Skills and PM are app-scoped. Skills Preview and PM reply HTTP(S) links open in the project active at click time, carried as an immutable destinationProjectId; source remains the skill name/current preview file or PM reply identity. Do not manufacture project ownership for either surface or resolve destination against the active project after an asynchronous response. Without an active project, retain the original link in an explicit copyable error. This supplies no project filesystem base for relative Skills/PM links.
+
+## external-url-intent#6 — Terminal clickable links and BROWSER launchers are distinct · [Gotcha]
+
+The terminal BROWSER launcher carries an exact URL through the OSC protocol into the explicit external gate. The default xterm WebLinksAddon uses a separate window-opening mechanism; no exact-URL routing or internal-tab behavior is established for terminal URL clicks. Do not infer support from the launcher E2E. Changes to clickable terminal URLs need their own capture and integration evidence.

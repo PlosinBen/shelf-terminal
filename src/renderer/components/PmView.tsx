@@ -4,6 +4,7 @@ import { renderMarkdown } from '../utils/markdown';
 import type { PmMessage, PmStreamChunk, PmToolCall } from '@shared/types';
 import { pmStreamReducer, initialPmStreamState } from './pm-view-reducer';
 import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
+import { LINK_OPEN } from '@shared/link-open-intent';
 
 // Read-only PM panel: PM is driven by tab events / Telegram, not in-app chat
 // (you're at the computer — no need to relay through PM). No message input, no
@@ -104,7 +105,7 @@ export function PmView() {
             {streamToolCalls.map((tc) => (
               <ToolCallSummary key={tc.id} toolCall={tc} />
             ))}
-            {streamText && <div className="pm-msg-md" dangerouslySetInnerHTML={{ __html: renderPmMarkdown(streamText) }} />}
+            {streamText && <div className="pm-msg-md" {...{ [LINK_OPEN.pmAttribute]: '' }} dangerouslySetInnerHTML={{ __html: renderPmMarkdown(streamText) }} />}
           </div>
         )}
         {streaming && !streamText && streamToolCalls.length === 0 && (
@@ -145,7 +146,7 @@ function MessageBubble({ message }: { message: PmMessage }) {
         </div>
       )}
       {isUser && message.content && <div className="pm-msg-text">{message.content}</div>}
-      {!isUser && html && <div className="pm-msg-md" dangerouslySetInnerHTML={{ __html: html }} />}
+      {!isUser && html && <div className="pm-msg-md" {...{ [LINK_OPEN.pmAttribute]: '' }} dangerouslySetInnerHTML={{ __html: html }} />}
     </div>
   );
 }

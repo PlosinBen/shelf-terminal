@@ -1,4 +1,4 @@
-import { SKILLS_PREVIEW_SOURCE, EXTERNAL_URL_INTENT_LIMITS, validateExternalUrlIntent, type ExternalUrlIntentInput, type ExternalUrlIntentDecision } from '@shared/external-url-intent';
+import { PM_REPLY_SOURCE, SKILLS_PREVIEW_SOURCE, EXTERNAL_URL_INTENT_LIMITS, validateExternalUrlIntent, type ExternalUrlIntentInput, type ExternalUrlIntentDecision } from '@shared/external-url-intent';
 import { LINK_OPEN, type LinkOpenInput, type LinkOpenResult } from '@shared/link-open-intent';
 
 interface Dependencies {
@@ -21,7 +21,8 @@ export async function openLink(value: unknown, dependencies: Dependencies): Prom
   });
   if (!envelope.ok) throw new Error(`Invalid link request: ${envelope.code}`);
   const source = envelope.intent.source;
-  if (input.destinationProjectId !== undefined && (source.kind !== SKILLS_PREVIEW_SOURCE
+  const appScoped = source.kind === SKILLS_PREVIEW_SOURCE || source.kind === PM_REPLY_SOURCE;
+  if (input.destinationProjectId !== undefined && (!appScoped
     || typeof input.destinationProjectId !== 'string' || !input.destinationProjectId
     || input.destinationProjectId.trim() !== input.destinationProjectId
     || input.destinationProjectId.length > EXTERNAL_URL_INTENT_LIMITS.sourceId)) {
@@ -38,13 +39,13 @@ export async function openLink(value: unknown, dependencies: Dependencies): Prom
   if (scheme === 'http:' || scheme === 'https:') {
     const checked = validateExternalUrlIntent({ ...input, source: source.kind === 'project-note' ? { kind: 'app-window' } : source });
     if (!checked.ok) throw new Error(`Link blocked: ${checked.code}`);
-    const projectId = source.kind === SKILLS_PREVIEW_SOURCE ? input.destinationProjectId
+    const projectId = appScoped ? input.destinationProjectId
       : source.kind === 'app-window' ? undefined : source.projectId;
     if (!projectId) throw new Error('A destination project is required for this link');
     await dependencies.web(projectId, input.url);
     return { kind: 'web', projectId, url: input.url };
   }
   if (scheme && scheme !== 'file:' && !/^[a-z]:[\\/]/i.test(input.url)) throw new Error('Unsupported link scheme');
-  if (source.kind === 'app-window' || source.kind === SKILLS_PREVIEW_SOURCE) throw new Error('A source project is required for file preview');
+  if (source.kind === 'app-window' || appScoped) throw new Error('A source project is required for file preview');
   return dependencies.file(input);
 }

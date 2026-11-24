@@ -34,7 +34,7 @@ import { QuickNoteOverlay } from './components/QuickNoteOverlay';
 import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, reconcileProjects, listStableProjectViews, showProjectNotice, validateAgentProviderForOpen, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
 import type { ConnectionHealth } from '@shared/types';
-import { SKILLS_PREVIEW_SOURCE, type ExternalUrlIntentDecision, type ExternalUrlIntentInput } from '@shared/external-url-intent';
+import { PM_REPLY_SOURCE, SKILLS_PREVIEW_SOURCE, type ExternalUrlIntentDecision, type ExternalUrlIntentInput } from '@shared/external-url-intent';
 import { LINK_OPEN, type LinkOpenInput, type LinkPreviewResult } from '@shared/link-open-intent';
 import { LinkPreview } from './components/LinkPreview';
 import type { Project, ProjectCreateInput } from '@shared/projects';
@@ -313,14 +313,15 @@ export function App() {
       const skillName = skillOwner?.getAttribute(LINK_OPEN.skillAttribute);
       const filePath = skillOwner?.getAttribute(LINK_OPEN.skillFileAttribute);
       const source: LinkOpenInput['source'] = skillName && filePath
-        ? { kind: SKILLS_PREVIEW_SOURCE, skillName, filePath } : projectId && viewId
+        ? { kind: SKILLS_PREVIEW_SOURCE, skillName, filePath }
+        : anchor.closest(`[${LINK_OPEN.pmAttribute}]`) ? { kind: PM_REPLY_SOURCE } : projectId && viewId
         ? { kind: 'project-tab', projectId, tabId: viewId }
         : projectId && noteId ? { kind: 'project-note', projectId, noteId } : { kind: 'app-window' };
       const input: LinkOpenInput = {
         url: rawHref,
         reason: 'Open a link from Shelf',
         source,
-        ...(source.kind === SKILLS_PREVIEW_SOURCE ? { destinationProjectId: getActiveProjectId() ?? undefined } : {}),
+        ...(source.kind === SKILLS_PREVIEW_SOURCE || source.kind === PM_REPLY_SOURCE ? { destinationProjectId: getActiveProjectId() ?? undefined } : {}),
         destination: anchor.getAttribute(LINK_OPEN.destinationAttribute) === LINK_OPEN.external ? LINK_OPEN.external : undefined,
       };
       void window.shelfApi.linkOpen(input).then(result => {
@@ -424,6 +425,8 @@ export function App() {
         sourceLabel = `${projectDisplayLabel(project)} / Note ${request.source.noteId}`;
       } else if (request.source.kind === SKILLS_PREVIEW_SOURCE) {
         sourceLabel = `Skills / ${request.source.skillName} / ${request.source.filePath}`;
+      } else if (request.source.kind === PM_REPLY_SOURCE) {
+        sourceLabel = 'PM reply';
       } else {
         sourceLabel = 'Shelf app window';
       }

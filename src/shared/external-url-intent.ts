@@ -19,8 +19,10 @@ export const EXTERNAL_URL_INTENT_LIMITS = {
 } as const;
 
 export const SKILLS_PREVIEW_SOURCE = 'skills-preview' as const;
+export const PM_REPLY_SOURCE = 'pm-reply' as const;
 
 export type ExternalUrlIntentSource =
+  | { kind: typeof PM_REPLY_SOURCE }
   | { kind: typeof SKILLS_PREVIEW_SOURCE; skillName: string; filePath: string }
   | { kind: 'project-tab'; projectId: string; tabId: string }
   | { kind: 'project-note'; projectId: string; noteId: string }
@@ -69,7 +71,7 @@ function isBoundedNonEmptyString(value: unknown, maxLength: number): value is st
 function validateSource(value: unknown): value is ExternalUrlIntentSource {
   if (!value || typeof value !== 'object') return false;
   const source = value as Record<string, unknown>;
-  if (source.kind === 'app-window') return true;
+  if (source.kind === 'app-window' || source.kind === PM_REPLY_SOURCE) return true;
   if (source.kind === SKILLS_PREVIEW_SOURCE) return isBoundedNonEmptyString(source.skillName, EXTERNAL_URL_INTENT_LIMITS.sourceId)
     && isBoundedNonEmptyString(source.filePath, EXTERNAL_URL_INTENT_LIMITS.url);
   if (source.kind === 'project-note') return isBoundedNonEmptyString(source.projectId, EXTERNAL_URL_INTENT_LIMITS.sourceId)
