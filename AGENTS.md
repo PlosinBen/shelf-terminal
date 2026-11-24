@@ -38,7 +38,6 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 - 跨檔共用的識別值，例如事件名、IPC channel 或 wire kind，應在一處定義為具名常數，由產生端和消費端共用。
 - 讀取或修改檔案時，優先使用目前 agent 提供的原生檔案工具。只有需要依資料結構解析或轉換內容時，才考慮使用腳本。
 - 執行彼此獨立的命令時，分開呼叫工具，避免用 `;` 串接，讓 Shelf 分別顯示每個命令的結果。後一步需要前一步成功時，才用 `&&` 串接。若查無結果符合預期，只將該工具代表「查無結果」的退出碼視為正常，其他錯誤仍回傳原退出碼。
-- 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
 
 ## Worktree-first
 
