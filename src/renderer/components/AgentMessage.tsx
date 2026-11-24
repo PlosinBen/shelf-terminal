@@ -148,6 +148,12 @@ function CodeFold({ message, settingMode, nested }: {
   settingMode: AgentDisplayMode;
   nested?: AgentMsg[];
 }) {
+  const execution = message.execution;
+  const exitCode = execution?.exitCode;
+  const exitedNonzero = execution?.state === ES.FAILED && exitCode !== undefined && exitCode !== 0;
+  // Older Codex cards persisted a generic banner derived from the same exit code.
+  const errorMessage = exitedNonzero && message.errorMessage === `Command failed with exit code ${exitCode}`
+    ? undefined : message.errorMessage;
   const hasError = !!message.errorMessage || (message.execution !== undefined &&
     [ES.FAILED, ES.DECLINED, ES.INTERRUPTED, ES.UNKNOWN].some(state => state === message.execution!.state));
   const [expansion, setExpansion] = useState({ failureSeen: hasError, choice: null as boolean | null });
@@ -185,11 +191,11 @@ function CodeFold({ message, settingMode, nested }: {
     <div className="agent-msg agent-msg-fold">
       <FoldHeader label={message.label} subtitle={isExpanded && !hasSeparateDetails ? undefined : message.subtitle} isExpanded={isExpanded} keyboard summary={summary}
         onToggle={() => setExpansion(current => ({ ...current, choice: !isExpanded }))} />
-      {message.execution && message.execution.state !== ES.SUCCEEDED && <div className="fold-execution" data-state={message.execution.state}>
-        {EXECUTION_LABEL[message.execution.state]}
-        {message.execution.exitCode !== undefined && ` · exit ${message.execution.exitCode}`}
+      {execution && execution.state !== ES.SUCCEEDED && <div className="fold-execution" data-state={execution.state}>
+        {exitedNonzero ? `Exited with code ${exitCode}` :
+          `${EXECUTION_LABEL[execution.state]}${exitCode === undefined ? '' : ` · exit ${exitCode}`}`}
       </div>}
-      {message.errorMessage && <div className="fold-error-banner">{message.errorMessage}</div>}
+      {errorMessage && <div className="fold-error-banner">{errorMessage}</div>}
       {isExpanded && <>
         {details && <div className="fold-body-container">
           <FoldCopyButton target="details" onCopy={() => copy(details, 'details')} />

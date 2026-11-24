@@ -221,7 +221,8 @@ function commandExecutionToMessage(id: string, item: Record<string, unknown>, op
     label: 'Command',
     execution: { state, ...(validExit ? { exitCode } : {}) },
     subtitle: redactText(command, opts.redactValues),
-    ...(state === ES.FAILED ? { errorMessage: validExit ? `Command failed with exit code ${exitCode}` : 'Command failed (exit code unavailable)' } : {}),
+    ...(state === ES.FAILED && (!validExit || exitCode === 0)
+      ? { errorMessage: validExit ? 'Command reported failure despite exit code 0' : 'Command failed (exit code unavailable)' } : {}),
     ...(bodyContent
       ? { body: { content: redactText(bodyContent, opts.redactValues) } }
       : {}),

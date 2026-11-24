@@ -1,89 +1,48 @@
 # CLAUDE.md
 
+Begin every user-facing final reply in natural language with `Ben,`. If the requested output format requires an exact response, follow that format.
+
 ## Agent Reference Docs
 
-先讀 [.agent/index.md](.agent/index.md)（bundle 入口），或依情境直接跳：
+修改子系統前，依任務從 [.agent/index.md](.agent/index.md) 查閱相關主題文件，也可依下表直接前往：
 
-| Situation | Read |
-|-----------|------|
-| 找功能在哪個檔案 | [.agent/map.md](.agent/map.md) |
-| 理解系統結構 / 抽象資料流 | [.agent/architecture/index.md](.agent/architecture/index.md) |
-| 查介面規格 / 訊息格式 / 路由規則 | [.agent/contracts/index.md](.agent/contracts/index.md) |
-| 理解為什麼這樣設計、什麼不該改、debug 前先看 | [.agent/context/index.md](.agent/context/index.md) — decisions + gotchas 按 topic；code 以 `<topic>#N` 引用（如 `skills#4` → `context/skills.md` 第 4 條）|
-| 評估新 feature 該不該做、判斷是否偏離產品定位 | [.agent/PRODUCT.md](.agent/PRODUCT.md) |
-| 選擇驗證、查環境前提、證據位置與覆蓋限制 | [.agent/verification.md](.agent/verification.md) |
-| 查相關工作的已知改善提案與再檢視條件 | [.agent/improvements.md](.agent/improvements.md) — 待評估清單，不等於已採納或授權實作 |
-| 發版流程、tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
-| 查封存 spike 成果／清理分支前確認保留限制 | [.agent/SPIKE_ARCHIVE.md](.agent/SPIKE_ARCHIVE.md) — 已移除 worktree 的保留分支、證據位置與刪除條件 |
-| 追蹤「必要回檢」的上游 issue（我方有 workaround/退化、等上游修好回收） | [.agent/UPSTREAM_WATCH.md](.agent/UPSTREAM_WATCH.md) — 薄 index，每次 release 前回檢（綁在 RELEASE_FLOW step 0.6）；rationale 仍在 `context/<topic>` |
-| 開發中 feature 的暫存工作筆記 | [.agent/features/](.agent/features/) — **development-flow** skill 的 transient note（PRD/SDD/Spec/Tasks），收尾 consolidate 進永久 doc 後刪除；**非永久文件**（gitignored、不跨機器同步）|
+| 何時查 | 文件 |
+|---|---|
+| 找功能或模組的位置 | [.agent/map.md](.agent/map.md) |
+| 理解架構、資料流或系統邊界 | [.agent/architecture/index.md](.agent/architecture/index.md) |
+| 查介面、訊息格式或路由 | [.agent/contracts/index.md](.agent/contracts/index.md) |
+| 查設計理由、既有約束或已知問題 | [.agent/context/index.md](.agent/context/index.md) |
+| 評估需求是否符合產品定位 | [.agent/PRODUCT.md](.agent/PRODUCT.md) |
+| 選擇驗證方式、查前提或覆蓋範圍 | [.agent/verification.md](.agent/verification.md) |
+| 查待評估的改善提案與回檢條件 | [.agent/improvements.md](.agent/improvements.md) |
+| 查發版流程與 tag 規範 | [.agent/RELEASE_FLOW.md](.agent/RELEASE_FLOW.md) |
+| 查封存成果或清理分支前確認限制 | [.agent/SPIKE_ARCHIVE.md](.agent/SPIKE_ARCHIVE.md) |
+| 發版前回檢上游問題 | [.agent/UPSTREAM_WATCH.md](.agent/UPSTREAM_WATCH.md) |
+| 接續進行中的開發 | [.agent/features/](.agent/features/) |
 
 ### Documentation maintenance
 開發流程依 **development-flow**；文件維護依 **project-agent-docs**；驗證依 **verification-discipline**，專案能力見 [.agent/verification.md](.agent/verification.md)；Git 交付依 **git-change-handoff**；文件格式依 **open-knowledge-format**。
 
-零星改動則直接更新 `.agent/`：**新增/搬移模組** → `map.md`（intent → file + 一行 role）；**改資料流** → `architecture/<topic>.md`（抽象、不提檔名）；**介面/訊息變更** → `contracts/<topic>.md`；**新決策或 gotcha** → 對應 `context/<topic>.md`（append 下一個 `topic#N`，從 code 以 `<topic>#N` 引用）。context entry 寫**現況 + 為什麼**，不留 changelog / 已廢棄 feature / commit hash / 日期。
-
-## Development
-
-- Node.js 22+
-- `npm run dev` — development (NODE_ENV=development, isolated userData)
-- `npm run test:e2e` — E2E tests (NODE_ENV=test, isolated userData)。**耗時長（含 build，數分鐘）→ 用 Bash `run_in_background` 跑，不要前景阻塞等待**
-- Production (packaged) uses default userData path
+變更若影響模組位置、資料流、介面或設計決策，或發現需要記錄的 gotcha，須同批更新對應的 `.agent/` 文件。
 
 ## Rules
 
-- **跨功能降級原則**：可用性可以降級，安全與資料正確性的必要條件不可放寬。停止受影響操作，保留能獨立、安全運作的功能；明確呈現失敗，不繞過認證／授權／驗證、不靜默丟資料、不把失敗標示成功。見 `.agent/context/failure-handling.md`（failure-handling#1）。
-- Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
-- **UI / 行為變更：E2E 是主動預設交付項，跟 unit test 同級** — 動到 renderer 行為（新元件、新流程、CRUD、互動）就在**同一步**補 E2E，不要標「deferred / 之後再寫」等被提醒。build 慢不是不做的理由：用 Bash `run_in_background` 跑 `npm run test:e2e -- <spec>`。core/非 UI 邏輯沒 surface 可 E2E 時才以 unit 為主。
-- 不要啟動 dev server 或 Electron（`npm run dev` / `npx electron`）— AI 看不到畫面，只會干擾使用者。驗證用 `npm run typecheck` + `npm run test:unit`；需要驗 UI 行為就寫 E2E test
-- 優先使用 `package.json` 定義的 npm scripts（如 `npm run typecheck`、`npm run test:unit`、`npm run test:e2e`），不要直接組底層指令（如 `tsc --noEmit`、`vitest run`）— 使用者開了 bypass permission，直接組指令會增加審閱負擔
-- Commit 前確認 `.agent/` 是否需要更新（規範見上方「Documentation maintenance」）— 有新增功能、改變架構、或發現 gotcha 時一併更新
+- **失敗處理**：必要前提不成立時，停止受影響的操作，保留能獨立且安全運作的功能。維持認證、授權、驗證與資料正確性的要求，明確呈現失敗。診斷規則見 [failure-handling#1](.agent/context/failure-handling.md)。
+- Bug fix 依 **systematic-debugging**，須先用迴歸測試重現問題，再修正。
+- **開發中，每次修正跑能驗證該行為的最小測試。Feature 或 bug fix 收尾前，在最終版本跑型別檢查、完整 unit suite，以及涵蓋變更與受影響既有流程的 E2E。**
+- **Renderer 行為變更須同批新增或更新對應的 E2E，並執行受影響的 spec。** 所需環境不可用時，完成其餘可獨立執行的檢查，並回報未驗證的行為與具體阻礙。沒有可供 E2E 驗證的 core／非 UI 邏輯以 unit test 為主。
+- 不要直接啟動 dev server 或 Electron。驗證使用專案的 npm scripts，執行方式與環境前提見 [.agent/verification.md](.agent/verification.md)。
 - `.agent/features/` 是暫時開發 context（gitignored、不跨機器同步）— **程式碼 / 測試 / 永久 doc 絕對禁止引用它**
-- 優先思考、查證再動手，不要猜測 — 不確定的事先查 code / 文件 / 既有實作確認（例：裝套件前先 `npm view <pkg> versions` 確認版本，不要假設版號）
-- 設計盡可能簡單，避免過度設計 / 過度抽象 / 過度設定 — 先滿足當前需求，不預先為想像中的未來鋪設
-- 修正問題時只動必要的項目 — 不順手改無關的 code / 格式 / 重構，降低審閱與回歸風險
+- 採用足以滿足當前需求的最簡單設計，改動限於本次任務所需。
+- 跨檔共用的識別值，例如事件名、IPC channel 或 wire kind，應在一處定義為具名常數，由產生端和消費端共用。
 - 讀取或修改檔案時，優先使用目前 agent 提供的原生檔案工具。只有需要依資料結構解析或轉換內容時，才考慮使用腳本。
 - 執行彼此獨立的命令時，分開呼叫工具，避免用 `;` 串接，讓 Shelf 分別顯示每個命令的結果。後一步需要前一步成功時，才用 `&&` 串接。若查無結果符合預期，只將該工具代表「查無結果」的退出碼視為正常，其他錯誤仍回傳原退出碼。
-- 有錯就停，逐一修復再測，不要重複跑整套 build/test
-- 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
-- 同一個問題一次無法修正，請嘗試使用 logger 靠實際輸出定位，不要純粹依靠讀 code（renderer 端走 `debugLog` bridge 落 main log 檔，AI 可直接讀）
-- 禁止靜默吞錯 / 丟資料 — 狀態對不上、解析失敗、收到非預期輸入時要 fail-loud（log 出關鍵 id / context），不要 silent `return` 或 catch 後不處理。良性 race 用低調 log（`debugLog` 落檔）、真資料遺失要大聲（`console.warn/error`）；純函式回傳 anomaly 讓 caller log（保持可測）。樂觀更新尤其要在跟真相源對帳對不上時留痕
-- **Commit message 格式**：使用精練 Claude-style Conventional Commit，保留有用脈絡與 model provenance。
-  - Subject 一律：`<type>(<scope>): <concise outcome>`。允許 type：`feat`、`fix`、`refactor`、`test`、`docs`、`chore`、`build`、`style`。scope 用子系統/產品面，不用檔名（例：`agent`、`codex`、`copilot`、`worktree`、`skills`、`backup`、`pty`、`main`、`renderer`、`diag`、`e2e`）。
-  - Subject 用英文、祈使/結果導向、冒號後小寫開頭、不加句號。不要用 bare scope（如 `agent: ...`）或句子式 subject（如 `Show ...`）。
-  - Body 只在有助 review 時寫：root cause、設計取捨、行為變更、regression test、已知限制。保持精練，通常 1-3 個短段落或少量 bullets。
-  - 實質參與撰寫 commit 時保留 trailer：`Co-Authored-By: <Model Name> <noreply/...>`。多人/多模型合作可多行。
-  - **多行 commit message 必須使用 heredoc 產生真正換行**；禁止在 `git commit -m` 參數中用 `\n` 或 `\\n` 拼接 body / trailer（shell 會原樣寫入，trailer 也不會被 Git 辨識）。commit 後一律以 `git show -s --format=%B HEAD` 確認段落、bullets 與 trailers 格式正常，再進行 push / tag。
-  - 範例：
-    ```text
-    fix(codex): send data URI images as app-server image URLs
 
-    The app-server accepts image URL parts, not raw data URI image payloads.
-    Normalize pasted image inputs before dispatch so local screenshots and
-    dragged images follow the same path as file-backed images.
+## Worktree-first
 
-    Regression covers data URI image input translation.
+修改 source 或 tests 必須在 Shelf worktree 內進行。尚未進入對應 worktree 時，先走 `shelf-worktree-handoff`。
 
-    Co-Authored-By: GPT-5 Codex <noreply@openai.com>
-    ```
-- **Worktree-first development**（覆寫 development-flow「原地開 branch」預設）：
-  - **Code / tests 一律在 worktree 開發** — 不在 main checkout 改 tracked source/test。main checkout = 規劃 + 唯讀調查 + 純文件維護 + 純套件升級；若升級後測試有問題，則開 note 並依 development-flow 處理。
-  - **純文件維護（不伴隨 code 變更）可在 main checkout 直接改**：`.agent/`、CLAUDE.md、其他 markdown、`.agent/features/` note。
-  - **伴隨 code 變更的 doc 跟著 code 走**：一次 code 變更該連帶更新的 `.agent/` / contract / map，與那份 code 同在 worktree、同批改，不拆回 main。
-  - 對本 repo 中必須隔離的 code / test work，**必須**以 `shelf-worktree-handoff` 作為控制流程；**禁止**繞過它自行建立 worktree，或留在 parent project 實作。該 skill、development-flow 或必要 Shelf worktree tools 任一缺失時，**必須立即停止並明確回報，禁止降級或自行補做整合流程**。純文件維護仍依本 repo 的明文例外處理。
-
-## Conventions
-
-- **Renderer 三機制職責**（先想清楚一個動作屬於哪個）：
-  - **Store（中心化 state 服務，zustand 式）** = 所有 renderer-local state 的讀與改；mutation 走 store 具名 action（同步呼叫，需要時可回傳值，如 `peekAgentTab` 讀、`enqueuePendingSend` 寫）。state 的事就 store 管。
-  - **Event bus (`src/renderer/events.ts`)** = 跨 component 的事件/意圖傳遞（解耦 pub/sub：component → 別的 component 或中央 handler），含「我 `emit` → 中央 handler 執行（常打 IPC）」這種跨界意圖。
-  - **IPC (`window.shelfApi.*`)** = 跨 process 到 main 的唯一通道（preload 純 RPC bridge）。
-  - 判別：碰 main → IPC；動 renderer state → store action；跨 component 傳事件/意圖 → bus。**read-return（同步要回傳值）用函式呼叫，別拆成 request/response event**（會把原子同步呼叫劈成非同步 + correlation，在 bus 上重造函式回傳）。
-- 觸發點 (UI 元件、keybindings) 只 `emit()` event，不執行 side effect；會打 main / 跨子系統的 side effect (pty kill、terminal dispose、persist) 集中在 `App.tsx`
-- 動作別繞共同父層 state coordinator：child 直接 emit bus event，不用 prop callback 往上轉手（避免父層 cascade re-render）
-- Connection-specific 邏輯走 `createConnector()` factory (`src/main/connector/`)；preload 純 RPC bridge 不含 dispatch
-- Agent backend (provider/SDK 細節) 完全封裝在 `agent-server/`；renderer 不感知 provider type、tool name、slash 語法
-- Wire payload 給 renderer 是渲染原語 (reply / fold_code / fold_markdown / fold_diff / note / system / error)，不是 provider 語意 (thinking / tool_use / slash_response)
-- Config source-of-truth 單向流動：renderer 持有 prefs → backend imperative apply 不 cache；backend 持有 status / capabilities → renderer 純展示
-- 有參數的 keybinding action 用 `action_param` pattern (例: `switchTab_3`)
-- **跨檔 / 重複使用的字串值用具名 const，不散落 magic string** — type 標籤、wire kind、事件名、IPC channel、固定路徑片段之類，在單一 source-of-truth 用 `const` / `as const` 物件定義一次，call site(設值端 + 判斷/消費端)一律引用常數,不直接寫字面值。型別盡量從常數 derive（`keyof typeof` / `typeof X`），新增值＝加一筆常數，不用同時改 union 與各處 case。既有範例：`IPC`（`ipc-channels.ts`）、`ShelfFileTypeMcp`/`SHELF_PLACEMENTS`（`shared/shelf-paths.ts`）。一次性、單檔內的字串不必硬抽。
+- **Main checkout** 可用於規劃、唯讀調查、純文件維護，以及只改依賴宣告和 lockfile 的套件升級。純套件升級可在 main 執行既有測試。
+- **套件升級後測試失敗**時，建立工作 note 並依 `development-flow` 處理。若需修改 source 或 tests，先走 Shelf handoff。
+- **隨 code 變更的文件**與 code 放在同一個 worktree，同批交付。
+- **缺少 `shelf-worktree-handoff`、`development-flow` 或必要的 Shelf 工具**時，立即停止需要隔離的工作並回報阻礙。Worktree 的建立、接續和收尾一律走 Shelf handoff。

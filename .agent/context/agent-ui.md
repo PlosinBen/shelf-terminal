@@ -79,30 +79,44 @@ Severity 是抽象層級：`'normal' | 'info' | 'warning' | 'critical'`，map �
 
 ## agent-ui#4 — Agent View 採事件 / Store 分離架構（InputZone 與 MessageList 間接相依）  ·  [Decision]
 
-**Decision**：AgentView 不該是擁有所有 state 的 god component。正確架構是：
+### Renderer state, events, and IPC
+
+| 機制 | 職責 |
+|---|---|
+| Store | 集中管理 renderer 本地狀態。透過 store 讀取，透過具名 action 修改。Action 同步呼叫，可回傳值，例如 `peekAgentTab` 讀取或 `enqueuePendingSend` 寫入。 |
+| Event bus（`src/renderer/events.ts`） | 傳遞跨元件事件或操作意圖，由其他元件或集中處理的 handler 訂閱。 |
+| IPC（`window.shelfApi.*`） | Renderer 呼叫 main process 的唯一通道，preload 只負責 RPC 轉接。 |
+
+需要立即取得回傳值時，直接呼叫函式。拆成 request／response event 會把一次同步操作變成非同步流程，還得額外配對請求與回覆。
+
+UI 元件與 keybindings 透過 `emit()` 發出跨元件或跨子系統的操作意圖。呼叫 main 或跨子系統的副作用（例如終止 PTY、釋放 terminal、持久化）由 `App.tsx` 集中處理，或由它註冊的 handler 處理。子元件直接發事件，省去共同父層轉送 action 的 prop callback，減少耦合和連鎖渲染。
+
+### Agent View example
+
+**Decision**：Agent View 的輸入意圖走 event bus，訊息狀態由 per-tab store 持有：
 
 ```
-InputZone ──emit('agent:send', ...)──▶ EventBus
-                                        ↓
-                              App.tsx handler:
-                              - agentTabStore.appendUser(tabId, ...)
-                              - shelfApi.agent.send(tabId, ...)
-                                        ↓
-                              agentTabStore (per-tab)
-                                        ↓ subscribe
-                              MessageList (純 render)
+InputZone ──enqueuePendingSend──────▶ agentTabStore (per-tab)
+    │                                             ↓ subscribe
+    │                                         MessageList
+    └──emit('agent:send', ...)───────▶ EventBus
+                                          ↓
+                                 ipc-agent.ts handler
+                                 （由 App.tsx 註冊）
+                                          ↓
+                                 shelfApi.agent.send(...)
 ```
 
 職責分配：
 - **InputZone** — 收輸入、emit event，**不知道 MessageList 存在**
 - **MessageList** — subscribe store、純 render，**不知道 InputZone 存在**
 - **EventBus** — 傳遞 action，不存 state（已存在 `src/renderer/events.ts`）
-- **App.tsx handler** — 統一處理 IPC + 寫 store（對位 CLAUDE.md Conventions「side effect 集中 App.tsx」）
+- **`ipc-agent.ts` handler** — 接收送出意圖並轉交 main，由 `App.tsx` 註冊
 - **agentTabStore** — per-tab scoped，唯一 message state
 
 兩個 sibling 間 **間接相依**：input 送出的訊息透過 store 流到 MessageList，沒有 prop 直接串、沒有共享 state 持有者。
 
-**Reason**：承 CLAUDE.md Conventions「sibling 元件間接相依」。具體效益：
+**Reason**：透過事件和 store 協作，讓兩個 sibling 元件保有各自的職責：
 - MessageList subscribe store slice → 只在 messages 變化時 re-render，input 打字不波及；不需要手動 memoize 一堆 props
 - Tab unmount 才安全：messages 在 store 不在 component state，non-active agent tab 可 unmount 釋放記憶體不掉資料
 
@@ -119,7 +133,7 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 **Do not change because**：
 - **不要把 input 跟 MessageList 透過共同父層 state 串** — 父層 state 變化照樣 cascade re-render，沒解決問題
 - **不要把 messages 留在 component state、其他搬 store** — tab unmount 會掉資料
-- **不要把 handleSend 留在 InputZone** — 違反 CLAUDE.md「side effect 集中 App.tsx」，handler 該在 App.tsx
+- **送出訊息的 IPC 由集中註冊的 handler 處理**。`InputZone` 準備輸入、登記本地 pending 狀態並發出送出意圖
 
 **Related**：`storage#1`（Per-project storage）。
 
@@ -133,7 +147,7 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 - **`plan` 不在 union 內** — 走獨立 `AgentEvent::plan` + `AGENT_PLAN` IPC channel → 直接寫 `agentTabStore.currentPlan`，永遠不進 timeline
 
 **Reason**：
-- 承 CLAUDE.md Conventions「wire payload 是渲染原語不是 provider 語意」— 舊 union 把 thinking / tool_use / slash_response 等 provider 語意洩漏進 renderer；渲染視角下「可收合卡片」是同個 UI primitive，差別只在 body format
+- 依 [wire 渲染原語契約](../contracts/agent-wire-protocol.md)，renderer 對可收合卡片依 body 格式渲染。SDK 的 thinking／tool use／slash response 由 provider 轉換。
 - 新增類似 entity 要新 type：未來加 MCP rich output、custom slash 等都要 variant + builder case + renderer case + CSS class
 - 語意洩漏到 settings：舊 `AgentDisplayKey` 是 `thinking|tool_use|file_edit|intent`，使用者要記「Tool Use」對應到哪些工具；新 key 是 4 個 `fold_*`、跟 body format 1:1
 - `slash_response` 跟 `tool_use` 結構同形但分兩個 type 是歷史包袱；`file_edit` 成功/失敗用不同 body shape 本來就該共用 fold 殼（這四個舊 type 都已併入新 fold_* 系列）
@@ -142,14 +156,14 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 - **`note` marker（▸）由 renderer 渲染** — provider 只給純內容，視覺契約跟 `error` 紅色 / `reply` markdown 同層級
 - **`subtitle` 截斷由 CSS 處理** — provider 給完整字串、renderer CSS truncate + `title={subtitle}` tooltip 給 hover 看原文，不在 provider 截斷
 - **`errorMessage` 兩層分工**：
-  - `fold_*` 卡片的 `errorMessage`：tool/action/slash 業務失敗（Bash exit 1、Edit old_string not found、/compact 失敗），紅色 banner inline 在卡片內
+  - `fold_*` 卡片的 `errorMessage`：tool/action/slash 回報的錯誤（例如命令無法執行、Edit old_string not found、/compact 失敗），紅色 banner inline 在卡片內
   - `AgentEvent::error` (無 msgId)：transport/framework 失敗（連線斷、agent-server 沒起來、JSON parse fail），main 端 `dispatchEvent` mint msgId 轉成 renderer `error` message
   - `OutgoingMessage msgType='error'`：provider 業務層錯誤（已有 turn 上下文）
 - **`fold_code` vs `fold_markdown` 區分**：markdown 是否解析。`fold_code` 用 `<pre>` 不解析（shell stdout、raw output 含 `*` `#` 不會誤判）；`fold_markdown` 解析 markdown（slash 結果、MCP rich text、想顯示 code 包 ```lang fence）— **不另開 `fold_json`**
 - **`FoldBase` interface 共享** label / subtitle / errorMessage，避免四個 fold 重複定義
 - **`errorMessage` 保持可見**：`fold_code` 每次 mount 首次失敗自動展開，之後可手動收合；重複失敗 snapshot 不覆寫使用者選擇。紅色 banner 在 body 外，因此收合仍可見。其他 fold 保留強制 expanded。重新掛載／history reload 的失敗 code 卡重新展開，不持久化展開偏好。
 - **`fold_code` 閱讀控制**：預設預覽 30 行，可顯示全部已收到的輸出、捲至尾端及複製全部內容；沿用限高捲動區。沒有獨立 details 的卡片展開時顯示完整 subtitle 並隱藏標題列的重複 subtitle，收合時恢復單行預覽；有 details 時依下述描述與詳細文字規則呈現。不提供第二層 Show／Hide details。保留換行、引號與既有 redaction；不解析 command 或補讀重導向檔案。控制只依渲染原語，不判斷工具名稱。沒有輸出的空 body 不顯示空白輸出框。複製失敗顯示回饋並記錄 msgId／target，不記錄文字內容。
-- **`fold_code.execution` 可選狀態**：狀態與 exit code 不從 body／錯誤文字推測。succeeded 是正常結果，不顯示成功 badge 或 exit 0，但 metadata 照常保存供狀態對帳與歷史恢復；其他狀態提示在收合區外，失敗收合後仍可見。failed／declined／interrupted／unknown 首次出現時採與失敗相同的展開策略。已確認 terminal 不被晚到 running／partial output 改寫；衝突 terminal 留診斷，unknown 可被後到的確定結果補正。idle、exit snapshot、reload 對有 metadata 的未完成卡片標結果未知，即使已有輸出；不宣稱程序已停止。無 metadata 的舊卡維持舊邏輯。
+- **`fold_code.execution` 可選狀態**：狀態與 exit code 不從 body／錯誤文字推測。succeeded 是正常結果，不顯示成功 badge 或 exit 0，但 metadata 照常保存供狀態對帳與歷史恢復；其他狀態提示在收合區外，失敗收合後仍可見。failed 有明確非零退出碼時，顯示 `Exited with code N` 並保留警示樣式與輸出。退出碼對應整次呼叫，無法判定個別命令的語意；既有 History 只隱藏與退出碼重複的舊 Codex 通用 banner，其餘診斷照常呈現。failed／declined／interrupted／unknown 首次出現時採與失敗相同的展開策略。已確認 terminal 不被晚到 running／partial output 改寫；衝突 terminal 留診斷，unknown 可被後到的確定結果補正。idle、exit snapshot、reload 對有 metadata 的未完成卡片標結果未知，即使已有輸出；不宣稱程序已停止。無 metadata 的舊卡維持舊邏輯。
 - **Provider 證據範圍**：Codex commandExecution 的 inProgress／failed／declined 直接映射；completed 只有明確 exit 0 才 succeeded，非零為 failed，缺 exit code 為 unknown。矛盾或未知原始欄位留警告。ACP execute-kind 依標準 tool status（pending／in_progress／completed／failed）映射；Claude Bash 依 tool_use／tool_result.is_error 映射。後兩者表示工具呼叫結果，不代表背景程序已結束，也不解析文字取得 exit code。其他工具維持無 metadata；目前沒有 provider 將 turn 取消直接映成 interrupted。
 - **描述與詳細文字**：fold_code 可提供獨立 `details`，此時 subtitle 收合／展開都留在標題，details 在展開區可複製；空字串表示只有描述，不把描述當程式碼。省略 details 的舊訊息沿用 subtitle 移入展開區的行為。非空 details 即使沒有輸出仍可展開。這避免把 provider 的人類描述誤當完整命令，renderer 不解析工具或命令語意。
   ACP 工具沒有結構化檔案路徑、以 title 作描述時，也明確提供空 details，展開直接顯示結果；此規則不依語言、標題長度或 Tool 字樣猜測，不改動檔案路徑與實際命令的呈現。

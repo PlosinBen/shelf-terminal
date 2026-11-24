@@ -96,7 +96,7 @@ dirty snapshots，失敗的 clear 在後續保存或退出前先重試，再確�
 
 ## agent-core#6 — Provider 格式解析失敗一定要 fail-loud（serverLog('error')）  ·  [Decision]
 
-> 通則見 CLAUDE.md「禁止靜默吞錯 / 丟資料」；本條是 **provider wire-format 解析**的具體化（preview 字數、pure parser 不 log 等）。log 機制見 `agent-core#9`。
+> [failure-handling#1](failure-handling.md) 說明通用的失敗處理規則。本條補充 **provider wire-format 解析**的細節，例如 preview 字數與純 parser 的責任。Log 機制見 `agent-core#9`。
 
 **Decision**：任何 provider 端的 wire-format 解析（SDK tool_result content、apply_patch 字串、自訂協議 payload）失敗時，**必須在 caller 端 `serverLog('error', tag, …)` 記錄 content preview**（前 200~300 字）。不要靜默 return null/fallback。
 

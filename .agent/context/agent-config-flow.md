@@ -90,6 +90,7 @@ InputZone parseSlashPrefix
 
 走「**renderer 發起 → provider 執行 → 廣播 capabilities → renderer 落地**」：
 
+- 專案保存的 prefs 用於初始化或明確的設定操作。Provider 負責套用設定，並提供 live status 和 capabilities 的權威快照。Renderer 依快照顯示目前狀態，並依確認結果保存偏好。
 - 打字 slash 與 slash-origin picker 走正常訊息；status-bar picker 走獨立 session control（`agent-config-flow#16`）。Provider 套用並確認後發布 capabilities，**無 renderer 樂觀更新**。
 - Renderer `AgentView` 觀察 capabilities，跟 savedPrefs 比較後保存。若有 `confirmedPrefs`，只保存該 explicit patch；其他 provider 沿用 snapshot 同步（`agent-config-flow#13`）。
 - Backend 拒絕的 edit 不發布成功 capabilities，也不保存該 edit。Claude 尚無 live session 時，保存的是下一個 session 的 options；不是宣稱 SDK 已預先驗證該值。

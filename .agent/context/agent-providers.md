@@ -11,27 +11,25 @@ related:
 
 # Agent Providers
 
-> 多個 agent provider（Claude / Copilot / 未來 OpenAI-compatible）對外一致、差異封裝在內部：auth、model registry、permission semantics 全收進 provider，renderer 對 provider type 無知。
+> Claude、Codex 與 Copilot 共用 Shelf 的介面，各自封裝 SDK、登入、模型與權限行為。
 
 ## agent-providers#1 — Provider 行為對外一致，差異封裝在 Provider 內部  ·  [Decision]
 
-**Decision**：所有 agent provider（Claude / Copilot / 未來其他 OpenAI-compatible）對 renderer 暴露同一組介面（`gatherCapabilities`、`query`、`stop` 等）。Provider 之間的行為差異（model list 來源、slash command 語意、context 管理策略、auth 流程）一律封裝在 provider 內部。Renderer 對 provider type 無知。
+**Decision**：`agent-server` 的 provider 實作共用 backend 介面（`gatherCapabilities`、`query`、`stop` 等）。各自解讀 SDK 事件、工具名稱、provider 專屬 slash 語法及行為。Renderer 可用 provider 身分呈現名稱等標示，互動與渲染以 Shelf 的 capabilities 和訊息契約為準。
 
 **典型差異點**：
-- **Model list**：Claude 寫死 / Copilot API 動態抓 / 未來 generic 由 user 配置 → 一律經 `gatherCapabilities().models` 出來，client 不用判斷怎麼來的
-- **Slash commands**：provider 在 `query()` 入口自行偵測 `/cmd` prefix 並內部 dispatch（見 `agent-config-flow#2`）— renderer 不分流
-- **Context 管理**：Claude SDK 自管 / Copilot modelMessages + auto-compact → 都在 provider 內部
-- **Auth**：Claude OAuth token / Copilot session token → 都包成 `auth_required` event
+- **Model list**：Renderer 從 capabilities 取得模型選項。清單來源由 provider 決定。
+- **Slash commands**：Provider 負責解讀並派送各自的命令（見 `agent-config-flow#2`）。
+- **Context 管理**：Provider 負責各自的 session 與 context 管理策略。
+- **Auth**：Provider 把登入需求轉為 Shelf 的 `auth_required` event。
 
-**Reason**：承 CLAUDE.md Conventions「Agent backend 封裝在 agent-server/」。具體效益：行為差異隔離後可分別演進（Copilot 加新 slash 不影響 Claude）；IPC contract 穩定（provider 內部重構不影響前端）。
+**Reason**：Provider 可各自調整行為，renderer 依賴的 IPC 契約維持一致。
 
 **Anti-pattern（不該這樣做）**：
 - Renderer 寫死 `if (provider === 'copilot') ...` 攔截特定 slash command
 - Renderer 知道某個 provider 的 model list 要動態 refetch、另一個不用
 - Status bar 或 SettingsPanel 為某個 provider 開特殊 UI 分支
-- IPC payload 帶 provider type 讓 main / agent-server 判斷怎麼處理
-
-**Exception**：純 UI 呈現（例如 provider 名稱顯示為 "Claude" / "Copilot"）可以在 renderer 處理 — 那是 i18n 等級的東西，不是 agent 邏輯。
+- 共通層按 provider type 重新解讀已轉換的訊息
 
 **Do not change casually because**：不要為了「圖方便」在 renderer 加 provider-specific 條件分支 — 短期省 5 行 code，長期回頭重構要付 5 倍代價。新需求進來時先問「能不能塞進 provider 介面」，不行才考慮擴介面，最後才動 renderer。
 
@@ -63,7 +61,7 @@ related:
 **Decision**：所有跟 permission 相關的行為細節（bypass 短路、acceptEdits 自動允許、plan mode 阻擋、session allowlist「always allow this tool」）都實作在 `agent-server/providers/<name>.ts` 裡。`agent-server/index.ts` (dispatcher) 不存任何 permission 狀態、不做任何 mode 判斷，只負責 IPC routing 和 backend lifecycle。
 
 **Reason**：
-- 承 CLAUDE.md Conventions + `agent-providers#1`。具體在 permission 領域：兩 provider SDK 對 permission 支援深度不一樣（Claude `updatedPermissions` addRules destination=session / Copilot `kind`-based + native `autopilot`），硬抽到 dispatcher 會走最低公分母、放棄各自 SDK 最原生機制
+- 延續 `agent-providers#1` 的封裝邊界。各 provider 的權限能力不同（Claude `updatedPermissions` addRules destination=session / Copilot `kind`-based + native `autopilot`），由 provider 保留各自的原生機制。
 - session allowlist 在 Claude 是「白送」（回 `updatedPermissions` 後 SDK 自己接管，連 `canUseTool` 都不會再 invoke）；dispatcher 一律「自己存 Set」就丟掉這個白賺
 
 **Companion details**：
@@ -89,13 +87,13 @@ related:
 
 **Decision**：像 `/mcp` `/skills` 這種「列出 session 載入了什麼」的輸出,**每個 provider 用自己的 runtime shape 直接組 markdown**(渲染原語)再 `reply` 出去。**不**先把各家資料 normalize 成一個跨 provider 的共通結果型別。Claude 使用 SDK shape；Codex 使用 app-server list routes；Copilot ACP 由 CLI 原生派發。共通層只保留無語意的排版工具。
 
-**Reason / 為什麼**:共通 result type 是**最低公分母契約** —— 各家資料天生不對稱(Claude `mcpServerStatus().tools` 帶 per-server tools + `readOnly`/`destructive` annotations;Copilot 的 `mcp_servers_loaded` / `mcp.list()` / `mcp.discover()` 三者都**沒有** per-server tools),硬塞進共通型別只能靠一堆 optional 欄 + adaptive column 撐,愈加愈漏。更糟的是**權責倒置**:把「怎麼呈現」的責任從各 provider 上收到共通層,等於逼共通層去懂每一家的 quirks,新 provider 進來得先滿足這個型別 → 不利擴充。承 `agent-providers#1`(差異封裝在 provider 內)+ CLAUDE.md「wire 給 renderer 的是渲染原語,不是 provider 語意」:呈現本就是 per-provider 的事,直接在 provider 內組 md 最誠實。
+**Reason**：各家提供的資料不同。例如 Claude 的 MCP 狀態可包含每個 server 的工具和 annotations，而 Copilot 的狀態資料未必有這些欄位。由 provider 依其資料組出渲染內容，可避免共通層逐家解讀欄位。
 
 **結果**：Claude與Codex各自產生 provider-owned輸出，Copilot CLI原生輸出；renderer只接收渲染原語，不知道來源 transport。
 
 **Do not change casually because**:不要「為了一致」再把這類輸出抽回共通 normalized struct —— 那會重新把各家差異上收到共通層,造成權責倒置、卡住新 provider。要共用就只共用 `md-table` 這種無語意工具。判準:**跨 provider 共用「無語意工具」可以,共用「帶語意的結果型別」不行**。
 
-**Related**:`agent-providers#1`、`skills#3`、CLAUDE.md Conventions(渲染原語)、`agent-server/providers/{md-table,claude/helpers,copilot/helpers,fake/index}.ts`。
+**Related**:`agent-providers#1`、`skills#3`、[渲染原語契約](../contracts/agent-wire-protocol.md)、`agent-server/providers/{md-table,claude/helpers,copilot/helpers,fake/index}.ts`。
 
 ## agent-providers#7 — Claude SDK `rate_limit_event` 在 `status:'allowed'` 不帶 `utilization` —— status bar quota 平常只能顯示 bucket+reset  ·  [Gotcha]
 

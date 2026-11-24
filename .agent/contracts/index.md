@@ -2,6 +2,8 @@
 
 Exact interface specs / message formats. Point to source types rather than duplicate them.
 
+共用的 type 標籤、wire kind、event name、IPC channel 和固定路徑片段，由單一 `const` 或 `as const` 定義。型別可從常數用 `keyof typeof` 或 `typeof` 推導，避免另外維護相同的值集合。實例見 [IPC](../../src/shared/ipc-channels.ts) 和 [Shelf 路徑常數](../../src/shared/shelf-paths.ts)（`ShelfFileTypeMcp`、`SHELF_PLACEMENTS`）。
+
 | Intent | File | One-line summary |
 |---|---|---|
 | renderer↔main IPC 介面 | [ipc-channels](ipc-channels.md) | `window.shelfApi.*` surface，按領域分 |

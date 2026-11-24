@@ -74,13 +74,16 @@ test.describe('agent flows via fake provider', () => {
       await app.evaluate(({ BrowserWindow }, channel) => {
         const target = BrowserWindow.getAllWindows()[0].webContents;
         const tabId = (globalThis as any).__outcomeTab;
-        const send = (id: string, execution?: unknown, body = 'partial output') => target.send(channel, tabId, {
+        const send = (id: string, execution?: unknown, body = 'partial output', errorMessage?: string) => target.send(channel, tabId, {
           type: 'fold_code', msgId: id, label: id, body: { content: body }, ...(execution ? { execution } : {}),
+          ...(errorMessage ? { errorMessage } : {}),
         });
         send('outcome-ok', { state: 'succeeded', exitCode: 0 }, '');
         send('outcome-ok-output', { state: 'succeeded' }, 'successful output');
         send('outcome-failed', { state: 'failed', exitCode: 130 });
         send('outcome-failed', { state: 'running' }, 'partial output\nlate output');
+        send('outcome-legacy-exit', { state: 'failed', exitCode: 1 }, 'earlier command output', 'Command failed with exit code 1');
+        send('outcome-tool-error', { state: 'failed' }, '', 'Could not start the shell');
         send('outcome-declined', { state: 'declined' }, '');
         send('outcome-interrupted', { state: 'interrupted' });
         send('outcome-pending', { state: 'pending' });
@@ -92,7 +95,11 @@ test.describe('agent flows via fake provider', () => {
       const expectResults = async () => {
         await expect(card('outcome-ok').locator('.fold-execution')).toHaveCount(0);
         await expect(card('outcome-ok-output').locator('.fold-execution')).toHaveCount(0);
-        await expect(card('outcome-failed').locator('.fold-execution')).toHaveText('Failed · exit 130');
+        await expect(card('outcome-failed').locator('.fold-execution')).toHaveText('Exited with code 130');
+        await expect(card('outcome-legacy-exit').locator('.fold-execution')).toHaveText('Exited with code 1');
+        await expect(card('outcome-legacy-exit').locator('.fold-body-code')).toHaveText('earlier command output');
+        await expect(card('outcome-legacy-exit').locator('.fold-error-banner')).toHaveCount(0);
+        await expect(card('outcome-tool-error').locator('.fold-error-banner')).toHaveText('Could not start the shell');
         await expect(card('outcome-declined').locator('.fold-execution')).toHaveText('Not executed: declined');
         await expect(card('outcome-interrupted').locator('.fold-execution')).toHaveText('Interrupted');
         await expect(card('outcome-malformed').locator('.fold-execution')).toHaveText('Result unknown');
@@ -109,7 +116,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(card('outcome-failed').locator('.fold-body-code')).toHaveCount(0);
       await expect(card('outcome-failed').locator('.fold-execution')).toBeVisible();
       await expect.poll(async () => (await storedAgentMessages(page)).filter(m => m.id.startsWith('outcome-')).length,
-        { timeout: 15000 }).toBe(9);
+        { timeout: 15000 }).toBe(11);
       expect((await storedAgentMessages(page)).find(m => m.id === 'outcome-ok')).toMatchObject({ execution: { state: 'succeeded', exitCode: 0 } });
       await page.locator('.tab-bar .tab.active').click({ button: 'right' });
       await page.locator('.context-menu-item', { hasText: 'Save to Default', exact: true }).click();
