@@ -69,7 +69,7 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 ## Conventions
 
 - 修改 renderer 狀態、跨元件事件或 IPC 前，先讀 [Store／Event bus／IPC 分工](.agent/context/agent-ui.md#renderer-state-events-and-ipc)。
-- Connection-specific 邏輯走 `createConnector()` factory (`src/main/connector/`)；preload 純 RPC bridge 不含 dispatch
+- 修改連線邏輯或 preload 前，先讀 [Connector factory 與 preload 分工](.agent/context/connector.md)（`connector#1`）。
 - Agent backend (provider/SDK 細節) 完全封裝在 `agent-server/`；renderer 不感知 provider type、tool name、slash 語法
 - Wire payload 給 renderer 是渲染原語 (reply / fold_code / fold_markdown / fold_diff / note / system / error)，不是 provider 語意 (thinking / tool_use / slash_response)
 - Config source-of-truth 單向流動：renderer 持有 prefs → backend imperative apply 不 cache；backend 持有 status / capabilities → renderer 純展示
