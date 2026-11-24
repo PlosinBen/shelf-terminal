@@ -13,6 +13,7 @@ title: Shelf — 驗證能力與執行入口
 - Node.js 22+；依 [package.json](../package.json) 安裝專案依賴。`postinstall` 包含 Electron native module rebuild，需相應建置環境。沒有安裝依賴不等於產品測試失敗。
 - 驗證用 `npm run typecheck` 和 `npm run test:unit`。優先使用 `package.json` 定義的 npm scripts，避免直接組 `tsc --noEmit`、`vitest run` 等底層指令，以減少額外審閱。UI 行為走既有 E2E fixture，避免直接用 `npm run dev` 或 `npx electron` 啟動產品。
 - E2E 包含 build、耗時較長。用當前工具提供的背景執行方式啟動 `npm run test:e2e -- <spec>`（例如 Bash 工具的 `run_in_background`），保留輸出並追蹤完成。無背景工具時如實指出限制。
+- Renderer 行為的 E2E 驗證以受影響 spec 的實際執行結果為準。若環境前提不足而無法執行，完成其餘可獨立執行的檢查，回報已完成的檢查、未驗證的行為，以及執行 E2E 還缺的具體前提。
 - 以下能力由 scripts／設定／代表性 fixture 盤點；操作 recipe 尚未經完整 runtime 演練，使用時確認目標環境的實際可用性。
 
 ## 能力與入口

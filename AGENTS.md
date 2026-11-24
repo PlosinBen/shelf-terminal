@@ -29,7 +29,7 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 
 - **跨功能降級原則**：可用性可以降級，安全與資料正確性的必要條件不可放寬。停止受影響操作，保留能獨立、安全運作的功能；明確呈現失敗，不繞過認證／授權／驗證、不靜默丟資料、不把失敗標示成功。見 `.agent/context/failure-handling.md`（failure-handling#1）。
 - Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
-- **UI / 行為變更：E2E 是主動預設交付項，跟 unit test 同級** — 動到 renderer 行為（新元件、新流程、CRUD、互動）就在**同一步**補 E2E，不要標「deferred / 之後再寫」等被提醒。core/非 UI 邏輯沒 surface 可 E2E 時才以 unit 為主。
+- **Renderer 行為變更須同批新增或更新對應的 E2E，並執行受影響的 spec。** 所需環境不可用時，完成其餘可獨立執行的檢查，並回報未驗證的行為與具體阻礙。沒有可供 E2E 驗證的 core／非 UI 邏輯以 unit test 為主。
 - 不要直接啟動 dev server 或 Electron。驗證使用專案的 npm scripts，執行方式與環境前提見 [.agent/verification.md](.agent/verification.md)。
 - Commit 前確認 `.agent/` 是否需要更新（規範見上方「Documentation maintenance」）— 有新增功能、改變架構、或發現 gotcha 時一併更新
 - `.agent/features/` 是暫時開發 context（gitignored、不跨機器同步）— **程式碼 / 測試 / 永久 doc 絕對禁止引用它**
