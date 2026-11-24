@@ -70,6 +70,7 @@ title: shelf-terminal — Intent → File Index
 | Web.fetch permission channel | `web-permission.ts` | `requestWebPermission()`：app 層全域 popup + away→Telegram + first-wins + timeout backstop |
 | browser_open gate + 開分頁 | `browser-open.ts` | `requestBrowserOpen()`：Open/Deny popup（不記住、無 Telegram、timeout backstop）+ `openWebTab()` 送 `web:open-tab`（agent 開登入分頁的 `web.open` op 用） |
 | External URL intent gate | `external-url-intent.ts` + `external-url-intent-gate.ts` | main-owned validation/FIFO lifecycle 與 Copy/Open/Cancel side effects |
+| Link Open routing / local file preview | `link-open-intent.ts` + `link-file-preview.ts` + `../shared/link-open-intent.ts` | User-click destination validation、original href/source contract 與 bounded UTF-8 reader |
 | External navigation adapters | `external-navigation.ts` | Electron popup/navigation intent 轉成明確 project-tab 或 app-window source |
 | Terminal browser launcher deployment | `external-url-launcher.ts` | 選 local platform asset或透過 connector 部署 POSIX launcher並回傳 Shelf-required `BROWSER` path |
 | Webview hardening | `web-session-harden.ts` | 強制安全 webPreferences、彈窗/導航/權限/下載鎖定（全在 main） |
@@ -251,6 +252,7 @@ title: shelf-terminal — Intent → File Index
 | Web.fetch 授權 popup | `components/WebPermissionPrompt.tsx` | app 層全域 popup，防偽 origin 顯示 + allow once/always/deny（由 `web:permission-request` 驅動） |
 | browser_open 確認 popup | `components/BrowserOpenPrompt.tsx` | app 層全域 popup，只有 Open/Deny（不記住），由 `web:browser-open-request` 驅動；核可後 `web:open-tab` 由 `App.tsx` 開分頁 |
 | External URL intent popup/state | `components/ExternalUrlIntentPrompt.tsx` + `store-external-url-intent.ts` | app-global FIFO presentation，Copy 預選，回傳 Copy/Open/Cancel 並顯示精確來源/目的地/URL |
+| Read-only link preview | `components/LinkPreview.tsx` | Copy-only link errors/mailto 與 inert file content/line navigation |
 | Web session/grant 管理 | `components/settings/WebSettingsTab.tsx` | Settings → Web 分頁：已登入 session 清單(刪) + grant whitelist(per-project 分組、revoke) |
 | Config 備份/複製 UI | `components/BackupView.tsx` + `backup-panel-store.ts` + `events/backup.ts` + `App.tsx` central handlers | Bottom bar 開同一個右側 operation panel，內含 Back up / Import tabs；Backup settings/清單/intent 與 transient Import URL/pinned source/選取分離；元件只 emit，store 管 session state，中央 handler 打 IPC |
 | App 層 MCP server 管理 | `components/McpView.tsx` | 右側欄 view（BottomBar 插頭 icon 開、Skills 的姊妹）：list + per-transport 新增/編輯(stdio/http)、rename、`?` scope help。沿用 `.right-panel` 殼 |

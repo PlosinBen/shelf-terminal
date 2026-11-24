@@ -18,6 +18,7 @@ import { emitAgent, emit, Events } from '../events';
 import { useStore } from '../store';
 import { DELEGATION } from '@shared/agent-delegation';
 import { DelegationPanel } from './agent/DelegationPanel';
+import { linkSourceAttributes } from '@shared/link-open-intent';
 
 interface Props {
   tabId: string;
@@ -125,7 +126,7 @@ export function AgentView({ tabId, sessionId, cwd, connection, provider, project
 
   if (authRequired) {
     return (
-      <div className="agent-view" ref={rootRef}>
+      <div className="agent-view" ref={rootRef} {...linkSourceAttributes(projectId, tabId)}>
         <ShelfMcpBanner tabId={tabId} />
         <DelegationPanel tabId={tabId} />
         <AuthPane tabId={tabId} />
@@ -134,7 +135,7 @@ export function AgentView({ tabId, sessionId, cwd, connection, provider, project
   }
 
   return (
-    <div className="agent-view" ref={rootRef}>
+    <div className="agent-view" ref={rootRef} {...linkSourceAttributes(projectId, tabId)}>
       <ShelfMcpBanner tabId={tabId} />
       <MessageList
         tabId={tabId}

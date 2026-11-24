@@ -2,8 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { WorktreeStartupOptions, WorktreeCreateProposal } from '@shared/worktree-child-config';
 import { IPC } from '@shared/ipc-channels';
 import { DELEGATION } from '@shared/agent-delegation';
+import { LINK_OPEN, type LinkOpenInput } from '@shared/link-open-intent';
 
 contextBridge.exposeInMainWorld('shelfApi', {
+  linkOpen: (input: LinkOpenInput) => ipcRenderer.invoke(LINK_OPEN.submit, input),
   pty: {
     spawn: (projectId: string, tabId: string, cwd: string, connection: unknown, initScript?: string, tabCmd?: string) =>
       ipcRenderer.invoke(IPC.PTY_SPAWN, { projectId, tabId, cwd, connection, initScript, tabCmd }),

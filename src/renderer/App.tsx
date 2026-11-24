@@ -35,6 +35,8 @@ import { useKeybindings } from './hooks/useKeybindings';
 import { useStore, setSettings, setUpdateStatus, addTab, addTerminalTabForSource, setActiveTab, removeTab, setSplitTab, clearUnread, setInvalidProjects, setPmActive, setConnectionHealth, setActiveProjectById, getActiveProjectId, getProjectById, getProjectViews, getProjectIndexById, reconcileProjects, listStableProjectViews, showProjectNotice, validateAgentProviderForOpen, projectDisplayLabel, enqueueExternalUrlIntent, removeExternalUrlIntent, beginExternalUrlIntentResolution, setExternalUrlIntentError } from './store';
 import type { ConnectionHealth } from '@shared/types';
 import type { ExternalUrlIntentDecision, ExternalUrlIntentInput } from '@shared/external-url-intent';
+import { LINK_OPEN, type LinkOpenInput, type LinkPreviewResult } from '@shared/link-open-intent';
+import { LinkPreview } from './components/LinkPreview';
 import type { Project, ProjectCreateInput } from '@shared/projects';
 import { disposeTerminal } from './components/TerminalView';
 import { teardownTab, waitForAgentViewTeardown } from './tab-teardown';
@@ -275,6 +277,7 @@ export function App() {
   // indexes the same fresh snapshot — resolves the new project; emitting inside a
   // bus handler right after ADD_PROJECT would hit the pre-add closure instead.
   const [pendingConnectId, setPendingConnectId] = useState<string | null>(null);
+  const [linkPreview, setLinkPreview] = useState<LinkPreviewResult | null>(null);
   useEffect(() => {
     if (!pendingConnectId) return;
     const idx = projects.findIndex((p) => p.id === pendingConnectId);
@@ -302,16 +305,30 @@ export function App() {
       event.preventDefault();
       event.stopPropagation();
 
-      const activeProject = getProjectViews().find((project) => project.id === getActiveProjectId());
-      const activeTab = activeProject?.tabs[activeProject.activeTabIndex];
-      const source: ExternalUrlIntentInput['source'] = activeProject && activeTab
-        ? { kind: 'project-tab', projectId: activeProject.id, tabId: activeTab.id }
-        : { kind: 'app-window' };
-      emit(Events.EXTERNAL_URL_INTENT_REQUEST, {
-        url: anchor.href,
+      const owner = anchor.closest(`[${LINK_OPEN.projectAttribute}]`);
+      const projectId = owner?.getAttribute(LINK_OPEN.projectAttribute);
+      const viewId = owner?.getAttribute(LINK_OPEN.viewAttribute);
+      const noteId = owner?.getAttribute(LINK_OPEN.noteAttribute);
+      const source: LinkOpenInput['source'] = projectId && viewId
+        ? { kind: 'project-tab', projectId, tabId: viewId }
+        : projectId && noteId ? { kind: 'project-note', projectId, noteId } : { kind: 'app-window' };
+      const input: LinkOpenInput = {
+        url: rawHref,
         reason: 'Open a link from Shelf',
         source,
-      } satisfies ExternalUrlIntentInput);
+        destination: anchor.getAttribute(LINK_OPEN.destinationAttribute) === LINK_OPEN.external ? LINK_OPEN.external : undefined,
+      };
+      void window.shelfApi.linkOpen(input).then(result => {
+        if (result.kind === 'web') {
+          const index = getProjectIndexById(result.projectId);
+          if (index < 0 || !addTab(index, undefined, undefined, undefined, 'web', undefined, result.url)) {
+            throw new Error('Could not open Web tab. Check the source project and available tab slots.');
+          }
+          setActiveProjectById(result.projectId);
+        } else if (result.kind !== 'opened') setLinkPreview(result);
+      }).catch(error => {
+        setLinkPreview({ kind: 'message', title: error instanceof Error ? error.message : 'Shelf could not open this link', url: rawHref });
+      });
     };
     const offRequest = on(Events.EXTERNAL_URL_INTENT_REQUEST, async (input: ExternalUrlIntentInput) => {
       try {
@@ -392,6 +409,14 @@ export function App() {
         }
         setActiveProjectById(source.projectId);
         sourceLabel = `${projectDisplayLabel(project)} / ${tab.label}`;
+      } else if (request.source.kind === 'project-note') {
+        const project = getProjectById(request.source.projectId);
+        if (!project) {
+          cancelUnattributed(request.requestId, 'unknown note project');
+          return;
+        }
+        setActiveProjectById(project.id);
+        sourceLabel = `${projectDisplayLabel(project)} / Note ${request.source.noteId}`;
       } else {
         sourceLabel = 'Shelf app window';
       }
@@ -1120,6 +1145,7 @@ export function App() {
       <BrowserOpenPrompt />
       <DelegationTargetPicker />
       <ExternalUrlIntentPrompt />
+      {linkPreview && <LinkPreview result={linkPreview} close={() => setLinkPreview(null)} />}
       {appExitPreparing && (
         <div className="app-exit-overlay" role="status" aria-live="polite">Saving Agent history before exit…</div>
       )}

@@ -46,7 +46,7 @@ related:
 **Root cause**：Electron 預設沒有區分內部/外部連結；而 main 的 `setWindowOpenHandler` / `will-navigate` defense path 無法可靠推回 renderer 當下的 project/tab。只在 main 依 active project 猜來源會在 tab switch race 下歸錯 owner。
 
 **Rule**：
-- renderer capture listener 在 click 當下解析 `<a>`，帶明確 project/tab source 送 external-URL intent gate；原事件一律阻止。
+- renderer capture listener 保留 `<a>` 的原始 href 與 owning Agent/Notes source，送 Link Open Gate；預設 Shelf 內開啟，明確 external 才送外部 FIFO gate。原事件一律阻止，不依 active project 猜來源。
 - renderer 所有 `<a href="http(s)://...">` 仍加 `target="_blank" rel="noopener noreferrer"`，讓未經 capture 的 defense path 不會帶走 app window。
 - 不要在 renderer 用 `window.location = url` 跳外部網址。
 - 需要程式化開外部連結時，送 typed external-URL intent；只有 central gate 在使用者選 Open 後可呼叫 default-app side effect。

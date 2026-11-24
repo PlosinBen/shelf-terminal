@@ -12,6 +12,10 @@ related:
 
 The renderer↔main bridge surface — `window.shelfApi.*` methods (RPC over `ipcRenderer.invoke`/`.send`) plus the main→renderer push channels they subscribe to. Channel name constants live in `src/shared/ipc-channels.ts` (`IPC`); the exposed surface is `src/main/preload.ts`; payload types referenced below live in `src/shared/types.ts`. `on*` methods register a listener and return an unsubscribe function.
 
+## linkOpen (`shelfApi.linkOpen`)
+
+`linkOpen(input: LinkOpenInput): Promise<LinkOpenResult>` invokes `LINK_OPEN.submit` (`link-open:submit`). Types and channel/source-attribute constants live in `src/shared/link-open-intent.ts`. See [Link Open / external URL intent](external-url-intent.md) for destinations, validation and preview limits.
+
 ## pty (`shelfApi.pty`)
 
 | Method | Shape |

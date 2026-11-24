@@ -5887,3 +5887,19 @@ button {
 
 .agent-slash-item[aria-disabled="true"] { opacity: 0.55; cursor: default; }
 .agent-command-error { font-size: 12px; color: var(--text-muted); padding: 4px 8px; }
+/* User-clicked links display inert text in an app-owned preview. */
+.link-preview-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.link-preview-panel {
+  background: var(--bg-primary, #202024); color: var(--text-primary, #eee);
+  width: min(1000px, 90vw); max-height: 85vh; padding: 20px;
+  overflow: auto; border: 1px solid #666; border-radius: 8px;
+}
+.link-preview-panel h2 { font-size: 16px; overflow-wrap: anywhere; }
+.link-preview-original { white-space: pre-wrap; overflow-wrap: anywhere; }
+.link-preview-content { overflow: auto; max-height: 60vh; user-select: text; }
+.link-preview-number { display: inline-block; width: 5em; color: #999; user-select: none; }
+.link-preview-selected { background: rgba(100, 150, 255, 0.25); }

@@ -1,5 +1,10 @@
 import { expect, readActiveTerminalText, test } from './helpers';
 import type { ElectronApplication } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { LINK_OPEN } from '../src/shared/link-open-intent';
+
+test.use({ homeProjectDirectories: false });
 
 type IntentInput = {
   url: string;
@@ -21,7 +26,7 @@ async function requestIntent(app: ElectronApplication, input: IntentInput) {
   }, input);
 }
 
-test('external URL popup defaults to copy and supports cancel/open decisions', async ({ shelfApp: { app, page } }) => {
+test('external URL popup defaults to copy and supports cancel/open decisions', async ({ shelfApp: { app, page, userDataDir } }) => {
   await app.evaluate(({ shell, clipboard }) => {
     const testGlobal = globalThis as typeof globalThis & { __shelfTestOpenedUrls?: string[] };
     testGlobal.__shelfTestOpenedUrls = [];
@@ -73,29 +78,29 @@ test('external URL popup defaults to copy and supports cancel/open decisions', a
     (globalThis as typeof globalThis & { __shelfTestOpenedUrls?: string[] }).__shelfTestOpenedUrls
   ))).toEqual([openUrl]);
 
-  const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
-  await page.locator('.sidebar-btn', { hasText: '+' }).click();
-  await expect(page.locator('.folder-picker-overlay')).toBeVisible();
-  await page.locator('.conn-btn-next').click();
-  await page.locator('.folder-picker-item', { hasText: 'shelf-test-a' }).click();
-  await page.keyboard.press(`${modifier}+Enter`);
+  const cwd = path.join(userDataDir, 'terminal-project');
+  fs.mkdirSync(cwd);
+  await page.evaluate(cwd => window.shelfApi.project.add({ name: 'URL Terminal', cwd, connection: { type: 'local' }, maxTabs: 5 }), cwd);
+  await page.reload();
+  await page.locator('.sidebar-item', { hasText: 'URL Terminal' }).click();
   await page.locator('.connect-prompt').click();
   await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
   await expect(page.locator('.terminal-loading')).toBeHidden({ timeout: 5_000 });
 
   const rendererLink = 'https://renderer.example.com/path?state=exact-renderer-state';
-  await page.evaluate((url) => {
+  await page.evaluate(({ url, attr }) => {
     const anchor = document.createElement('a');
     anchor.id = 'external-url-e2e-link';
     anchor.href = url;
     anchor.target = '_blank';
+    anchor.setAttribute(attr, 'external');
     anchor.textContent = 'External URL E2E link';
     document.body.appendChild(anchor);
-  }, rendererLink);
+  }, { url: rendererLink, attr: LINK_OPEN.destinationAttribute });
   await page.locator('#external-url-e2e-link').click();
 
   await expect(popup).toBeVisible();
-  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by: shelf-test-a /');
+  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by: Shelf app window');
   await expect(popup.locator('.external-url-intent-url')).toHaveText(rendererLink);
   await popup.locator('.agent-perm-option', { hasText: 'Cancel' }).click();
   await expect(popup).not.toBeVisible();
@@ -105,7 +110,7 @@ test('external URL popup defaults to copy and supports cancel/open decisions', a
   await page.keyboard.type(`"$BROWSER" '${terminalUrl}'\n`);
 
   await expect(popup).toBeVisible();
-  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by: shelf-test-a /');
+  await expect(popup.locator('.external-url-intent-source')).toContainText('Requested by: URL Terminal /');
   await expect(popup.locator('.external-url-intent-url')).toHaveText(terminalUrl);
   await page.keyboard.press('Enter');
   await expect(popup).not.toBeVisible();

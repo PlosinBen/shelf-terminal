@@ -12,6 +12,7 @@ interface ImportMeta {
 }
 
 interface ShelfApi {
+  linkOpen: (input: import('../shared/link-open-intent').LinkOpenInput) => Promise<import('../shared/link-open-intent').LinkOpenResult>;
   pty: {
     spawn: (projectId: string, tabId: string, cwd: string, connection: import('../shared/types').Connection, initScript?: string, tabCmd?: string) => Promise<void>;
     input: (tabId: string, data: string) => void;

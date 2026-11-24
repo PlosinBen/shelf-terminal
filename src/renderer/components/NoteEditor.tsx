@@ -4,6 +4,7 @@ import { renderMarkdown } from '../utils/markdown';
 import { parseDataTransfer } from '../utils/parse-data-transfer';
 import { NoteImage } from './NoteImage';
 import type { Mode, Note } from './notes-types';
+import { linkSourceAttributes } from '@shared/link-open-intent';
 
 export interface NoteEditorHandle {
   /** Apply title fallback / delete-if-empty / flush pending save.
@@ -279,7 +280,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, NoteEditorProps>(function
         ) : body.trim() === '' && images.length === 0 ? (
           <div className="notes-empty">(empty)</div>
         ) : (
-          <div className="notes-preview" dangerouslySetInnerHTML={{ __html: html }} />
+          <div className="notes-preview" {...linkSourceAttributes(projectId, noteId, true)} dangerouslySetInnerHTML={{ __html: html }} />
         )}
         {images.length > 0 && (
           <div className="notes-images">

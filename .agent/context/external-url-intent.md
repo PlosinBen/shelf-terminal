@@ -40,3 +40,9 @@ related:
 **Reason:** The destinations carry different identity and permission semantics. Combining them would either send an external OAuth link into Shelf's cookie-bearing Web tab unexpectedly or let an agent request bypass the stricter Web-tab gate.
 
 **Do not change casually because:** Sharing presentation primitives is fine, but never route one contract through the other's approval or persistence model. Neither contract remembers approval.
+
+## external-url-intent#4 — User clicks retain original intent and owning surface · [Decision]
+
+Direct anchor clicks enter Link Open with the original href and declared surface source. Agent and Notes project ownership determines internal Web/file routing; active-project lookup and renderer-bundle URL resolution cannot supply file ownership. Explicit external callers retain the external FIFO gate, including local handling of remote-terminal login URLs. Default mailto is copy-only because Shelf cannot preview email links; it never launches an email application implicitly.
+
+The file preview renders text instead of executing file content. Its current supported boundary is regular local UTF-8 files up to 1 MiB; unavailable remote previews fail explicitly before local filesystem access. The existing connector interface has no bounded file-read primitive. This limit avoids introducing shell-based remote reads or interpreting remote paths on the host.

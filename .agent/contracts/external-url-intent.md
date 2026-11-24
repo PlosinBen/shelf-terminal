@@ -10,6 +10,16 @@ related:
 
 # External URL Intent
 
+## Link Open entry
+
+`src/shared/link-open-intent.ts` defines `LinkOpenInput`, `LinkOpenResult`, DOM source attributes and the `link-open:submit` channel. `shelfApi.linkOpen` routes direct user clicks through main validation. The original `url` is preserved; `destination` defaults to `shelf`, with `external` explicit. Source is `project-tab`, `project-note` (projectId/noteId), or `app-window`; capture reads the owning DOM surface, never active-project state or resolved `anchor.href`.
+
+- Project HTTP(S) returns a validated Web-tab action; renderer checks tab availability and activates the owning project. Missing projects or full tabs show an error. Agent `browser_open` still uses its separate per-call approval.
+- Local project file references resolve against canonical project cwd. Absolute paths, file URLs and `#L12` / `:12:3` suffixes are supported. Preview accepts only regular UTF-8 files up to 1 MiB; content is rendered as text, with a selected line. Remote reads are currently unavailable and report an error before host filesystem access. Missing files, binary content, invalid encodings and unknown schemes never fall back to an external app.
+- Default mailto displays `Shelf cannot preview email links`, the complete original value, Copy and Close. There is no external-open action.
+- Explicit external requests delegate to the existing validated FIFO gate. The named external compatibility adapter pins this destination for device login, terminal BROWSER and navigation defenses. AuthPane marks its login anchor explicitly external.
+- App-window HTTP/file requests require destination/source ownership and currently report an error. A PM/Skills destination-project policy is not supplied by this contract.
+
 The app-wide contract for validated external-app requests and cooperative terminal launcher frames. Authoritative types and limits live in `src/shared/external-url-intent.ts`; the terminal frame source is `src/shared/external-url-osc.ts`.
 
 ## Intent input and request
@@ -17,6 +27,7 @@ The app-wide contract for validated external-app requests and cooperative termin
 ```ts
 type ExternalUrlIntentSource =
   | { kind: 'project-tab'; projectId: string; tabId: string }
+  | { kind: 'project-note'; projectId: string; noteId: string }
   | { kind: 'app-window' };
 
 interface ExternalUrlIntentInput {

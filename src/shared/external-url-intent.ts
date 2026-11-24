@@ -20,6 +20,7 @@ export const EXTERNAL_URL_INTENT_LIMITS = {
 
 export type ExternalUrlIntentSource =
   | { kind: 'project-tab'; projectId: string; tabId: string }
+  | { kind: 'project-note'; projectId: string; noteId: string }
   | { kind: 'app-window' };
 
 export interface ExternalUrlIntentInput {
@@ -66,6 +67,8 @@ function validateSource(value: unknown): value is ExternalUrlIntentSource {
   if (!value || typeof value !== 'object') return false;
   const source = value as Record<string, unknown>;
   if (source.kind === 'app-window') return true;
+  if (source.kind === 'project-note') return isBoundedNonEmptyString(source.projectId, EXTERNAL_URL_INTENT_LIMITS.sourceId)
+    && isBoundedNonEmptyString(source.noteId, EXTERNAL_URL_INTENT_LIMITS.sourceId);
   return source.kind === 'project-tab'
     && isBoundedNonEmptyString(source.projectId, EXTERNAL_URL_INTENT_LIMITS.sourceId)
     && isBoundedNonEmptyString(source.tabId, EXTERNAL_URL_INTENT_LIMITS.sourceId);

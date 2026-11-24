@@ -7,6 +7,7 @@ import {
   useAgentTab,
 } from '../../agentTabStore';
 import { emitAgent } from '../../events';
+import { LINK_OPEN } from '@shared/link-open-intent';
 
 interface Props {
   tabId: string;
@@ -97,7 +98,7 @@ export function AuthPane({ tabId }: Props) {
                   <div className="agent-auth-instructions">
                     Choose Copy URL or Open with default app in the link prompt. You can also open this link again:
                   </div>
-                  <a className="agent-auth-link" href={loginPrompt.prefilledUri} target="_blank" rel="noreferrer">
+                  <a className="agent-auth-link" {...{ [LINK_OPEN.destinationAttribute]: LINK_OPEN.external }} href={loginPrompt.prefilledUri} target="_blank" rel="noreferrer">
                     {loginPrompt.prefilledUri}
                   </a>
                   <div className="agent-auth-instructions">
