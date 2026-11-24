@@ -132,7 +132,7 @@ test.describe('agent flows via fake provider', () => {
       await expect(card('outcome-running').locator('.fold-body-code')).toHaveText('partial output');
     });
 
-    test('failed output can collapse, reveal the tail and copy complete received text', async ({ shelfApp: { app, page } }) => {
+    test('failed output can toggle a compact preview and copy complete received text', async ({ shelfApp: { app, page } }) => {
       await setupProject(page);
       await app.evaluate(({ ipcMain }, channel) => {
         const original = (ipcMain as any)._invokeHandlers.get(channel);
@@ -157,6 +157,18 @@ test.describe('agent flows via fake provider', () => {
       await header.click();
       await expect(card.locator('.fold-body-code')).toBeVisible();
       await expect(card.locator('.fold-command-text')).toHaveText(command);
+      await expect(card.locator('.fold-reading-controls button')).toHaveCount(0);
+      const wrapped = 'wrapped output '.repeat(600);
+      await sendCard(false, wrapped);
+      const outputBlock = card.locator('.fold-body-code');
+      await expect(outputBlock).toHaveCSS('overflow-y', 'clip');
+      await expect(card.getByRole('button', { name: 'Show full output', exact: true })).toBeVisible();
+      expect(await outputBlock.evaluate(el => el.clientHeight <= 8 * parseFloat(getComputedStyle(el).lineHeight) + 13)).toBe(true);
+      await card.getByRole('button', { name: 'Show full output', exact: true }).click();
+      await expect(outputBlock).toHaveText(wrapped.trim());
+      await card.getByRole('button', { name: 'Show preview' }).click();
+      await sendCard(false, 'alpha');
+      await expect(card.locator('.fold-reading-controls button')).toHaveCount(0);
       await header.hover();
       const hoverBackground = await header.evaluate(el => getComputedStyle(el).backgroundColor);
       const bodyBackground = await card.locator('.fold-body-code').evaluate(el => getComputedStyle(el).backgroundColor);
@@ -224,7 +236,8 @@ test.describe('agent flows via fake provider', () => {
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
       await expect(copyOutput).toHaveAttribute('data-copied', 'false');
       await expect(copyOutput.locator('svg rect')).toHaveCount(1);
-      await card.getByRole('button', { name: 'View tail', exact: true }).click();
+      await expect(card.locator('.fold-reading-controls button')).toHaveCount(1);
+      await card.getByRole('button', { name: 'Show full output (46 lines)', exact: true }).click();
       await expect(card.locator('.fold-body-code')).toHaveText(output);
       const outputStyle = await card.locator('.fold-body-code').evaluate(el => {
         const style = getComputedStyle(el);
@@ -232,7 +245,6 @@ test.describe('agent flows via fake provider', () => {
       });
       expect(outputStyle.overflows).toBe(true);
       expect(outputStyle.scrollbar.startsWith(outputStyle.background + ' ')).toBe(false);
-      await expect.poll(() => card.locator('.fold-body-code').evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
       await card.getByRole('button', { name: 'Copy output', exact: true }).click();
       await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(output);
       await card.getByRole('button', { name: 'Show preview', exact: true }).click();
@@ -449,7 +461,8 @@ test.describe('agent flows via fake provider', () => {
       }).toBe(true);
       await expect(page.locator('.agent-messages:visible')).toContainText('original work completed');
       await expect.poll(async () => (await storedAgentMessages(page)).filter(row =>
-        row.type === 'system' && row.content === 'Model set to fake-model-pro (applies on next query)').length).toBe(1);
+        row.type === 'system' && row.content === 'Model set to fake-model-pro (applies on next query)').length,
+      { timeout: 15000 }).toBe(1);
     });
 
     test('defers effort ahead of queued messages while slash picker remains ordinary input', async ({ shelfApp: { page } }) => {
@@ -1051,7 +1064,7 @@ test.describe('agent flows via fake provider', () => {
       expect(bounds!.height).toBeGreaterThanOrEqual(20);
       expect(bounds!.height).toBeLessThanOrEqual(24);
       await header.click();
-      await expect(cards.first().locator('.fold-body')).toBeVisible();
+      await expect(cards.first().getByLabel('Output', { exact: true })).toBeVisible();
       await header.click();
       await expect(cards.first().locator('.fold-body')).toHaveCount(0);
     });

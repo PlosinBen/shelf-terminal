@@ -3505,6 +3505,16 @@ button {
   --scrollbar-thumb-hover: var(--text);
 }
 
+.fold-body-code[data-preview="true"] {
+  max-height: none;
+  overflow: clip;
+}
+
+.fold-body-code[data-preview="true"] > span {
+  display: block;
+  overflow: clip;
+}
+
 .fold-command-text {
   color: var(--text-muted);
 }

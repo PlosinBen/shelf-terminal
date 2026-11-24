@@ -47,6 +47,8 @@ export type AgentMsg = {
   | { type: 'user'; content: string; images?: string[]; files?: AgentFile[]; inputMessage?: AgentInputMessage }
 );
 
+const OUTPUT_PREVIEW_LINES = 8;
+
 function truncateLines(text: string, max: number): { lines: string[]; remaining: number } {
   const all = text.split('\n');
   if (all.length <= max) return { lines: all, remaining: 0 };
@@ -168,14 +170,20 @@ function CodeFold({ message, settingMode, nested }: {
   const summary = message.body?.content === '' && !message.details && !nested?.length;
   const isExpanded = !summary && (expansion.choice ?? (hasError || settingMode === 'expanded'));
   const [fullOutput, setFullOutput] = useState(false);
-  const [tailRequest, setTailRequest] = useState(0);
+  const [wrapsPastPreview, setWrapsPastPreview] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
-  const outputRef = useRef<HTMLPreElement>(null);
+  const previewRef = useRef<HTMLSpanElement>(null);
   const output = message.body?.content ?? '';
-  const preview = useMemo(() => truncateLines(output, 30), [output]);
+  const preview = useMemo(() => truncateLines(output, OUTPUT_PREVIEW_LINES), [output]);
   useLayoutEffect(() => {
-    if (tailRequest && outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [tailRequest]);
+    const el = previewRef.current;
+    if (!el || preview.remaining) return;
+    const measure = () => setWrapsPastPreview(el.scrollHeight > el.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isExpanded, fullOutput, preview]);
   const copy = async (text: string, target: 'details' | 'output') => {
     try {
       await navigator.clipboard.writeText(text);
@@ -205,16 +213,15 @@ function CodeFold({ message, settingMode, nested }: {
           {nested.map(child => <AgentMessage key={child.id} message={child} />)}
         </div>}
         {output && <>
-          {preview.remaining > 0 && <div className="fold-reading-controls">
-            <button type="button" onClick={() => setFullOutput(!fullOutput)}>
-              {fullOutput ? 'Show preview' : `Show full output (${preview.lines.length + preview.remaining} lines)`}
+          {(preview.remaining > 0 || wrapsPastPreview || fullOutput) && <div className="fold-reading-controls">
+            <button type="button" aria-expanded={fullOutput} onClick={() => setFullOutput(!fullOutput)}>
+              {fullOutput ? 'Show preview' : preview.remaining ? `Show full output (${preview.lines.length + preview.remaining} lines)` : 'Show full output'}
             </button>
-            <button type="button" onClick={() => { setFullOutput(true); setTailRequest(n => n + 1); }}>View tail</button>
           </div>}
           <div className="fold-body-container">
             <FoldCopyButton target="output" onCopy={() => copy(output, 'output')} />
-            <pre ref={outputRef} className="fold-body fold-body-code" tabIndex={0} aria-label="Output">
-              {fullOutput ? output : preview.lines.join('\n') + (preview.remaining > 0 ? `\n... +${preview.remaining} more lines` : '')}
+            <pre className="fold-body fold-body-code" data-preview={!fullOutput} tabIndex={fullOutput ? 0 : undefined} aria-label="Output">
+              {fullOutput ? output : <span ref={previewRef} style={{ maxHeight: `${OUTPUT_PREVIEW_LINES}lh` }}>{preview.lines.join('\n')}</span>}
             </pre>
           </div>
         </>}
