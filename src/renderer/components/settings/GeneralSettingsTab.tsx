@@ -1,5 +1,6 @@
 import React from 'react';
 import { themes } from '../../themes';
+import { FontSettings } from './FontSettings';
 import type { AppSettings, LogLevel } from '@shared/types';
 import { formatBytes } from '../../utils/format-bytes';
 
@@ -30,6 +31,7 @@ export function GeneralSettingsTab({ draft, updateDraft, pathError, setPathError
         </select>
       </div>
 
+      <FontSettings draft={draft} updateDraft={updateDraft} />
       <div className="settings-divider" />
       <div className="settings-section-title">Project Defaults</div>
       <div className="settings-group">

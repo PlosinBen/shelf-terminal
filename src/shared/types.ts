@@ -381,6 +381,7 @@ export type LogLevel = 'off' | 'error' | 'warn' | 'info' | 'debug';
 export interface AppSettings {
   fontSize: number;
   fontFamily: string;
+  interfaceFontFamily: string;
   themeName: string;
   scrollback: number;
   defaultMaxTabs: number;

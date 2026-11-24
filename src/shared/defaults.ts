@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentMessageGap: DEFAULT_AGENT_MESSAGE_GAP,
   fontSize: 14,
   fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+  interfaceFontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   themeName: 'catppuccin-mocha',
   scrollback: 5000,
   defaultMaxTabs: 5,

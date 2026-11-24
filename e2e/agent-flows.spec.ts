@@ -78,6 +78,11 @@ test.describe('agent flows via fake provider', () => {
         });
       }, { channel: IPC.AGENT_MESSAGE, body });
       const reply = page.locator('.agent-msg-reply').filter({ hasText: 'PR Title:' });
+      const uiFamily = await page.locator('body').evaluate(el => getComputedStyle(el).fontFamily);
+      const monoFamily = await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim());
+      await expect(reply.locator('p').first()).toHaveCSS('font-family', uiFamily);
+      await expect(reply.locator('pre code')).toHaveCSS('font-family', monoFamily);
       const inline = reply.getByRole('button', { name: 'Copy code', exact: true });
       await inline.focus();
       await inline.press('Enter');

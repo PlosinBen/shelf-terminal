@@ -128,25 +128,30 @@ test('General saves the default local path in the existing settings file', async
   await expect(localPath).toHaveValue(userDataDir);
 });
 
-test('terminal font picker lists local families and preserves a saved selection', async ({ shelfApp: { page } }) => {
-  const openTerminalSettings = async () => {
-    await page.keyboard.press(`${modifier}+,`);
-    await page.locator('.settings-panel').getByRole('button', { name: 'Terminal', exact: true }).click();
-  };
-  await openTerminalSettings();
-  const picker = page.getByLabel('Font Family', { exact: true });
+test('General font pickers apply interface and monospace settings independently', async ({ shelfApp: { page } }) => {
+  await ensureConnected(page);
+  const openSettings = () => page.keyboard.press(`${modifier}+,`);
+  await openSettings();
+  const ui = page.getByLabel('Interface Font', { exact: true });
+  await ui.selectOption('custom');
+  await page.getByLabel('Interface Font stack', { exact: true }).fill('Georgia, serif');
+  const picker = page.getByLabel('Monospace Font', { exact: true });
   const installed = picker.locator('optgroup option');
   await expect.poll(() => installed.count(), { timeout: 20_000 }).toBeGreaterThan(0);
   const value = await installed.first().getAttribute('value');
   await picker.selectOption(value!);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await openTerminalSettings();
+  await openSettings();
   await expect(picker).toHaveValue(value!);
+  await expect(ui).toHaveCSS('font-family', 'Georgia, serif');
   await picker.selectOption('custom');
-  const stack = page.getByLabel('Custom font stack', { exact: true });
+  const stack = page.getByLabel('Monospace Font stack', { exact: true });
   await stack.fill('My Font, monospace');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await openTerminalSettings();
+  await expect.poll(() => page.evaluate(() =>
+    (window as any).__shelfTerminalCache__.values().next().value.term.options.fontFamily
+  )).toBe('My Font, monospace');
+  await openSettings();
   await expect(stack).toHaveValue('My Font, monospace');
 });
 

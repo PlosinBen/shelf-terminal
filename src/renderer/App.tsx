@@ -981,6 +981,12 @@ export function App() {
   const theme = getTheme(settings.themeName);
 
   useEffect(() => {
+    const style = document.documentElement.style;
+    style.setProperty('--font-interface', settings.interfaceFontFamily);
+    style.setProperty('--font-mono', settings.fontFamily);
+  }, [settings.interfaceFontFamily, settings.fontFamily]);
+
+  useEffect(() => {
     const root = document.documentElement;
     for (const [name, value] of Object.entries(buildThemeVars(theme))) {
       root.style.setProperty(name, value);
