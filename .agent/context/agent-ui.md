@@ -79,30 +79,44 @@ Severity 是抽象層級：`'normal' | 'info' | 'warning' | 'critical'`，map �
 
 ## agent-ui#4 — Agent View 採事件 / Store 分離架構（InputZone 與 MessageList 間接相依）  ·  [Decision]
 
-**Decision**：AgentView 不該是擁有所有 state 的 god component。正確架構是：
+### Renderer state, events, and IPC
+
+| 機制 | 職責 |
+|---|---|
+| Store | 集中管理 renderer 本地狀態。透過 store 讀取，透過具名 action 修改。Action 同步呼叫，可回傳值，例如 `peekAgentTab` 讀取或 `enqueuePendingSend` 寫入。 |
+| Event bus（`src/renderer/events.ts`） | 傳遞跨元件事件或操作意圖，由其他元件或集中處理的 handler 訂閱。 |
+| IPC（`window.shelfApi.*`） | Renderer 呼叫 main process 的唯一通道，preload 只負責 RPC 轉接。 |
+
+需要立即取得回傳值時，直接呼叫函式。拆成 request／response event 會把一次同步操作變成非同步流程，還得額外配對請求與回覆。
+
+UI 元件與 keybindings 透過 `emit()` 發出跨元件或跨子系統的操作意圖。呼叫 main 或跨子系統的副作用（例如終止 PTY、釋放 terminal、持久化）由 `App.tsx` 集中處理，或由它註冊的 handler 處理。子元件直接發事件，省去共同父層轉送 action 的 prop callback，減少耦合和連鎖渲染。
+
+### Agent View example
+
+**Decision**：Agent View 的輸入意圖走 event bus，訊息狀態由 per-tab store 持有：
 
 ```
-InputZone ──emit('agent:send', ...)──▶ EventBus
-                                        ↓
-                              App.tsx handler:
-                              - agentTabStore.appendUser(tabId, ...)
-                              - shelfApi.agent.send(tabId, ...)
-                                        ↓
-                              agentTabStore (per-tab)
-                                        ↓ subscribe
-                              MessageList (純 render)
+InputZone ──enqueuePendingSend──────▶ agentTabStore (per-tab)
+    │                                             ↓ subscribe
+    │                                         MessageList
+    └──emit('agent:send', ...)───────▶ EventBus
+                                          ↓
+                                 ipc-agent.ts handler
+                                 （由 App.tsx 註冊）
+                                          ↓
+                                 shelfApi.agent.send(...)
 ```
 
 職責分配：
 - **InputZone** — 收輸入、emit event，**不知道 MessageList 存在**
 - **MessageList** — subscribe store、純 render，**不知道 InputZone 存在**
 - **EventBus** — 傳遞 action，不存 state（已存在 `src/renderer/events.ts`）
-- **App.tsx handler** — 統一處理 IPC + 寫 store（對位 CLAUDE.md Conventions「side effect 集中 App.tsx」）
+- **`ipc-agent.ts` handler** — 接收送出意圖並轉交 main，由 `App.tsx` 註冊
 - **agentTabStore** — per-tab scoped，唯一 message state
 
 兩個 sibling 間 **間接相依**：input 送出的訊息透過 store 流到 MessageList，沒有 prop 直接串、沒有共享 state 持有者。
 
-**Reason**：承 CLAUDE.md Conventions「sibling 元件間接相依」。具體效益：
+**Reason**：透過事件和 store 協作，讓兩個 sibling 元件保有各自的職責：
 - MessageList subscribe store slice → 只在 messages 變化時 re-render，input 打字不波及；不需要手動 memoize 一堆 props
 - Tab unmount 才安全：messages 在 store 不在 component state，non-active agent tab 可 unmount 釋放記憶體不掉資料
 
@@ -119,7 +133,7 @@ InputZone ──emit('agent:send', ...)──▶ EventBus
 **Do not change because**：
 - **不要把 input 跟 MessageList 透過共同父層 state 串** — 父層 state 變化照樣 cascade re-render，沒解決問題
 - **不要把 messages 留在 component state、其他搬 store** — tab unmount 會掉資料
-- **不要把 handleSend 留在 InputZone** — 違反 CLAUDE.md「side effect 集中 App.tsx」，handler 該在 App.tsx
+- **送出訊息的 IPC 由集中註冊的 handler 處理**。`InputZone` 準備輸入、登記本地 pending 狀態並發出送出意圖
 
 **Related**：`storage#1`（Per-project storage）。
 

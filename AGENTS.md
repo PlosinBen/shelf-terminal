@@ -68,13 +68,7 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 
 ## Conventions
 
-- **Renderer 三機制職責**（先想清楚一個動作屬於哪個）：
-  - **Store（中心化 state 服務，zustand 式）** = 所有 renderer-local state 的讀與改；mutation 走 store 具名 action（同步呼叫，需要時可回傳值，如 `peekAgentTab` 讀、`enqueuePendingSend` 寫）。state 的事就 store 管。
-  - **Event bus (`src/renderer/events.ts`)** = 跨 component 的事件/意圖傳遞（解耦 pub/sub：component → 別的 component 或中央 handler），含「我 `emit` → 中央 handler 執行（常打 IPC）」這種跨界意圖。
-  - **IPC (`window.shelfApi.*`)** = 跨 process 到 main 的唯一通道（preload 純 RPC bridge）。
-  - 判別：碰 main → IPC；動 renderer state → store action；跨 component 傳事件/意圖 → bus。**read-return（同步要回傳值）用函式呼叫，別拆成 request/response event**（會把原子同步呼叫劈成非同步 + correlation，在 bus 上重造函式回傳）。
-- 觸發點 (UI 元件、keybindings) 只 `emit()` event，不執行 side effect；會打 main / 跨子系統的 side effect (pty kill、terminal dispose、persist) 集中在 `App.tsx`
-- 動作別繞共同父層 state coordinator：child 直接 emit bus event，不用 prop callback 往上轉手（避免父層 cascade re-render）
+- 修改 renderer 狀態、跨元件事件或 IPC 前，先讀 [Store／Event bus／IPC 分工](.agent/context/agent-ui.md#renderer-state-events-and-ipc)。
 - Connection-specific 邏輯走 `createConnector()` factory (`src/main/connector/`)；preload 純 RPC bridge 不含 dispatch
 - Agent backend (provider/SDK 細節) 完全封裝在 `agent-server/`；renderer 不感知 provider type、tool name、slash 語法
 - Wire payload 給 renderer 是渲染原語 (reply / fold_code / fold_markdown / fold_diff / note / system / error)，不是 provider 語意 (thinking / tool_use / slash_response)
