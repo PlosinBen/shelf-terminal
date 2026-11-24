@@ -18,7 +18,10 @@ export const EXTERNAL_URL_INTENT_LIMITS = {
   sourceId: 256,
 } as const;
 
+export const SKILLS_PREVIEW_SOURCE = 'skills-preview' as const;
+
 export type ExternalUrlIntentSource =
+  | { kind: typeof SKILLS_PREVIEW_SOURCE; skillName: string; filePath: string }
   | { kind: 'project-tab'; projectId: string; tabId: string }
   | { kind: 'project-note'; projectId: string; noteId: string }
   | { kind: 'app-window' };
@@ -67,6 +70,8 @@ function validateSource(value: unknown): value is ExternalUrlIntentSource {
   if (!value || typeof value !== 'object') return false;
   const source = value as Record<string, unknown>;
   if (source.kind === 'app-window') return true;
+  if (source.kind === SKILLS_PREVIEW_SOURCE) return isBoundedNonEmptyString(source.skillName, EXTERNAL_URL_INTENT_LIMITS.sourceId)
+    && isBoundedNonEmptyString(source.filePath, EXTERNAL_URL_INTENT_LIMITS.url);
   if (source.kind === 'project-note') return isBoundedNonEmptyString(source.projectId, EXTERNAL_URL_INTENT_LIMITS.sourceId)
     && isBoundedNonEmptyString(source.noteId, EXTERNAL_URL_INTENT_LIMITS.sourceId);
   return source.kind === 'project-tab'

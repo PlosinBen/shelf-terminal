@@ -5,6 +5,35 @@ const source = { kind: 'project-tab' as const, projectId: 'p', tabId: 'v' };
 const dependencies = () => ({ external: vi.fn(), web: vi.fn(), file: vi.fn() });
 
 describe('link opening destinations', () => {
+  it('opens Skills web links in the captured destination without fabricating project ownership', async () => {
+    const deps = dependencies();
+    const source = { kind: 'skills-preview', skillName: 'example', filePath: 'SKILL.md' };
+    const url = 'https://example.com/skill';
+    expect(await openLink({ url, reason: 'Link', source, destinationProjectId: 'click-project' }, deps))
+      .toEqual({ kind: 'web', projectId: 'click-project', url });
+    expect(source).toEqual({ kind: 'skills-preview', skillName: 'example', filePath: 'SKILL.md' });
+    expect(deps.web).toHaveBeenCalledWith('click-project', url);
+    expect(deps.external).not.toHaveBeenCalled();
+  });
+  it('requires an explicit captured destination for Skills without extending the rule to PM', async () => {
+    const deps = dependencies();
+    await expect(openLink({ url: 'https://example.com', reason: 'Link', source: { kind: 'skills-preview', skillName: 'example', filePath: 'SKILL.md' } }, deps))
+      .rejects.toThrow('destination project');
+    await expect(openLink({ url: 'https://example.com', reason: 'Link', source: { kind: 'app-window' }, destinationProjectId: 'p' }, deps))
+      .rejects.toThrow();
+    expect(deps.web).not.toHaveBeenCalled();
+  });
+  it('validates Skills identity and destination independently', async () => {
+    const deps = dependencies();
+    const base = { url: 'https://example.com', reason: 'Link', source: { kind: 'skills-preview', skillName: 'example', filePath: 'reference.md' } };
+    for (const destinationProjectId of ['', ' p ', 12, 'p'.repeat(257)]) {
+      await expect(openLink({ ...base, destinationProjectId }, deps)).rejects.toThrow('destination project');
+    }
+    await expect(openLink({ ...base, destinationProjectId: 'p', source: { ...base.source, skillName: '' } }, deps)).rejects.toThrow('invalid-source');
+    await expect(openLink({ ...base, url: './reference.md', destinationProjectId: 'p' }, deps)).rejects.toThrow('source project');
+    expect(deps.web).not.toHaveBeenCalled();
+    expect(deps.file).not.toHaveBeenCalled();
+  });
   it('keeps mailto original value in a copy-only message', async () => {
     const deps = dependencies();
     const url = 'mailto:ben@example.com?subject=hello%20world';

@@ -4,6 +4,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
+// Skills tests own app-scoped data and never select the shared home projects.
+test.use({ homeProjectDirectories: false });
+
 // App-level Skills panel (no project needed). Covers the L1 UI wire:
 // open → New (template) → edit frontmatter name → Save (renames the folder) →
 // Back → the list reflects the new name + description. Collision / validation

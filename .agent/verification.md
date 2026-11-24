@@ -48,7 +48,7 @@ Shelf 內建 HTTP MCP 的工具探索可從 main debug log 的 `[shelf-mcp] Disc
 PM SDK 串接可使用 `npm run test:unit -- src/main/pm/llm-client-stream.test.ts` 驗證真實 SDK 的請求 schema、tool history、錯誤與取消；fetch 為 fixture，不打外部服務。`npm run test:e2e -- e2e/pm-sdk-stream.spec.ts` 使用獨立 loopback HTTP server 與實際 main bundle／PM IPC，驗證工具迴圈、面板回覆與錯誤、history 檔案及取消；不啟用 Telegram，也不需要帳號憑證。此測試不代表真實服務／模型工具能力已通過。
 
 - 一般 E2E 每個 test 建立 `shelf-e2e-*` 暫存 userData，以 `--user-data-dir` 指定路徑，並以 `NODE_ENV=test` 啟動隱藏視窗、等待 `.app`。設定使用一個 worker，但不同 checkout 的獨立測試程序仍可能互相影響。
-- `e2e/link-open-intent.spec.ts` 與 `e2e/external-url-intent.spec.ts` 停用 homeProjectDirectories，專案與檔案放在各 test 的 userData 暫存目錄；可驗證 direct-click capture、Agent/Notes 預覽、mailto、Web-tab approval 與外部 launcher，不建立或清理共用 home 專案目錄。Fake-provider 路徑不代表真實認證／遠端預覽通過。
+- `e2e/link-open-intent.spec.ts` 與 `e2e/external-url-intent.spec.ts` 停用 homeProjectDirectories，專案與檔案放在各 test 的 userData 暫存目錄；可驗證 direct-click capture、Agent/Notes 預覽、Skills Preview 來源／點擊時目的 project、無 project 的可複製錯誤、mailto、Web-tab approval 與外部 launcher，不建立或清理共用 home 專案目錄。Skills 切換 project 的競態案例只延遲 IPC 回應，核心 main routing 另由 unit 覆蓋；正常點擊另走實際 handler。Fake-provider 路徑不代表真實認證／遠端預覽通過。
 - 正式安裝版使用 Electron 的預設 userData 路徑。未打包且未指定路徑時使用 `-dev` 後綴，詳見 [settings-config#1](context/settings-config.md)。
 - 共用 fixture 預設還會建立及清理主機 home 下固定的 `shelf-test-a`／`shelf-test-b`／`shelf-test-c` 目錄；userData 隔離不代表所有主機資源都隔離。執行前確認不與其他測試或使用者資料衝突。 不使用這些具名專案目錄的測試可在 describe 範圍設定 `test.use({ homeProjectDirectories: false })`，同時略過建立與清理；此選項不隔離產品本身的 home 寫入。
 - Docker／SSH scripts 使用固定 `shelf-test-container` 名稱與 host port 2222；部署 script 也使用固定容器名。先確認可用性，不移除他人的容器以取得空位，不同 runs 避免併發使用這些資源。

@@ -46,3 +46,7 @@ related:
 Direct anchor clicks enter Link Open with the original href and declared surface source. Agent and Notes project ownership determines internal Web/file routing; active-project lookup and renderer-bundle URL resolution cannot supply file ownership. Explicit external callers retain the external FIFO gate, including local handling of remote-terminal login URLs. Default mailto is copy-only because Shelf cannot preview email links; it never launches an email application implicitly.
 
 The file preview renders text instead of executing file content. Its current supported boundary is regular local UTF-8 files up to 1 MiB; unavailable remote previews fail explicitly before local filesystem access. The existing connector interface has no bounded file-read primitive. This limit avoids introducing shell-based remote reads or interpreting remote paths on the host.
+
+## external-url-intent#5 — Skills Preview destination is captured independently of source · [Decision]
+
+Skills are app-scoped. Their HTTP(S) preview links open in the project active at click time, carried as an immutable destinationProjectId; source remains the skill name and current preview file. Do not manufacture project ownership for Skills or resolve destination against the active project after an asynchronous response. Without an active project, retain the original link in an explicit copyable error. This rule applies to Skills Preview, not PM, and supplies no project filesystem base for relative Skills links.

@@ -8,6 +8,8 @@ export const LINK_OPEN = {
   viewAttribute: 'data-link-view-id',
   noteAttribute: 'data-link-note-id',
   destinationAttribute: 'data-link-destination',
+  skillAttribute: 'data-link-skill-name',
+  skillFileAttribute: 'data-link-skill-file',
   maxFileBytes: 1024 * 1024,
 } as const;
 
@@ -20,6 +22,7 @@ export interface LinkOpenInput {
   reason: string;
   source: ExternalUrlIntentSource;
   destination?: 'shelf' | 'external';
+  destinationProjectId?: string;
 }
 
 export type LinkOpenResult =

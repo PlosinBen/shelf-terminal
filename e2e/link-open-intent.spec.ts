@@ -6,6 +6,68 @@ import path from 'node:path';
 // These cases own no home-directory fixture and can run beside other checkouts.
 test.use({ homeProjectDirectories: false });
 
+async function openSkillsPreview(page: import('@playwright/test').Page) {
+  await page.locator('.right-tab-btn', { hasText: 'Skills' }).click();
+  await page.locator('.skills-view .notes-new-btn').click();
+  const editor = page.locator('.skills-view .notes-textarea');
+  await expect(editor).toHaveValue(/name: my-skill/);
+  await editor.fill('---\nname: my-skill\ndescription: links\n---\n[Skill web](https://example.invalid/skill?original=%2f)');
+  await page.locator('.skills-view .notes-mode-btn', { hasText: 'Preview' }).click();
+}
+
+test('Skills Preview without an active project shows a copyable missing-destination error', async ({ shelfApp: { app, page } }) => {
+  await openSkillsPreview(page);
+  await page.locator('.skills-view .notes-preview a').click();
+  const preview = page.getByRole('dialog', { name: 'Link preview' });
+  await expect(preview).toContainText('A destination project is required');
+  await expect(preview.locator('.link-preview-original')).toHaveText('https://example.invalid/skill?original=%2f');
+  await preview.getByRole('button', { name: 'Copy', exact: true }).click();
+  await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe('https://example.invalid/skill?original=%2f');
+  expect(await page.evaluate(() => window.shelfApi.project.getAll())).toEqual([]);
+  await expect(page.locator('.external-url-intent-overlay')).toHaveCount(0);
+});
+
+test('Skills Preview keeps Skills source and fixes destination at click time across a project switch', async ({ shelfApp: { app, page, userDataDir } }) => {
+  const ids: string[] = [];
+  for (const name of ['Skills Target A', 'Skills Target B']) {
+    const cwd = path.join(userDataDir, name);
+    fs.mkdirSync(cwd);
+    const project = await page.evaluate(({ cwd, name }) => window.shelfApi.project.add({ name, cwd, connection: { type: 'local' }, maxTabs: 5 }), { cwd, name });
+    ids.push(project.id);
+  }
+  await page.reload();
+  await page.locator('.sidebar-item', { hasText: 'Skills Target A' }).click();
+  await openSkillsPreview(page);
+  await page.locator('.skills-view .notes-preview a').click();
+  await expect(page.locator('.web-tab:visible .web-tab-address')).toHaveValue('https://example.invalid/skill?original=%2f');
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(1);
+
+  // Delay only the IPC response: the unit tests exercise main routing, while
+  // this seam proves renderer capture and response handling across the switch.
+  await app.evaluate(({ ipcMain }, channel) => {
+    const state = globalThis as typeof globalThis & { capturedSkillLink?: unknown; releaseSkillLink?: () => void };
+    ipcMain.removeHandler(channel);
+    ipcMain.handle(channel, async (_event, input) => {
+      state.capturedSkillLink = input;
+      await new Promise<void>(resolve => { state.releaseSkillLink = resolve; });
+      return { kind: 'web', projectId: input.destinationProjectId, url: input.url };
+    });
+  }, LINK_OPEN.submit);
+  await page.locator('.skills-view .notes-preview a').click();
+  await expect.poll(() => app.evaluate(() => (globalThis as typeof globalThis & { capturedSkillLink?: unknown }).capturedSkillLink)).toEqual({
+    url: 'https://example.invalid/skill?original=%2f', reason: 'Open a link from Shelf',
+    source: { kind: 'skills-preview', skillName: 'my-skill', filePath: 'SKILL.md' },
+    destinationProjectId: ids[0], destination: undefined,
+  });
+  await page.locator('.sidebar-item', { hasText: 'Skills Target B' }).click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(0);
+  await app.evaluate(() => (globalThis as typeof globalThis & { releaseSkillLink?: () => void }).releaseSkillLink!());
+  await expect(page.locator('.sidebar-item.active')).toContainText('Skills Target A');
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(2);
+  await page.locator('.sidebar-item', { hasText: 'Skills Target B' }).click();
+  await expect(page.locator('.tab-bar .tab')).toHaveCount(0);
+});
+
 test('anchor capture preserves original relative href and declared source', async ({ shelfApp: { app, page } }) => {
   await app.evaluate(({ ipcMain }, channel) => {
     ipcMain.removeHandler(channel);

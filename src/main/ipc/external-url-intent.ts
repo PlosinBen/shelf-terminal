@@ -16,7 +16,7 @@ export function registerExternalUrlIntentHandlers(): void {
           if (!getProjectsRepository().get(projectId)) throw new Error('Source project is unavailable');
         },
         file: input => {
-          if (input.source.kind === 'app-window') throw new Error('Source project is required');
+          if (!('projectId' in input.source)) throw new Error('Source project is required');
           const project = getProjectsRepository().get(input.source.projectId);
           if (!project) throw new Error('Source project is unavailable');
           return readLinkFile(input, project);

@@ -4,6 +4,7 @@ import { renderMarkdown } from '../utils/markdown';
 import { LockIcon, UnlockIcon, PowerIcon } from './icons';
 import { RightPanel, RIGHT_PANEL_WIDTH } from './RightPanel';
 import { SKILL_EDITOR_MAIN_FILE } from '@shared/skill-editor';
+import { LINK_OPEN } from '@shared/link-open-intent';
 import { useSkillCommandDraft, resetSkillCommandDraft, loadSkillCommandDraft, editSkillCommandDraft, peekSkillCommandDraft, isSkillCommandDirty, markSkillCommandSaved, markSkillEditorUncertain } from '../skillCommandDraftStore';
 
 interface SkillMeta {
@@ -424,7 +425,7 @@ const SkillEditor = forwardRef<SkillEditorHandle, {
             disabled={saving || command.uncertain}
           />
         ) : (
-          <div className="notes-preview" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+          <div className="notes-preview" {...{ [LINK_OPEN.skillAttribute]: actualNameRef.current, [LINK_OPEN.skillFileAttribute]: activeFile }} dangerouslySetInnerHTML={{ __html: previewHtml }} />
         )}
       </div>
     </>
