@@ -187,14 +187,14 @@ describe('translateCodexAppServerNotification', () => {
     ]);
   });
 
-  it('marks failed command execution as an error card', () => {
+  it('preserves a nonzero process result without inventing a separate tool error', () => {
     expect(translateCodexAppServerNotification('item/completed', {
       item: {
         id: 'cmd-1',
         type: 'commandExecution',
-        command: 'false',
+        command: 'echo searched; rg absent README.md',
         status: 'failed',
-        aggregatedOutput: 'no',
+        aggregatedOutput: 'searched',
         exitCode: 1,
       },
     })).toEqual([
@@ -203,12 +203,17 @@ describe('translateCodexAppServerNotification', () => {
         msgId: 'cmd-1',
         msgType: 'fold_code',
         label: 'Command',
-        subtitle: 'false',
+        subtitle: 'echo searched; rg absent README.md',
         execution: { state: 'failed', exitCode: 1 },
-        errorMessage: 'Command failed with exit code 1',
-        body: { content: 'no' },
+        body: { content: 'searched' },
       },
     ]);
+  });
+
+  it('retains an error message when Codex reports failure without a process exit code', () => {
+    expect(translateCodexAppServerNotification('item/completed', { item: {
+      id: 'cmd-1', type: 'commandExecution', command: 'false', status: 'failed', exitCode: null,
+    } })).toMatchObject([{ execution: { state: 'failed' }, errorMessage: expect.any(String) }]);
   });
 
   it('maps a single object-kind update to a hunk diff', () => {
