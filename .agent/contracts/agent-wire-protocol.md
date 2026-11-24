@@ -45,6 +45,8 @@ state independently of conversation messages and initialization readiness.
 
 ## Render-primitive messages — `type: 'message'`
 
+Provider adapters translate SDK events and tool or slash results into Shelf render primitives before sending timeline content. The renderer uses `msgType` and the body shape to display the entry. Native event kinds such as thinking, tool use, and slash responses stay within the provider adapter.
+
 The renderer-facing timeline entries. One wire `type: 'message'`, discriminated by `msgType`. These messages are session-scoped and MUST NOT carry `executionId`. Main's `buildAgentMessagePayload` translates each into the canonical `AgentMessage` union (`src/shared/types.ts`). Unknown `msgType` → main returns null and drops the message.
 
 `msgId` is the universal identity key (provider-minted). A first-seen `msgId` appends at its arrival position; later events with the same `msgId` update that entry in place. Therefore a newly minted logical message id MUST be unique against the session's persisted history, including after provider-process restart and session resume; a process-local counter is insufficient. Stream chunks (see [stream](#stream--type-stream)) share a `msgId` with their eventual finalize so the renderer accumulates them into one entry. For `fold_*` tool messages providers typically reuse the SDK `toolUseId` as `msgId` (pending → completed upsert).

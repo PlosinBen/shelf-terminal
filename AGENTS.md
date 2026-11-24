@@ -68,10 +68,5 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 
 ## Conventions
 
-- 修改 renderer 狀態、跨元件事件或 IPC 前，先讀 [Store／Event bus／IPC 分工](.agent/context/agent-ui.md#renderer-state-events-and-ipc)。
-- 修改連線邏輯或 preload 前，先讀 [Connector factory 與 preload 分工](.agent/context/connector.md)（`connector#1`）。
-- Agent backend (provider/SDK 細節) 完全封裝在 `agent-server/`；renderer 不感知 provider type、tool name、slash 語法
-- Wire payload 給 renderer 是渲染原語 (reply / fold_code / fold_markdown / fold_diff / note / system / error)，不是 provider 語意 (thinking / tool_use / slash_response)
-- Config source-of-truth 單向流動：renderer 持有 prefs → backend imperative apply 不 cache；backend 持有 status / capabilities → renderer 純展示
-- 有參數的 keybinding action 用 `action_param` pattern (例: `switchTab_3`)
-- **跨檔 / 重複使用的字串值用具名 const，不散落 magic string** — type 標籤、wire kind、事件名、IPC channel、固定路徑片段之類，在單一 source-of-truth 用 `const` / `as const` 物件定義一次，call site(設值端 + 判斷/消費端)一律引用常數,不直接寫字面值。型別盡量從常數 derive（`keyof typeof` / `typeof X`），新增值＝加一筆常數，不用同時改 union 與各處 case。既有範例：`IPC`（`ipc-channels.ts`）、`ShelfFileTypeMcp`/`SHELF_PLACEMENTS`（`shared/shelf-paths.ts`）。一次性、單檔內的字串不必硬抽。
+- 修改子系統前，依 [.agent/index.md](.agent/index.md) 閱讀對應的架構、契約和設計決策。
+- 跨檔共用或重複使用的字串識別值統一定義為具名常數，產生端與消費端共用。一次性的單檔字串可直接寫。
