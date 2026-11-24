@@ -28,20 +28,17 @@ Begin every user-facing final reply in natural language with `Ben,`. If the requ
 ## Rules
 
 - **跨功能降級原則**：可用性可以降級，安全與資料正確性的必要條件不可放寬。停止受影響操作，保留能獨立、安全運作的功能；明確呈現失敗，不繞過認證／授權／驗證、不靜默丟資料、不把失敗標示成功。見 `.agent/context/failure-handling.md`（failure-handling#1）。
-- Bug fix 必須包含迴歸測試 — 先寫測試重現問題，再修 code
+- Bug fix 依 **systematic-debugging**，須先用迴歸測試重現問題，再修正。
 - **開發中，每次修正跑能驗證該行為的最小測試。Feature 或 bug fix 收尾前，在最終版本跑型別檢查、完整 unit suite，以及涵蓋變更與受影響既有流程的 E2E。**
 - **Renderer 行為變更須同批新增或更新對應的 E2E，並執行受影響的 spec。** 所需環境不可用時，完成其餘可獨立執行的檢查，並回報未驗證的行為與具體阻礙。沒有可供 E2E 驗證的 core／非 UI 邏輯以 unit test 為主。
 - 不要直接啟動 dev server 或 Electron。驗證使用專案的 npm scripts，執行方式與環境前提見 [.agent/verification.md](.agent/verification.md)。
 - Commit 前確認 `.agent/` 是否需要更新（規範見上方「Documentation maintenance」）— 有新增功能、改變架構、或發現 gotcha 時一併更新
 - `.agent/features/` 是暫時開發 context（gitignored、不跨機器同步）— **程式碼 / 測試 / 永久 doc 絕對禁止引用它**
-- 優先思考、查證再動手，不要猜測 — 不確定的事先查 code / 文件 / 既有實作確認（例：裝套件前先 `npm view <pkg> versions` 確認版本，不要假設版號）
-- 設計盡可能簡單，避免過度設計 / 過度抽象 / 過度設定 — 先滿足當前需求，不預先為想像中的未來鋪設
-- 修正問題時只動必要的項目 — 不順手改無關的 code / 格式 / 重構，降低審閱與回歸風險
+- 採用足以滿足當前需求的最簡單設計，改動限於本次任務所需。
 - 跨檔共用的識別值，例如事件名、IPC channel 或 wire kind，應在一處定義為具名常數，由產生端和消費端共用。
 - 讀取或修改檔案時，優先使用目前 agent 提供的原生檔案工具。只有需要依資料結構解析或轉換內容時，才考慮使用腳本。
 - 執行彼此獨立的命令時，分開呼叫工具，避免用 `;` 串接，讓 Shelf 分別顯示每個命令的結果。後一步需要前一步成功時，才用 `&&` 串接。若查無結果符合預期，只將該工具代表「查無結果」的退出碼視為正常，其他錯誤仍回傳原退出碼。
 - 需要 dev 整個重 build 才能驗的項目（如 agent-server bundle 改動），先把所有相關項目一口氣做完再交給 dev 驗一輪 — 不要做一個交一個，造成來回重 build 浪費時間
-- 同一個問題一次無法修正，請嘗試使用 logger 靠實際輸出定位，不要純粹依靠讀 code（renderer 端走 `debugLog` bridge 落 main log 檔，AI 可直接讀）
 - 禁止靜默吞錯 / 丟資料 — 狀態對不上、解析失敗、收到非預期輸入時要 fail-loud（log 出關鍵 id / context），不要 silent `return` 或 catch 後不處理。良性 race 用低調 log（`debugLog` 落檔）、真資料遺失要大聲（`console.warn/error`）；純函式回傳 anomaly 讓 caller log（保持可測）。樂觀更新尤其要在跟真相源對帳對不上時留痕
 - **Commit message 格式**：使用精練 Claude-style Conventional Commit，保留有用脈絡與 model provenance。
   - Subject 一律：`<type>(<scope>): <concise outcome>`。允許 type：`feat`、`fix`、`refactor`、`test`、`docs`、`chore`、`build`、`style`。scope 用子系統/產品面，不用檔名（例：`agent`、`codex`、`copilot`、`worktree`、`skills`、`backup`、`pty`、`main`、`renderer`、`diag`、`e2e`）。
