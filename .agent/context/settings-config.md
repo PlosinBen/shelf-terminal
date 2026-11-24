@@ -11,6 +11,8 @@ related:
 
 > userData 隔離、settings/keybindings merge、開窗前 bootstrap 載 config，以及 DEFAULT_SETTINGS 該放哪。
 
+Settings → Terminal 的 Font Family 透過 renderer 的 `queryLocalFonts()` 列出 Shelf 所在電腦的字型。設定檔中的 `fontFamily` 儲存 CSS font stack。既有自訂值、預設組合與無法列舉本機字型時的手動輸入共用同一欄位。
+
 ## settings-config#1 — userData 隔離靠 Electron 內建訊號  ·  [Decision]
 
 **Decision**：`src/main/user-data-path.ts` 的 `applyUserDataIsolation()` 在 `index.ts` top-level 呼叫一次（idempotent guard）。判斷邏輯：

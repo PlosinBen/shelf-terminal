@@ -128,6 +128,28 @@ test('General saves the default local path in the existing settings file', async
   await expect(localPath).toHaveValue(userDataDir);
 });
 
+test('terminal font picker lists local families and preserves a saved selection', async ({ shelfApp: { page } }) => {
+  const openTerminalSettings = async () => {
+    await page.keyboard.press(`${modifier}+,`);
+    await page.locator('.settings-panel').getByRole('button', { name: 'Terminal', exact: true }).click();
+  };
+  await openTerminalSettings();
+  const picker = page.getByLabel('Font Family', { exact: true });
+  const installed = picker.locator('optgroup option');
+  await expect.poll(() => installed.count(), { timeout: 20_000 }).toBeGreaterThan(0);
+  const value = await installed.first().getAttribute('value');
+  await picker.selectOption(value!);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await openTerminalSettings();
+  await expect(picker).toHaveValue(value!);
+  await picker.selectOption('custom');
+  const stack = page.getByLabel('Custom font stack', { exact: true });
+  await stack.fill('My Font, monospace');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await openTerminalSettings();
+  await expect(stack).toHaveValue('My Font, monospace');
+});
+
 test('settings cancel discards changes', async ({ shelfApp: { page } }) => {
   await page.keyboard.press(`${modifier}+,`);
   const panel = page.locator('.settings-panel');
