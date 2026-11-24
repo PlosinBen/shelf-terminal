@@ -36,8 +36,8 @@ describe('buildThemeVars', () => {
     }
   });
 
-  it('keeps Latte agent labels readable on panels and cards', () => {
-    const vars = buildThemeVars(getTheme('catppuccin-latte'));
+  it.each(themes.filter(theme => theme.semantic))('$label keeps custom agent labels readable on panels and cards', theme => {
+    const vars = buildThemeVars(theme);
     for (const role of ['error', 'warning', 'success', 'info', 'fold-label']) {
       for (const background of ['--bg', '--bg-secondary', '--surface']) {
         expect(contrast(vars['--agent-' + role], vars[background])).toBeGreaterThanOrEqual(4.5);

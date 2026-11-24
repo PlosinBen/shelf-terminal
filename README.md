@@ -61,7 +61,7 @@ Where each surface fits in:
 - **Web tabs** — open web pages in a tab alongside your terminals
 - **Split pane** — left/right split within a project (mod+\\)
 - **SSH / WSL** — connect to remote hosts via SSH (ControlMaster multiplexing, password auth) or WSL (distro dropdown)
-- **Themes** — 5 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night)
+- **Themes** — 8 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night, Fern, Saffron, Orchid)
 - **Terminal search** — search scrollback buffer (mod+F)
 - **Project search** — use the Sidebar magnifying glass to highlight and navigate matching visible projects without filtering or reordering the list
 - **Tab management** — double-click to rename, drag to reorder, mod+1~9 to switch

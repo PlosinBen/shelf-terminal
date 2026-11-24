@@ -62,7 +62,7 @@ Shelf 不是針對某個角色設計（前端 / 後端 / SRE 都可能），而�
 - **Web tabs** — 在分頁裡開網頁，跟 terminal 並列
 - **Split pane** — project 內可左右分割（mod+\\）
 - **SSH / WSL** — 透過 SSH 連遠端（ControlMaster multiplex、密碼驗證）或 WSL（distro 下拉選單）
-- **主題** — 5 個內建主題（Catppuccin Mocha/Latte、Dracula、Nord、Tokyo Night）
+- **主題** — 8 個內建主題（Catppuccin Mocha/Latte、Dracula、Nord、Tokyo Night、Fern、Saffron、Orchid）
 - **Terminal 搜尋** — 搜尋 scrollback buffer（mod+F）
 - **Project 搜尋** — 使用 Sidebar 放大鏡反白並導覽目前可見的符合專案，不會篩減或重新排列清單
 - **Tab 管理** — 雙擊重命名、拖拉排序、mod+1~9 切換

@@ -290,7 +290,7 @@ title: shelf-terminal — Intent → File Index
 | Canonical Agent message type | `src/shared/types.ts` (`AgentMessage`) | 9-variant 渲染原語 discriminated union（inline + fold_* 卡片類） |
 | Command execution outcome | `src/shared/agent-execution.ts` | 共用 fold_code 狀態、wire 驗證與 terminal 更新保護；provider 正規化、main/builder/store/history 共用 |
 | Inline SVG icon | `components/icons.tsx` | 手繪原創 line icon（24x24，`currentColor`），footer toggle 用 |
-| 主題定義 | `themes.ts` | 5 個內建主題的 Terminal 與 UI 色彩。強調色底上的文字使用 `--on-accent`，Latte 覆寫淺底用的狀態色。 |
+| 主題定義 | `themes.ts` | 內建主題的 Terminal、UI 與狀態色。強調色底上的文字使用 `--on-accent`。 |
 | Window API 型別 | `env.d.ts` | `window.shelfApi` TypeScript 宣告 |
 | React entry | `main.tsx` | `createRoot` + `<App />` |
 

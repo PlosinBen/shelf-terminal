@@ -97,6 +97,9 @@ test('saved themes apply button, label and validation colors in Settings', async
   await expect(save).toHaveCSS('color', 'rgb(30, 30, 46)');
   for (const [theme, ink, muted] of [
     ['nord', 'rgb(32, 37, 46)', 'rgb(164, 176, 194)'],
+    ['fern', 'rgb(48, 35, 13)', 'rgb(184, 207, 168)'],
+    ['saffron', 'rgb(255, 241, 209)', 'rgb(92, 68, 38)'],
+    ['orchid', 'rgb(16, 54, 44)', 'rgb(216, 175, 208)'],
     ['catppuccin-latte', 'rgb(255, 255, 255)', 'rgb(83, 87, 108)'],
   ]) {
     await panel.locator('.settings-select').first().selectOption(theme);
