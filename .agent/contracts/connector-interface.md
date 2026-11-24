@@ -78,6 +78,20 @@ Windows password-only deploy is not promised by a one-time `connect()` verificat
 
 `connector/preview-read.ts` composes `spawnProcess` without extending the Connector interface. It checks `isConnected` and the live generation, then reads a regular worker file via POSIX `sh`/`head` using positional argv. Content is bounded at 1 MiB plus one overflow byte; stdout framing and stderr are bounded, and probe+read share a 15-second deadline. Failure kills the client process and never invokes connect or host file reads. Shell startup output outside the random frame is rejected. The caller validates raw bytes as UTF-8 and renders inert text. Workers without these POSIX capabilities report an explicit read error.
 
+### Primitive selection and lifecycle limits
+
+| Connector | Existing execution / transfer primitives | Preview use |
+|---|---|---|
+| Local Unix/Windows | Direct process spawn, text exec, host file access, local-to-target copy/put | Bounded host file read; no remote interpretation |
+| SSH Unix | Text exec, non-PTY SSH process streams, SCP local-to-target copy, streamed put; connectivity uses the existing ControlMaster | Existing authenticated source runtime supplies raw bytes; read does not call connect |
+| SSH Windows client | Text exec, non-PTY SSH streams, SCP/put; connectivity is a short SSH probe without ControlMaster | Same byte-reader composition; target must support POSIX sh/head, independently of the app OS |
+| Docker | Text exec, non-PTY docker exec streams, docker cp local-to-target copy, streamed put | Read inside the source container after its connectivity check |
+| WSL | Text exec, wsl.exe process streams, local-to-target cp/put | Read inside the selected distribution with POSIX worker paths |
+
+The interface has no generic download/read method. `exec` returns already decoded strings with execFile buffering, so it cannot supply the preview's original-byte UTF-8 validation and explicit stream bounds. Copy/put methods move data toward the worker and are not read alternatives.
+
+The deadline bounds caller wait and buffered data; it is not a worker cancellation protocol. Preview currently has no in-flight Cancel UI/API. On timeout/output/transport failure the reader kills the local client handle and destroys its streams. The interface does not guarantee that a remote worker process terminates synchronously with its SSH/docker/wsl client. Guaranteeing remote cancellation would require worker process identity/termination acknowledgements or a worker-side watchdog; neither is claimed by this reader. Generation changes are checked before the probe, after it, and before accepting the completed read. Disconnection during the read fails through transport close/error or the deadline. A regular-file check precedes the read, but concurrent file replacement or a stalled filesystem may still delay the worker operation; the caller must not accept late content or fall back to host reads.
+
 ## Connection types
 
 Defined as the discriminated union `Connection` in `src/shared/types.ts`; `createConnector` dispatches on `type`.
