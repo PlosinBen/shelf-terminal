@@ -40,3 +40,9 @@ title: Shelf — 待評估改善項目
 - 影響：已重現於 Alpine arm64 的 Copilot 對話，非本次升版新增的已知回歸；不外推至所有 musl 架構，也不代表 Claude 的 Alpine 路徑或整個 Shelf 不支援 Alpine。
 - 建議落點：優先驗證上游修復的 standalone artifact。未採用解包後改系統 Node 啟動的 workaround，也不配送手動改寫 ELF 的 binary；暫存 GNU hash 重建實驗未得到可用修復。
 - 再檢視條件：上游發布相關修復、有實際 Alpine 使用需求，或準備調整 musl 支援範圍時。重新驗證須包含 ACP initialize、新對話、工具執行與停止後恢復，不只執行版本指令。
+
+## IMP-5 — Copilot 載入原對話後的 Shelf 工具搜尋偶發空結果
+
+同一個 session 在 Stop 前後以相同範圍 `shelf` 和關鍵字 `skill` 搜尋，曾從 7 個工具變成空清單。後續測試在恢復後成功直接呼叫已找到的工具，該回合沒有新的搜尋結果可供比對。維持待觀察。
+
+再次出現時，依 [MCP 診斷說明](verification.md) 對照同一回合的 `tool_search_output` 與 Shelf 最近的 `tools/list` 回應，確認 `update_app_skill` 在哪一層消失。
