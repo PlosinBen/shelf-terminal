@@ -283,10 +283,10 @@ This is the user-visible feedback for skill hot-reload (`context/skills` skills#
 
 ## stop (interrupt execution)
 
-**Direction**: renderer → main → agent-server (fire-and-forget). ESC: clear the waiting queue + interrupt the running execution.
+Double Esc requests a stop through renderer → main → agent-server. The first Esc arms the gesture.
 
 - renderer → main: `IPC.AGENT_STOP` `{ tabId }` → `stopSession(tabId)` → `backend.stop()`.
-- main → agent-server: `sendLine({ type: 'stop' })`. The switch runs `sendQueue.clear()` (drops all not-yet-running sends and re-emits the queue snapshot) then `handleStop()` → `activeBackend.stop()`. Provider-native stoppability remains internal and never surfaces to the renderer (`agent-config-flow#2`).
+- Main sends `stop` with a request ID. The server clears waiting sends, interrupts the provider and acknowledges via `stop_result`. Upon success, main publishes a `Stopped by user` system message to the originating session's history. A failed or timed-out stop does not generate a success notice.
 
 ## queue (send-queue snapshot)
 

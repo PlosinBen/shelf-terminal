@@ -1341,9 +1341,16 @@ test.describe('agent flows via fake provider', () => {
     await sendAgentPrompt(page, 'delay:10000|text:cancelled-copilot-response');
     await expect(page.locator('.agent-loading')).toBeVisible({ timeout: 5_000 });
     await page.locator('.agent-textarea:visible').focus();
+    const stopMessage = 'Stopped by user';
+    const notice = page.locator('.agent-msg-system:visible').filter({ hasText: stopMessage });
     await page.keyboard.press('Escape');
+    await expect(notice).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(page.locator('.agent-status-label:visible')).toHaveText('idle', { timeout: 5_000 });
+    await expect(notice).toHaveCount(1);
+    await expect.poll(async () => (await storedAgentMessages(page)).filter(
+      row => row.type === 'system' && row.content === stopMessage,
+    ).length, { timeout: 15000 }).toBe(1);
     await sendAgentPrompt(page, 'text:copilot-continued-after-stop');
     await expect(page.locator('.agent-messages:visible')).toContainText('copilot-continued-after-stop');
     await expect(page.locator('.agent-msg-reply:visible', { hasText: 'cancelled-copilot-response' })).toHaveCount(0);

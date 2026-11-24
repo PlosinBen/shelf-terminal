@@ -877,6 +877,9 @@ async function stopSession(tabId: string): Promise<boolean> {
   if (!session) return false;
   await session.backend.stop();
   session.state = 'idle';
+  if (sessions.get(tabId) === session) {
+    send(IPC.AGENT_MESSAGE, tabId, { type: 'system', content: 'Stopped by user' });
+  }
   return true;
 }
 
